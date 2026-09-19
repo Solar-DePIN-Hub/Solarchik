@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Solarchik — a voice AI friend you carry everywhere</title>
+<style>
+  :root { --bg:#070d14; --card:#101a26; --gold:#c9a84c; --teal:#4ec9b0; --fg:#f0ede6; --muted:#8aa0b5; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 80px; }
+  .kicker { color: var(--gold); letter-spacing: .18em; font-size: 12px; font-weight: 700; }
+  h1 { font-size: clamp(36px, 7vw, 64px); line-height: .95; margin: 12px 0 16px; }
+  .lead { font-size: 20px; color: var(--muted); max-width: 34rem; }
+  .modes { display:grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap:16px; margin: 40px 0; }
+  .card { background: var(--card); border: 1px solid #1e3348; border-radius: 16px; padding: 22px; }
+  .card h2 { margin: 0 0 8px; font-size: 20px; color: var(--gold); }
+  .card p { margin:0; color: var(--muted); line-height: 1.5; }
+  a.btn { display:inline-block; margin: 8px 10px 0 0; padding: 12px 18px; border-radius: 999px; background: var(--gold); color:#0d1b2a; font-weight: 700; text-decoration:none; }
+  a.ghost { background: transparent; color: var(--fg); border:1px solid #2d4f6b; }
+  footer { margin-top: 48px; color: var(--muted); font-size: 14px; }
+</style>
+<body>
+  <div class="wrap">
+    <p class="kicker">SOLAR DEPIN · LIVE PROTOTYPE</p>
+    <h1>Solarchik</h1>
+    <p class="lead">A small solar robot friend on your phone. Talks in the room. Runs with you. Takes the call when you cannot.</p>
+    <p>
+      <a class="btn" href="https://github.com/Solar-DePIN-Hub/Solarchik">GitHub</a>
+      <a class="btn ghost" href="https://solardepin.net">solardepin.net</a>
+    </p>
+    <div class="modes">
+      <div class="card"><h2>Friend</h2><p>Room chat by voice or text. You pick his voice once. He answers in your language, out loud.</p></div>
+      <div class="card"><h2>Runner</h2><p>Roof-run companion. Short lines every 30–40 seconds. Quiet if you already opened the mic.</p></div>
+      <div class="card"><h2>Secretary</h2><p>Tap the red phone on the booth. Who called, why, next action — then he speaks the report.</p></div>
+    </div>
+    <p class="lead">Gemini first. OpenAI / Featherless fallback. Speech on device. Keys stay off the phone.</p>
+    <footer>Built in Ukraine by Solar DePin (Vadym). MunichTech EXPO 2026 · Open AI &amp; DeepTech Grand Challenge.</footer>
+  </div>
+</body>
+</html>
