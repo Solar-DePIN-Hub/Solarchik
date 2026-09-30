@@ -7,6 +7,7 @@ import { deriveDepositWallet } from "@/lib/agents/deposit-wallet";
 import { GROK_MODEL } from "@/lib/agents/grok-model";
 import { SLICE_STOCKS } from "@/lib/agents/slice-stocks";
 import { useAgents } from "@/lib/agents/store";
+import { healDevnet } from "@/lib/agents/rpc-heal";
 import { readMainnetBalance, readMainnetSlot } from "@/lib/agents/mainnet";
 import { revealRoomSecret } from "@/lib/agents/wallet";
 import { cn, formatSol, shortKey } from "@/lib/utils";
@@ -14,8 +15,6 @@ import { Button } from "@/components/ui/button";
 import { AgentBay } from "./agent-bay";
 import { AgentConsole } from "./agent-console";
 import { IconCopy, IconPlay, IconStop, IconWallet } from "./icons";
-import { SolanaWatch } from "./solana-watch";
-import { DeskDoctor } from "./desk-doctor";
 import { useWorkLoop } from "./use-work-loop";
 
 var CLASS_IDS = [
@@ -90,9 +89,11 @@ function WorkApp() {
 	const tab = useAgents((s) => s.tab);
 	const setTab = useAgents((s) => s.setTab);
 	useEffect(() => {
-		hydrate().then(() => {
-			const t = useAgents.getState().tab;
-			if (t === "work" || t === "store" || t === "room") useAgents.getState().ensureWallet();
+		void healDevnet().finally(() => {
+			hydrate().then(() => {
+				const t = useAgents.getState().tab;
+				if (t === "work" || t === "store" || t === "room") useAgents.getState().ensureWallet();
+			});
 		});
 	}, [hydrate]);
 	useWorkLoop();
@@ -117,8 +118,6 @@ function WorkApp() {
 						children: /* @__PURE__ */ jsxs("div", {
 							className: "mx-auto w-full max-w-5xl",
 							children: [
-								/* @__PURE__ */ jsx(SolanaWatch, {}),
-								/* @__PURE__ */ jsx(DeskDoctor, {}),
 								tab === "room" && /* @__PURE__ */ jsx(WalletDesk, {}),
 								/* @__PURE__ */ jsx(TradeGate, {}),
 								/* @__PURE__ */ jsx(PolyGate, {}),
@@ -135,10 +134,6 @@ function WorkApp() {
 						className: "fixed inset-x-0 bottom-0 z-20 border-t border-border bg-bg/95 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2",
 						"aria-label": "Розділи столу",
 						children: [
-							/* @__PURE__ */ jsx("p", {
-								className: "mx-auto mb-1 max-w-5xl px-3 text-center text-xs text-muted",
-								children: TABS.find((t) => t.id === tab)?.hint
-							}),
 							/* @__PURE__ */ jsx("div", {
 								className: "mx-auto grid max-w-5xl grid-cols-4 gap-1 px-3",
 								children: TABS.map((t) => /* @__PURE__ */ jsx("button", {
@@ -160,10 +155,7 @@ function TopBar() {
 	const sol = useAgents((s) => s.sol);
 	const solKnown = useAgents((s) => s.solKnown);
 	const solMiss = useAgents((s) => s.solMiss);
-	const roomMainnetSol = useAgents((s) => s.roomMainnetSol);
-	const roomMainnetSolKnown = useAgents((s) => s.roomMainnetSolKnown);
 	const notice = useAgents((s) => s.notice);
-	const brain = useAgents((s) => s.brain);
 	const setTab = useAgents((s) => s.setTab);
 	const [copied, setCopied] = useState(false);
 	async function copyKey() {
@@ -212,25 +204,12 @@ function TopBar() {
 								/* @__PURE__ */ jsx("span", {
 									className: "block truncate text-xs text-muted tabular-nums",
 									"data-testid": "header-devnet",
-									children: solMiss ? "немає цифри" : !solKnown ? "читаю Devnet…" : `${formatSol(sol)} SOL Devnet`
-								}),
-								/* @__PURE__ */ jsx("span", {
-									className: "block truncate text-xs text-muted tabular-nums",
-									"data-testid": "header-mainnet",
-									children: roomMainnetSol == null ? (roomMainnetSolKnown ? "немає цифри" : "читаю mainnet…") : `${formatSol(roomMainnetSol)} SOL mainnet`
+									children: solMiss ? "немає цифри" : !solKnown ? "читаю…" : `${formatSol(sol)} SOL`
 								})
 							]
 						})]
 					})]
 				})]
-			}),
-			/* @__PURE__ */ jsxs("p", {
-				className: "mx-auto mt-2 max-w-5xl text-xs text-muted",
-				children: [
-					"Solana Devnet · QuickNode · Metaplex Core",
-					brain ? ` · ${brain}` : "",
-					copied ? " · адресу скопійовано" : ""
-				]
 			}),
 			notice ? /* @__PURE__ */ jsx("p", {
 				className: "mx-auto mt-1 max-w-5xl text-xs text-accent",

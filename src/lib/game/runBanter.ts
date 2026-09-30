@@ -141,6 +141,7 @@ export function pickBanter(kind: BanterKind, locale: Locale, vibe: PetVibe, chap
 }
 
 export function scriptedBanter(state: RunState, events: Ev[]): MsgKey | null {
+  if (events.includes("clock")) return "banter.clockReady";
   if (events.includes("dead")) {
     const meters = state.distance / 10;
     if (state.death === "FALL" && meters < 200) return "banter.firstRoof";

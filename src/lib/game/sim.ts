@@ -35,6 +35,7 @@ export type Particle = {
   r: number;
   color: string;
   ring?: boolean;
+  streak?: boolean;
 };
 export type DayMod = "calm" | "wind" | "gold" | "drones" | "wire";
 
@@ -58,7 +59,8 @@ export type Ev =
   | "bonus"
   | "thunder"
   | "boss"
-  | "chapter";
+  | "chapter"
+  | "clock";
 
 export type Input = {
   jumpPressed: boolean;
@@ -127,6 +129,8 @@ export type RunState = {
   ghostTape: { x: number; y: number; grounded: boolean }[];
   ghostBucket: number;
   lastHeartSaid: boolean;
+  clockSaid: boolean;
+  clockOpen: boolean;
 };
 
 export const BANDS = [168, 216, 264] as const;
@@ -173,9 +177,9 @@ export function shiftName(seed: number) {
   return SHIFTS[Math.abs(seed) % SHIFTS.length];
 }
 
-const GRAVITY_UP = 2550;
-const GRAVITY_DOWN = 4000;
-const JUMP_V = -800;
+const GRAVITY_UP = 1480;
+const GRAVITY_DOWN = 2400;
+const JUMP_V = -620;
 const DOUBLE_V = -680;
 const STOMP_V = -640;
 const TERMINAL = 1150;
@@ -272,7 +276,7 @@ function addPlat(s: RunState, x: number, y: number, w: number, kind: PlatKind = 
 }
 
 function addEnemy(s: RunState, kind: EnemyKind, x: number, y: number, boss = false) {
-  const hover = kind === "drone" ? (boss ? 56 : 46) : 0;
+  const hover = kind === "drone" ? (boss ? 56 : s.mod === "drones" ? 28 : 46) : 0;
   const base = y - hover;
   s.enemies.push({
     kind,
@@ -282,9 +286,86 @@ function addEnemy(s: RunState, kind: EnemyKind, x: number, y: number, boss = fal
     dead: false,
     near: false,
     t: rand(s, 0, Math.PI * 2),
-    vx: 0,
+    vx: kind === "mite" ? (rand(s, 0, 1) < 0.5 ? -78 : 78) : 0,
     boss,
   });
+}
+
+function dropSuns(s: RunState, x: number, y: number, w: number) {
+  const rich = s.mod === "gold";
+  const ax = x + w * 0.62;
+  s.picks.push({
+    x: ax,
+    y: y - 54,
+    gold: rich && chance(s, 0.35),
+    shield: false,
+    taken: false,
+  });
+  if (chance(s, rich ? 1 : 0.4)) {
+    s.picks.push({
+      x: ax + 34,
+      y: y - 54,
+      gold: rich && chance(s, 0.45),
+      shield: false,
+      taken: false,
+    });
+  }
+  if (rich && chance(s, 0.5)) {
+    s.picks.push({
+      x: ax - 36,
+      y: y - 62,
+      gold: true,
+      shield: false,
+      taken: false,
+    });
+  }
+}
+
+function timeAt(x: number) {
+  const k = 0.018;
+  const capX = (SPEED_CAP - SPEED0) / k;
+  if (x <= 0) return 0;
+  if (x <= capX) return Math.log((SPEED0 + k * x) / SPEED0) / k;
+  return Math.log(SPEED_CAP / SPEED0) / k + (x - capX) / SPEED_CAP;
+}
+
+function twoRows(x: number) {
+  const start = timeAt(1760);
+  const t = timeAt(x);
+  if (t < start) return false;
+  return Math.floor((t - start) / 10) % 2 === 0;
+}
+
+function standPlat(s: RunState) {
+  let best: Plat | undefined;
+  for (const p of s.plats) {
+    if (!feetOn(s.x, p) || Math.abs(s.y - p.y) >= 22) continue;
+    if (!best || Math.abs(s.y - p.y) < Math.abs(s.y - best.y)) best = p;
+  }
+  return best;
+}
+
+function landPlat(s: RunState, prevY: number) {
+  let best: Plat | undefined;
+  for (const p of s.plats) {
+    if (!feetOn(s.x, p)) continue;
+    if (!(prevY <= p.y + 22 && s.y >= p.y - 2)) continue;
+    if (!best || p.y < best.y) best = p;
+  }
+  return best;
+}
+
+function pickPiece(s: RunState, x: number): "pair" | "wire" | "mite" | "drone" | "calm" {
+  if (x < 980) return "calm";
+  const roll = rand(s, 0, 1);
+  const drones = s.mod === "drones" || x > 5200;
+  if (s.mod === "wire" && roll < 0.38) return "wire";
+  if (s.mod === "drones" && drones && roll < 0.34) return "drone";
+  if (roll < 0.28) return "mite";
+  if (roll < 0.62) return "pair";
+  if (roll < 0.74 && drones) return "drone";
+  if (s.mod === "wire" && roll < 0.86) return "wire";
+  return "calm";
 }
 
 function spawnChunk(s: RunState, fromX: number, count: number) {
@@ -295,86 +376,60 @@ function spawnChunk(s: RunState, fromX: number, count: number) {
   for (let i = 0; i < count; i++) {
     const dist = Math.max(s.x, x);
     const diff = Math.min(1, Math.max(0, (dist - 3800) / 9000));
-    const spd = speedAtDist(dist);
-    const reach = spd * 0.28;
-    const minGap = Math.max(36, reach * 0.5);
-    const maxGap = Math.max(minGap + 8, Math.min(reach, 96));
-    let gap = minGap + rand(s, 0, Math.max(4, maxGap - minGap));
+    const minGap = 92;
+    const maxGap = 114;
+    let gap = minGap + rand(s, 0, maxGap - minGap);
     gap = Math.max(minGap, Math.min(maxGap, gap));
 
-    const w = Math.max(200, Math.min(340, 280 - diff * 40 + rand(s, -16, 36)));
-
-    const stepRoll = rand(s, 0, 1);
-    let step = 0;
-    if (stepRoll < 0.16) step = -1;
-    else if (stepRoll > 0.84) step = 1;
-    band = Math.max(0, Math.min(2, band + step));
-
-    const y = BANDS[band];
-    addPlat(s, x, y, w);
-    if (s.mod === "wire" && w >= 220 && chance(s, 0.22)) {
-      const plat = s.plats[s.plats.length - 1];
-      if (plat) {
-        plat.kind = "wire";
-        plat.w = w * 0.4;
-      }
-    }
-
-    s.picks.push({ x: x + w * 0.22, y: y - 48, gold: false, shield: false, taken: false });
-    if (chance(s, 0.65)) {
-      s.picks.push({ x: x + w * 0.72, y: y - 48, gold: false, shield: false, taken: false });
-    }
-    s.picks.push({
-      x: x + w + gap * 0.5,
-      y: y - 66 - rand(s, 0, 20),
-      gold: chance(s, s.mod === "gold" ? 0.28 : 0.14),
-      shield: false,
-      taken: false,
-    });
-    if (chance(s, 0.1)) {
-      s.picks.push({ x: x + w * 0.5, y: y - 96, gold: true, shield: false, taken: false });
-    }
-    if (x > 4200 && chance(s, 0.06 + diff * 0.04)) {
-      s.picks.push({ x: x + w * 0.55, y: y - 58, gold: false, shield: true, taken: false });
-    }
-
-    const canHazard = !s.bonus && x > (s.mod === "drones" ? 4200 : 8000) && w >= 200 && s.sinceHazard >= 2;
-    let placed = false;
-    if (canHazard && chance(s, 0.42 + diff * 0.18)) {
-      const pick = rand(s, 0, 1);
-      const hx = x + Math.max(100, w * 0.58);
-      const droneAt = s.mod === "drones" ? 0.5 : 0.72;
-      if (pick < 0.4) {
-        addEnemy(s, "mite", hx, y);
-        placed = true;
-      } else if (pick < droneAt) {
-        addEnemy(s, "bush", x + w * 0.52, y);
-        placed = true;
-      } else if (s.mod === "drones" || (x > 5200 && w >= 220)) {
-        addEnemy(s, "drone", x + w * 0.62, y);
-        placed = true;
-      } else {
-        addEnemy(s, "mite", hx, y);
-        placed = true;
-      }
-    }
-
-    if (!placed && x > 2400 && chance(s, 0.14 + diff * 0.08) && band >= 1) {
-      const ww = Math.min(gap + 48, 240);
-      addPlat(s, x + w - 10, BANDS[0], ww, "wire");
+    const w = Math.max(210, Math.min(320, 270 - diff * 24 + rand(s, -16, 18)));
+    const lift = twoRows(x) && Math.floor(x / 1400) % 2 === 1;
+    const y = lift ? BANDS[0] : BANDS[1];
+    const piece = pickPiece(s, x);
+    if (piece === "pair") {
+      const a = Math.max(200, Math.floor(w * 0.9));
+      const b = Math.max(190, Math.floor(w * 0.86));
+      const g = gap;
+      addPlat(s, x, y, a);
+      dropSuns(s, x, y, a);
+      addPlat(s, x + a + g, y, b);
+      dropSuns(s, x + a + g, y, b);
+      x += a + g + b + Math.max(40, gap * 0.6);
+      s.sinceHazard += 1;
+    } else if (piece === "wire") {
+      addPlat(s, x, y, w);
+      dropSuns(s, x, y, w);
+      const ww = Math.max(88, Math.min(130, w * 0.28));
+      const lead = Math.max(44, Math.min(70, gap));
+      addPlat(s, x + w + lead, y, ww, "wire");
+      x += w + lead + ww + 40;
+      s.sinceHazard = 0;
+    } else if (piece === "mite") {
+      addPlat(s, x, y, w);
+      dropSuns(s, x, y, w);
+      addEnemy(s, "mite", x + w * 0.55, y);
+      x += w + gap;
+      s.sinceHazard = 0;
+    } else if (piece === "drone") {
+      addPlat(s, x, y, w);
+      addEnemy(s, "drone", x + w * 0.62, y);
       s.picks.push({
-        x: x + w + ww * 0.4,
-        y: BANDS[0] - 40,
-        gold: true,
+        x: x + w * 0.42,
+        y: y - 58,
+        gold: s.mod === "gold" || chance(s, 0.2),
         shield: false,
         taken: false,
       });
+      x += w + gap;
+      s.sinceHazard = 0;
+    } else {
+      addPlat(s, x, y, w);
+      dropSuns(s, x, y, w);
+      if (x > 4200 && chance(s, s.mod === "gold" ? 0.12 : 0.05)) {
+        s.picks.push({ x: x + w * 0.5, y: y - 58, gold: false, shield: true, taken: false });
+      }
+      x += w + gap;
+      s.sinceHazard += 1;
     }
-
-    if (placed) s.sinceHazard = 0;
-    else s.sinceHazard += 1;
-
-    x += w + gap;
   }
   s.lastBand = band;
   s.spawnX = x;
@@ -529,35 +584,37 @@ export function createRun(seed: number, opts?: { skin?: PlatSkin; robot?: RobotI
     ghostTape: [],
     ghostBucket: -1,
     lastHeartSaid: false,
+    clockSaid: false,
+    clockOpen: false,
   };
 
-  addPlat(s, 0, BANDS[1], 1020);
-  addPlat(s, 1066, BANDS[1], 320);
-  addPlat(s, 1432, BANDS[0], 300);
-  addPlat(s, 1778, BANDS[1], 340);
-  addPlat(s, 2164, BANDS[1], 320);
-  addPlat(s, 2530, BANDS[2], 340);
+  addPlat(s, 0, BANDS[1], 420);
+  addEnemy(s, "mite", 300, BANDS[1]);
+  const lead = s.enemies[s.enemies.length - 1];
+  if (lead) lead.vx = -36;
+  addPlat(s, 534, BANDS[1], 250);
+  addPlat(s, 890, BANDS[0], 230);
+  addPlat(s, 1234, BANDS[1], 260);
   s.picks.push(
-    { x: 480, y: BANDS[1] - 48, gold: false, shield: false, taken: false },
-    { x: 820, y: BANDS[1] - 48, gold: false, shield: false, taken: false },
-    { x: 1200, y: BANDS[1] - 48, gold: false, shield: false, taken: false },
-    { x: 1580, y: BANDS[0] - 48, gold: true, shield: false, taken: false },
-    { x: 1960, y: BANDS[1] - 48, gold: false, shield: false, taken: false },
-    { x: 2360, y: BANDS[1] - 48, gold: false, shield: false, taken: false },
+    { x: 210, y: BANDS[1] - 54, gold: false, shield: false, taken: false },
+    { x: 244, y: BANDS[1] - 54, gold: false, shield: false, taken: false },
+    { x: 640, y: BANDS[1] - 54, gold: s.mod === "gold", shield: false, taken: false },
+    { x: 990, y: BANDS[0] - 54, gold: false, shield: false, taken: false },
+    { x: 1024, y: BANDS[0] - 54, gold: false, shield: false, taken: false },
   );
   if (opts?.offerBonus) {
     s.picks.push({
-      x: 1180,
+      x: 640,
       y: BANDS[1] - 48,
       gold: false,
       shield: false,
       portal: true,
       taken: false,
     });
-    s.pops.push({ x: 1180, y: BANDS[1] - 130, text: "FLY GATE", life: 3.2 });
+    s.pops.push({ x: 640, y: BANDS[1] - 130, text: "FLY GATE", life: 3.2 });
   }
-  s.lastBand = 2;
-  s.spawnX = 2916;
+  s.lastBand = 1;
+  s.spawnX = 1600;
   spawnChunk(s, s.spawnX, 16);
   return s;
 }
@@ -612,11 +669,17 @@ function loseHeart(s: RunState, events: Ev[], why: "FALL" | "HIT") {
   }
   s.hearts -= 1;
   s.death = why;
-  s.shake = Math.min(1, s.shake + 0.8);
-  s.flash = 0.5;
-  s.hitstop = 0.11;
+  s.shake = Math.min(1, s.shake + (why === "HIT" ? 1 : 0.55));
+  s.flash = why === "HIT" ? 0.72 : 0.22;
+  s.hitstop = why === "HIT" ? 0.05 : 0.03;
   events.push("hurt");
   emit(s.particles, s.x, s.y - 30, 18, why === "HIT" ? "#e0564a" : "#e8b931", 260, 220);
+  if (why === "HIT") {
+    s.grounded = false;
+    s.vy = -360;
+    s.x -= 26;
+    s.grind = false;
+  }
   if (s.hearts <= 0) {
     s.phase = "dead";
     s.grounded = false;
@@ -705,6 +768,21 @@ export function step(prev: RunState, dtRaw: number, input: Input): { state: RunS
     if (e.kind === "drone") {
       const amp = e.boss ? 14 : 10;
       e.y = e.baseY + Math.sin(e.t * (e.boss ? 2.2 : 3.2) + e.x * 0.01) * amp;
+    } else if (e.kind === "mite") {
+      const plat = s.plats.find((p) => p.kind !== "wire" && e.x >= p.x - 6 && e.x <= p.x + p.w + 6);
+      if (plat) {
+        e.y = plat.y;
+        e.baseY = plat.y;
+        if (!e.vx) e.vx = e.t > Math.PI ? -78 : 78;
+        e.x += e.vx * dt;
+        if (e.x < plat.x + 24) {
+          e.x = plat.x + 24;
+          e.vx = Math.abs(e.vx);
+        } else if (e.x > plat.x + plat.w - 24) {
+          e.x = plat.x + plat.w - 24;
+          e.vx = -Math.abs(e.vx);
+        }
+      }
     }
   }
 
@@ -725,6 +803,10 @@ export function step(prev: RunState, dtRaw: number, input: Input): { state: RunS
       s.countdown = 0;
       events.push("tick");
     }
+    return { state: s, events };
+  }
+
+  if (s.clockOpen && s.phase === "running") {
     return { state: s, events };
   }
 
@@ -772,6 +854,29 @@ export function step(prev: RunState, dtRaw: number, input: Input): { state: RunS
       events.push("chapter");
       s.pops.push({ x: s.x, y: s.y - 100, text: ch.banner, life: 1.15 });
     }
+    if (!s.clockSaid && s.distance / 10 >= 1200) {
+      s.clockSaid = true;
+      s.clockOpen = true;
+      s.shake = 1;
+      s.hitstop = Math.max(s.hitstop, 0.08);
+      s.vy = 0;
+      s.announce = "";
+      s.announceLife = 0;
+      s.pops.push({ x: s.x, y: s.y - 88, text: "1200", life: 0.7 });
+      events.push("clock");
+    }
+  }
+
+  if (s.mod === "wind" && s.grounded && s.phase === "running" && Math.random() < 0.55) {
+    s.particles.push({
+      x: s.x - 12,
+      y: s.y - 6,
+      vx: -90 - Math.random() * 40,
+      vy: -16 - Math.random() * 24,
+      life: 0.28,
+      r: 1.6 + Math.random() * 1.6,
+      color: "#efe2c4",
+    });
   }
 
   if ((s.fever > 0 || s.grind) && s.grounded) {
@@ -863,7 +968,7 @@ export function step(prev: RunState, dtRaw: number, input: Input): { state: RunS
   const prevY = s.y;
   if (s.grounded) {
     s.vy = 0;
-    const stand = s.plats.find((p) => feetOn(s.x, p) && Math.abs(s.y - p.y) < 22);
+    const stand = standPlat(s);
     if (stand) {
       s.y = stand.y;
       s.checkpoint = { x: stand.x + Math.min(40, stand.w * 0.2), y: stand.y };
@@ -881,6 +986,7 @@ export function step(prev: RunState, dtRaw: number, input: Input): { state: RunS
   if (!s.grounded) {
     s.jumpAge += dt;
     let g = s.vy < 0 ? GRAVITY_UP : GRAVITY_DOWN;
+    if (s.mod === "wind" && s.vy < 0) g *= 1.22;
     if (s.vy < 0 && !input.jumpHeld && !s.cutJump && s.jumpAge > 0.28) {
       s.vy *= 0.55;
       s.cutJump = true;
@@ -907,7 +1013,7 @@ export function step(prev: RunState, dtRaw: number, input: Input): { state: RunS
   }
 
   if (!s.grounded && !stomped && s.vy > 18) {
-    const land = s.plats.find((p) => feetOn(s.x, p) && prevY <= p.y + 22 && s.y >= p.y - 2);
+    const land = landPlat(s, prevY);
     if (land) {
       s.y = land.y;
       s.vy = 0;
@@ -974,10 +1080,10 @@ export function step(prev: RunState, dtRaw: number, input: Input): { state: RunS
         const gain = Math.round((pick.gold ? 40 : 16) * mult);
         s.score += gain;
         s.pops.push({
-          x: pick.x,
-          y: pick.y - 10,
-          text: pick.gold ? `+${gain} GOLD` : `+${gain}`,
-          life: 0.6,
+          x: s.x,
+          y: s.y - 72,
+          text: pick.gold ? "+SUN" : "+1",
+          life: 0.55,
         });
         events.push(pick.gold ? "gold" : "collect");
         if (s.combo === 4 || s.combo === 8 || s.combo === 12) {
@@ -999,6 +1105,29 @@ export function step(prev: RunState, dtRaw: number, input: Input): { state: RunS
       if (aabb(pb, eb)) {
         loseHeart(s, events, "HIT");
         break;
+      }
+      if (
+        (e.kind === "mite" || e.kind === "drone") &&
+        !e.near &&
+        Math.abs(e.x - s.x) <= 18 &&
+        Math.abs(e.y - s.y) < 90
+      ) {
+        e.near = true;
+        s.hitstop = Math.max(s.hitstop, 0.034);
+        s.shake = Math.min(1, s.shake + 0.28);
+        s.score += 8;
+        s.particles.push({
+          x: s.x - 6,
+          y: s.y - 28,
+          vx: -70,
+          vy: 0,
+          life: 0.18,
+          r: 2,
+          color: "#fffdf8",
+          streak: true,
+        });
+        s.pops.push({ x: s.x, y: s.y - 78, text: "CLOSE", life: 0.4 });
+        events.push("near");
       }
       const ducked = s.slide > 0 && e.kind === "drone" && Math.abs(e.x - s.x) < 28 && pb.t > eb.b - 4;
       if (ducked && !e.near) {

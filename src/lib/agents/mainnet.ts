@@ -41,10 +41,15 @@ export const prepareMainnetSweep = createServerFn({ method: "POST" })
   });
 
 export const prepareMainnetSend = createServerFn({ method: "POST" })
-  .validator((input: { from: string; to: string; sol: number }) => input)
+  .validator((input: { from: string; to: string; sol: number; memo?: string }) => input)
   .handler(async ({ data }) => {
     const { prepareMainnetSendOnServer } = await import("./mainnet.server");
-    return prepareMainnetSendOnServer(String(data.from ?? ""), String(data.to ?? ""), Number(data.sol));
+    return prepareMainnetSendOnServer(
+      String(data.from ?? ""),
+      String(data.to ?? ""),
+      Number(data.sol),
+      typeof data.memo === "string" ? data.memo : "",
+    );
   });
 
 export const sendMainnetTx = createServerFn({ method: "POST" })

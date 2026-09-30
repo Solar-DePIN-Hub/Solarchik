@@ -101,7 +101,7 @@ export function liveCatalog(): LiveSku[] {
     {
       id: "sku-dex-arb",
       priceSol: 0,
-      blurb: "Titan × Backpack, SOL/USDC. DRY_RUN: рахує край і не відправляє угоду.",
+      blurb: "Titan × Backpack. Усі Solana-пари проти USDC. Стріляє лише коли є край і каса.",
       nft: liveNft({
         asset: "DexArbTpl00000000000000000000000006",
         classId: 2,

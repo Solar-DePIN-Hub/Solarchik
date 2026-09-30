@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { ChevronsDown, Heart, Home, Pause, Play, Shield, Volume2, VolumeX } from "lucide-react";
-import { createRun, step, chapterLabel, type DayMod, type Ev, type PlatSkin, type RunState, HEARTS } from "@/lib/game/sim";
+import { createRun, step, chapterLabel, shiftName, type DayMod, type Ev, type PlatSkin, type RunState, HEARTS } from "@/lib/game/sim";
+import { dayMod, daySeed, todayKey, type SaveData } from "@/lib/game/save";
+import { DayCard } from "./DayCard";
 import { drawWorld } from "@/lib/game/draw";
-import { isMuted, play, pauseMusic, setMuted, startMusic, stopMusic, unlockAudio } from "@/lib/game/audio";
+import { isMuted, play, buzz, pauseMusic, setMuted, startMusic, stopMusic, unlockAudio } from "@/lib/game/audio";
 import type { RobotId } from "@/lib/game/robots";
 import { SPR } from "@/lib/game/sprites";
-import type { Locale, TFunc } from "@/lib/game/i18n";
+import type { Locale, MsgKey, TFunc } from "@/lib/game/i18n";
 import type { PetVibe, PetVoice } from "@/lib/game/pet";
 import { RunRadio } from "./RunRadio";
-import { todayKey, writeGhost } from "@/lib/game/save";
 
 type Props = {
   seed: number;
@@ -34,6 +35,11 @@ type Props = {
   }) => void;
   onYard: () => void;
   onRetry: () => void;
+  onClock: () => void;
+  signed: boolean;
+  signBusy: boolean;
+  signError: string;
+  save: SaveData;
 };
 
 export function RoofRun({
@@ -54,6 +60,11 @@ export function RoofRun({
   onResult,
   onYard,
   onRetry,
+  onClock,
+  signed,
+  signBusy,
+  signError,
+  save,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<RunState>(createRun(seed, { skin, robot, offerBonus, careBoost, mod }));
@@ -65,19 +76,10 @@ export function RoofRun({
   });
   const ptrRef = useRef({ id: -1, y: 0, sliding: false });
   const reported = useRef(false);
-  const ghostWrote = useRef(false);
+  const goalReported = useRef(false);
   const onResultRef = useRef(onResult);
   onResultRef.current = onResult;
-  const flushGhost = () => {
-    if (ghostWrote.current) return;
-    const s = stateRef.current;
-    const meters = Math.round(s.distance / 10);
-    if (meters < 400) return;
-    ghostWrote.current = true;
-    writeGhost(todayKey(), meters, s.ghostTape);
-  };
   const leaveYard = () => {
-    flushGhost();
     onYard();
   };
   const [hud, setHud] = useState(() => snapshot(stateRef.current));
@@ -157,6 +159,10 @@ export function RoofRun({
           pausedRef.current = !pausedRef.current;
           setPaused(pausedRef.current);
         }
+        return;
+      }
+      if (stateRef.current.phase === "dead" || stateRef.current.clockOpen) {
+        e.preventDefault();
         return;
       }
       if (pausedRef.current) return;
@@ -240,9 +246,21 @@ export function RoofRun({
         stateRef.current = state;
         for (const ev of events) play(ev);
         radioRef.current?.push(events, state);
+        if (state.clockOpen && !goalReported.current) {
+          goalReported.current = true;
+          reported.current = true;
+          setHud(snapshot(state));
+          onResultRef.current({
+            score: Math.round(state.score),
+            suns: state.suns,
+            maxCombo: state.maxCombo,
+            distance: Math.round(state.distance / 10),
+            didBonus: state.didBonus,
+          });
+        }
         if (state.phase === "dead" && !reported.current) {
           reported.current = true;
-          flushGhost();
+          setHud(snapshot(state));
           onResultRef.current({
             score: Math.round(state.score),
             suns: state.suns,
@@ -262,7 +280,7 @@ export function RoofRun({
       if (hudAcc > 0.12) {
         hudAcc = 0;
         const s = stateRef.current;
-        const k = `${s.phase}|${s.hearts}|${Math.round(s.score)}|${s.combo}|${Math.round(s.distance / 8)}|${s.bonus ? 1 : 0}`;
+        const k = `${s.phase}|${s.hearts}|${Math.round(s.score)}|${s.combo}|${Math.round(s.distance / 8)}|${s.bonus ? 1 : 0}|${s.clockOpen ? 1 : 0}`;
         if (k !== hudKey) {
           hudKey = k;
           setHud(snapshot(s));
@@ -285,7 +303,7 @@ export function RoofRun({
     e.preventDefault();
     unlockAudio();
     const st = stateRef.current;
-    if (st.phase === "dead" || pausedRef.current) return;
+    if (st.phase === "dead" || st.clockOpen || pausedRef.current) return;
     ptrRef.current = { id: e.pointerId, y: e.clientY, sliding: false };
     inputRef.current.jumpPressed = true;
     inputRef.current.jumpHeld = true;
@@ -500,9 +518,9 @@ export function RoofRun({
         </div>
       )}
 
-      {hud.phase === "dead" && (
-        <div className="pointer-events-none absolute inset-0 z-20 flex items-end justify-center px-5 pb-10 pt-16 sm:items-center">
-          <div className="pointer-events-auto w-full max-w-sm rounded-xl bg-bg p-6 text-fg shadow-card">
+      {hud.phase === "dead" && !hud.clockOpen && hud.distance < 1200 && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/50 px-5">
+          <div className="w-full max-w-sm rounded-xl bg-bg p-6 text-fg shadow-card">
             <p className="text-sm font-semibold tracking-[0.16em] text-primary">
               {daily ? t("run.daily") : t("run.practice")}
             </p>
@@ -519,7 +537,61 @@ export function RoofRun({
             <div className="mt-5 flex flex-col gap-2">
               <button
                 type="button"
-                className="flex h-12 items-center justify-center rounded-lg bg-primary font-display text-base font-semibold text-primary-fg"
+                className="flex h-16 items-center justify-center rounded-lg bg-primary font-display text-2xl font-semibold text-primary-fg"
+                onClick={onRetry}
+              >
+                {t("run.again")}
+              </button>
+              <button
+                type="button"
+                className="flex h-12 items-center justify-center gap-2 rounded-md bg-elevated font-semibold"
+                onClick={leaveYard}
+              >
+                <Home className="size-4" />
+                {t("run.yard")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {hud.clockOpen && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/50 px-5">
+          <div className="w-full max-w-sm rounded-xl bg-bg p-6 text-fg shadow-card">
+            <p className="text-sm font-semibold tracking-[0.16em] text-primary">1200m</p>
+            <h2 className="mt-1 font-display text-3xl font-semibold">
+              {signed ? t("banter.signed") : t("banter.signNow")}
+            </h2>
+            <p className="mt-2 text-sm text-muted">
+              {hud.distance}m · {hud.score} pts · {hud.suns} {t("run.suns")}
+            </p>
+            <div className="mt-5 flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={signed || signBusy}
+                className="flex h-16 items-center justify-center rounded-lg bg-primary font-display text-2xl font-semibold text-primary-fg disabled:opacity-60"
+                onClick={() => {
+                  buzz(40);
+                  onClock();
+                }}
+              >
+                {signBusy ? t("yard.signing") : signed ? t("yard.signed") : t("yard.sign")}
+              </button>
+              {signError ? (
+                <p className="text-center text-xs text-accent">
+                  {signError === "need-apk" ? t("yard.needApk") : signError === "wallet" ? t("yard.walletOff") : signError}
+                </p>
+              ) : null}
+              {signed ? (
+                <DayCard
+                  save={save}
+                  t={t}
+                  shift={shiftName(daySeed(todayKey()))}
+                  modLabel={t(`yard.mod.${dayMod()}` as MsgKey)}
+                />
+              ) : null}
+              <button
+                type="button"
+                className="flex h-12 items-center justify-center rounded-md bg-elevated font-semibold"
                 onClick={onRetry}
               >
                 {t("run.again")}
@@ -560,5 +632,6 @@ function snapshot(s: RunState) {
     chapterLabel: chapterLabel(s.chapter),
     announce: s.announce,
     announceLife: s.announceLife,
+    clockOpen: s.clockOpen,
   };
 }

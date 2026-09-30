@@ -24,9 +24,9 @@ export const CLASS_META: Record<
   2: {
     id: 2,
     title: "Titan × Backpack",
-    short: "Арб",
+    short: "Арбітраж",
     kind: "dex",
-    blurb: "DRY_RUN. Книга Backpack SOL/USDC і ончейн-ціна. Угоду не відправляє.",
+    blurb: "Усі Solana-пари Backpack проти USDC. Стріляє лише коли є край і каса.",
   },
   3: {
     id: 3,
@@ -163,7 +163,7 @@ export function clampStrategy(s: StrategyBundle): StrategyBundle {
     dex: {
       pair: (s.dex.pair.trim() || "SOL/USDC").slice(0, 32),
       dcaIntervalSec: Math.round(clamp(s.dex.dcaIntervalSec, 60, 7200)),
-      dcaAmountSol: Number(clamp(s.dex.dcaAmountSol, 0.005, 0.005).toFixed(4)),
+      dcaAmountSol: Number(clamp(s.dex.dcaAmountSol, 0.005, 0.1).toFixed(4)),
       slippageBps: Math.round(clamp(s.dex.slippageBps, 10, 120)),
       side: s.dex.side === "buy" || s.dex.side === "sell" ? s.dex.side : "both",
     },

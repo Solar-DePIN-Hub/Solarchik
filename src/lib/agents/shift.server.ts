@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
 import type { ArbQuote, PolyMarketQuote, Quote, WhirlQuote } from "./engine";
-import { grokChat } from "./grok-fetch";
+import { arbNets } from "./engine";
+import { bookTop, loadSpots, USDC_MINT, type SpotMarket } from "./arb-markets.server";
+import { deskHeaders, DESK_ORIGIN, grokChat } from "./grok-fetch";
 import { GROK_MODEL } from "./grok-model";
 import { geminiTalk } from "./gemini-live.server";
 import type { ShiftInput, ShiftOk, ShiftResult } from "./shift-types";
@@ -181,94 +184,193 @@ function mergePoly(lists: PolyMarketQuote[][]): PolyMarketQuote[] {
   return out;
 }
 
-const SOL_MINT = "So11111111111111111111111111111111111111112";
-const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const ARB_SOL = 0.1;
+const ARB_BATCH = 4;
 
-async function backpackBook(): Promise<{ bid: number; ask: number } | null> {
-  const res = await fetch("https://api.backpack.exchange/api/v1/depth?symbol=SOL_USDC", {
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) return null;
-  const body = (await res.json()) as { bids?: [string, string][]; asks?: [string, string][] };
-  const bid = Number(body.bids?.at(-1)?.[0]);
-  const ask = Number(body.asks?.[0]?.[0]);
-  if (!(bid > 0) || !(ask > bid)) return null;
-  return { bid, ask };
+let arbCursor = 0;
+const arbMem = new Map<string, { at: number; quote: ArbQuote }>();
+
+async function quoteSpot(spot: SpotMarket, notionalUsd: number, key: string): Promise<ArbQuote | null> {
+  const book = await bookTop(spot.market);
+  if (!book) return null;
+  const qty = Math.max(spot.minQty, notionalUsd > 0 ? notionalUsd / book.ask : spot.minQty);
+  const atoms = Math.round(qty * 10 ** spot.decimals);
+  const usdcIn = Math.round(book.ask * qty * 1_000_000);
+  if (!(atoms > 0) || !(usdcIn > 0)) return null;
+  const titanSell = await titanOut(spot.mint, USDC_MINT, String(atoms), key).catch(() => null);
+  const titanBuy = titanSell ? await titanOut(USDC_MINT, spot.mint, String(usdcIn), key).catch(() => null) : null;
+  const via = titanSell && titanBuy ? "titan" : "jupiter";
+  const sellRaw = via === "titan" ? titanSell : await legOut(spot.mint, USDC_MINT, String(atoms));
+  const buyRaw = via === "titan" ? titanBuy : await legOut(USDC_MINT, spot.mint, String(usdcIn));
+  if (!sellRaw || !buyRaw) {
+    return { bid: book.bid, ask: book.ask, sellPx: 0, buyPx: 0, chain: "none", sizeSol: qty, base: spot.base, scanned: 0, minQty: spot.minQty };
+  }
+  const sellPx = sellRaw / 1_000_000 / qty;
+  const baseOut = buyRaw / 10 ** spot.decimals;
+  const buyPx = baseOut > 0 ? usdcIn / 1_000_000 / baseOut : 0;
+  const mid = (book.bid + book.ask) / 2;
+  if (!(sellPx > mid * 0.5 && sellPx < mid * 1.5 && buyPx > mid * 0.5 && buyPx < mid * 1.5)) return null;
+  return { bid: book.bid, ask: book.ask, sellPx, buyPx, chain: via, sizeSol: qty, base: spot.base, scanned: 0, minQty: spot.minQty };
+}
+
+/** Best net edge across Backpack spot markets that withdraw on Solana. A few pairs are refreshed each call. */
+export async function readArb(
+  passedKey = "",
+  sizeSol = ARB_SOL,
+  side: "buy" | "sell" | "both" = "both",
+): Promise<ArbQuote | null> {
+  const spots = await loadSpots();
+  if (!spots.length) return null;
+  const key = titanKeyFromEnv() || passedKey.trim().slice(0, 256);
+  const size = Math.min(0.1, Math.max(0.005, sizeSol));
+  const solSpot = spots.find((row) => row.base === "SOL") ?? null;
+  const solBook = solSpot ? await bookTop(solSpot.market) : null;
+  const solPx = solBook?.ask ?? 0;
+  const notional = solPx > 0 ? size * solPx : 0;
+  const batch: SpotMarket[] = [];
+  if (solSpot) batch.push(solSpot);
+  for (let i = 0; i < ARB_BATCH && spots.length; i++) batch.push(spots[(arbCursor + i) % spots.length]);
+  arbCursor = (arbCursor + ARB_BATCH) % spots.length;
+  const seen = new Set<string>();
+  const unique = batch.filter((row) => (seen.has(row.base) ? false : (seen.add(row.base), true)));
+  const quoted = await Promise.all(unique.map((row) => quoteSpot(row, notional, key).catch(() => null)));
+  const now = Date.now();
+  for (const row of quoted) {
+    if (row) arbMem.set(row.base, { at: now, quote: row });
+  }
+  const fresh = [...arbMem.entries()].filter(([, row]) => now - row.at < 120_000);
+  for (const [base, row] of [...arbMem.entries()]) {
+    if (now - row.at >= 120_000) arbMem.delete(base);
+  }
+  let best: ArbQuote | null = null;
+  let bestEdge = -Infinity;
+  for (const [, row] of fresh) {
+    const quote = row.quote;
+    if (!(quote.sellPx > 0) || !(quote.buyPx > 0)) continue;
+    const { netA, netB } = arbNets(quote);
+    const edge = side === "sell" ? netA : side === "buy" ? netB : Math.max(netA, netB);
+    if (edge > bestEdge) {
+      bestEdge = edge;
+      best = quote;
+    }
+  }
+  if (!best) {
+    const any = quoted.find((row) => row && row.bid > 0);
+    if (!any) return null;
+    return { ...any, scanned: fresh.length || 1 };
+  }
+  return { ...best, scanned: fresh.length };
 }
 
 async function jupiterOut(inputMint: string, outputMint: string, amount: string): Promise<number | null> {
-  const url = new URL("https://lite-api.jup.ag/swap/v1/quote");
-  url.searchParams.set("inputMint", inputMint);
-  url.searchParams.set("outputMint", outputMint);
-  url.searchParams.set("amount", amount);
-  url.searchParams.set("slippageBps", "30");
-  const res = await fetch(url, {
-    headers: { accept: "application/json", "user-agent": "Solarchik/1.0" },
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) return null;
-  const body = (await res.json()) as { outAmount?: string };
-  const out = Number(body.outAmount);
-  return Number.isFinite(out) && out > 0 ? out : null;
+  const bases = ["https://lite-api.jup.ag/swap/v1/quote", "https://api.jup.ag/swap/v1/quote"];
+  for (const base of bases) {
+    const url = new URL(base);
+    url.searchParams.set("inputMint", inputMint);
+    url.searchParams.set("outputMint", outputMint);
+    url.searchParams.set("amount", amount);
+    url.searchParams.set("slippageBps", "30");
+    try {
+      const res = await fetch(url, {
+        headers: { accept: "application/json", "user-agent": "Solarchik/1.0" },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) continue;
+      const body = (await res.json()) as { outAmount?: string };
+      const out = Number(body.outAmount);
+      if (Number.isFinite(out) && out > 0) return out;
+    } catch {
+      /* next host */
+    }
+  }
+  return null;
 }
 
 function titanKeyFromEnv(): string {
-  return (process.env.TITAN_API_KEY || process.env.TITAN_JWT || "").trim();
+  const fromEnv = (process.env.TITAN_API_KEY || process.env.TITAN_JWT || "").trim();
+  if (fromEnv) return fromEnv;
+  try {
+    return readFileSync(new URL("../../../server/titan.secret", import.meta.url), "utf8").trim().slice(0, 256);
+  } catch {
+    return "";
+  }
+}
+
+function readOutAmount(body: {
+  outAmount?: string | number;
+  quote?: { outAmount?: string | number };
+  quotes?: Record<string, { outAmount?: string | number }>;
+}): number | null {
+  let out = Number(body.outAmount ?? body.quote?.outAmount);
+  if (body.quotes) {
+    for (const row of Object.values(body.quotes)) {
+      const n = Number(row?.outAmount);
+      if (n > out) out = n;
+    }
+  }
+  return Number.isFinite(out) && out > 0 ? out : null;
 }
 
 async function titanOut(inputMint: string, outputMint: string, amount: string, key: string): Promise<number | null> {
+  try {
+    const desk = await fetch(`${DESK_ORIGIN}/api/titan`, {
+      method: "POST",
+      headers: {
+        ...deskHeaders(),
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      },
+      body: JSON.stringify({ inputMint, outputMint, amount }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (desk.ok) {
+      const n = readOutAmount((await desk.json()) as { outAmount?: string | number });
+      if (n) return n;
+    }
+  } catch {
+    /* desk down — try Titan directly */
+  }
   if (!key) return null;
   const url = new URL("https://portal.api.titan.exchange/api/v1/quote/swap");
   url.searchParams.set("inputMint", inputMint);
   url.searchParams.set("outputMint", outputMint);
   url.searchParams.set("amount", amount);
   url.searchParams.set("slippageBps", "30");
+  url.searchParams.set("userPublicKey", "8J3hxf1XSYV1HKVUJtwtQtVwSvSeaAyW5RmL8EqC67ic");
   const res = await fetch(url, {
-    headers: { "x-api-key": key, accept: "application/json" },
+    headers: {
+      "x-api-key": key,
+      accept: "application/json",
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    },
     signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) return null;
-  const body = (await res.json()) as { outAmount?: string | number; quote?: { outAmount?: string | number } };
-  const out = Number(body.outAmount ?? body.quote?.outAmount);
-  return Number.isFinite(out) && out > 0 ? out : null;
+  return readOutAmount((await res.json()) as { outAmount?: string | number });
 }
 
 async function legOut(inputMint: string, outputMint: string, amount: string): Promise<number | null> {
   return jupiterOut(inputMint, outputMint, amount);
 }
 
-/** Backpack top of book plus the on-chain price of ARB_SOL. Titan when a key exists, otherwise Jupiter. */
-export async function readArb(passedKey = ""): Promise<ArbQuote | null> {
-  const book = await backpackBook();
-  if (!book) return null;
-  const key = titanKeyFromEnv() || passedKey.trim().slice(0, 256);
-  const lamports = String(Math.round(ARB_SOL * 1_000_000_000));
-  const usdcIn = String(Math.round(book.ask * ARB_SOL * 1_000_000));
-  const titanSell = key ? await titanOut(SOL_MINT, USDC_MINT, lamports, key).catch(() => null) : null;
-  const titanBuy = titanSell ? await titanOut(USDC_MINT, SOL_MINT, usdcIn, key).catch(() => null) : null;
-  const via = titanSell && titanBuy ? "titan" : "jupiter";
-  const sellRaw = via === "titan" ? titanSell : await legOut(SOL_MINT, USDC_MINT, lamports);
-  const buyRaw = via === "titan" ? titanBuy : await legOut(USDC_MINT, SOL_MINT, usdcIn);
-  if (!sellRaw || !buyRaw) {
-    return { bid: book.bid, ask: book.ask, sellPx: 0, buyPx: 0, chain: "none", sizeSol: ARB_SOL };
-  }
-  const sellPx = sellRaw / 1_000_000 / ARB_SOL;
-  const solOut = buyRaw / 1_000_000_000;
-  const buyPx = usdcIn === "0" || !(solOut > 0) ? 0 : Number(usdcIn) / 1_000_000 / solOut;
-  if (!(sellPx > 20 && sellPx < 10_000 && buyPx > 20 && buyPx < 10_000)) return null;
-  return { bid: book.bid, ask: book.ask, sellPx, buyPx, chain: via, sizeSol: ARB_SOL };
-}
-
-export async function fetchQuotes(keywords: string[] = [], titanKey = ""): Promise<Quote | null> {
-  const wantTitan = Boolean(titanKeyFromEnv() || titanKey.trim());
+export async function fetchQuotes(
+  keywords: string[] = [],
+  titanKey = "",
+  sizeSol = ARB_SOL,
+  side: "buy" | "sell" | "both" | string = "both",
+): Promise<Quote | null> {
+  const pick = side === "buy" || side === "sell" ? side : "both";
   const fresh = quoteCache && Date.now() - quoteCache.at < 20_000 ? quoteCache.quote : null;
   const missing = keywords.filter((raw) => {
     const q = raw.trim().toLowerCase();
     if (!q || q.includes("/") || /^\d+$/.test(q)) return false;
     return !fresh?.polymarkets.some((m) => m.question.toLowerCase().includes(q) || m.yesLabel.toLowerCase().includes(q));
   });
-  if (fresh && missing.length === 0 && (!wantTitan || fresh.arb?.chain === "titan")) return fresh;
+  if (fresh && missing.length === 0) {
+    const arb = await readArb(titanKey, sizeSol, pick).catch(() => fresh.arb ?? null);
+    return { ...fresh, arb };
+  }
   const searches = ["Bitcoin", "Solana"];
   for (const raw of keywords) {
     const q = raw.trim();
@@ -282,7 +384,7 @@ export async function fetchQuotes(keywords: string[] = [], titanKey = ""): Promi
     orcaPools().catch(() => [] as WhirlQuote[]),
     gammaBtcWindows().catch(() => [] as PolyMarketQuote[]),
     gammaTop().catch(() => [] as PolyMarketQuote[]),
-    readArb(titanKey).catch(() => null),
+    readArb(titanKey, sizeSol, pick).catch(() => null),
     ...searches.map((q) => gammaSearch(q).catch(() => [] as PolyMarketQuote[])),
   ]);
   const whirlpools = pools;

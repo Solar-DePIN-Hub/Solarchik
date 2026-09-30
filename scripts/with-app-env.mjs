@@ -82,33 +82,6 @@ export function exitStatusFromChild(code, signal) {
   return code ?? 1;
 }
 
-/** Server-only secrets in `.grok/xai.env`. Never `VITE_` keys. Process env wins. */
-export function readXaiEnv(root) {
-  try {
-    const text = readFileSync(join(root, ".grok/xai.env"), "utf8");
-    const env = {};
-    for (const line of text.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eq = trimmed.indexOf("=");
-      if (eq <= 0) continue;
-      const key = trimmed.slice(0, eq);
-      if (!/^[A-Z0-9_]+$/.test(key) || key.startsWith(VITE_PREFIX)) continue;
-      let value = trimmed.slice(eq + 1);
-      if (
-        (value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))
-      ) {
-        value = value.slice(1, -1);
-      }
-      env[key] = value;
-    }
-    return env;
-  } catch {
-    return {};
-  }
-}
-
 /** The workspace root (this file lives in `<root>/scripts/`). */
 export function projectRoot() {
   return dirname(dirname(fileURLToPath(import.meta.url)));
@@ -137,10 +110,7 @@ function main(argv) {
     console.error("usage: node scripts/with-app-env.mjs <command> [args…]");
     process.exit(2);
   }
-  const env = mergeAppEnv(readAppEnv(projectRoot()), {
-    ...readXaiEnv(projectRoot()),
-    ...process.env,
-  });
+  const env = mergeAppEnv(readAppEnv(projectRoot()), process.env);
   const child = spawn(command, args, { stdio: "inherit", env });
   // The dev server is long-running and is stopped by signalling this wrapper.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {

@@ -23,13 +23,15 @@ export const brainStatus = createServerFn({ method: "GET" }).handler(async (): P
 });
 
 export const liveQuotes = createServerFn({ method: "POST" })
-  .validator((input: { keywords?: string[]; titanKey?: string } | undefined) => ({
+  .validator((input: { keywords?: string[]; titanKey?: string; sizeSol?: number; side?: string } | undefined) => ({
     keywords: Array.isArray(input?.keywords) ? input.keywords.slice(0, 4) : [],
     titanKey: typeof input?.titanKey === "string" ? input.titanKey.trim().slice(0, 256) : "",
+    sizeSol: typeof input?.sizeSol === "number" && Number.isFinite(input.sizeSol) ? input.sizeSol : 0.1,
+    side: input?.side === "buy" || input?.side === "sell" ? input.side : "both",
   }))
   .handler(async ({ data }) => {
     const { fetchQuotes } = await import("./shift.server");
-    return fetchQuotes(data.keywords, data.titanKey);
+    return fetchQuotes(data.keywords, data.titanKey, data.sizeSol, data.side);
   });
 
 export const runAgentShift = createServerFn({ method: "POST" })

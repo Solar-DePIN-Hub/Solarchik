@@ -56,9 +56,11 @@ export function Yard({
   const urgency = signed
     ? t("banter.signed")
     : clocked
-      ? t("banter.signNow")
+      ? save.streak > 0
+        ? `${t("banter.signNow")} ${t("urgency.burns", { n: save.streak, left })}`
+        : t("yard.opened")
       : save.streak > 0
-        ? t("urgency.burns", { n: save.streak, left })
+        ? `${modLabel}. ${t("urgency.burns", { n: save.streak, left })}`
         : t("urgency.open", { shift, mod: modLabel });
 
   const [langOpen, setLangOpen] = useState(false);
@@ -116,8 +118,8 @@ export function Yard({
               </button>
               {!native && (
               <a
-                href="/Solarchik-CLOCK-IN-0.19.52.apk"
-                download="Solarchik-CLOCK-IN-0.19.52.apk"
+                href="/Solarchik-CLOCK-IN-0.19.51.apk"
+                download="Solarchik-CLOCK-IN-0.19.51.apk"
                 className="flex h-11 items-center gap-1.5 rounded-md bg-elevated px-3 text-sm font-semibold text-fg"
               >
                 <Download className="size-4" />
@@ -163,13 +165,28 @@ export function Yard({
           </div>
 
           <div className="mt-4 flex flex-col gap-2">
+            {clocked && !signed ? (
+              <button
+                type="button"
+                onClick={onSign}
+                disabled={signBusy}
+                className="flex h-14 items-center justify-center gap-2 rounded-lg bg-primary px-5 font-display text-lg font-semibold text-primary-fg disabled:opacity-60"
+              >
+                <Wallet className="size-5" />
+                {signBusy ? t("yard.signing") : t("yard.sign")}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onRun}
-              className="flex h-14 items-center justify-center gap-2 rounded-lg bg-primary px-5 font-display text-lg font-semibold text-primary-fg transition-transform duration-[var(--motion-quick,150ms)] active:scale-[0.98]"
+              className={
+                clocked && !signed
+                  ? "flex h-12 items-center justify-center gap-2 rounded-md bg-elevated px-3 text-sm font-semibold text-fg"
+                  : "flex h-14 items-center justify-center gap-2 rounded-lg bg-primary px-5 font-display text-lg font-semibold text-primary-fg transition-transform duration-[var(--motion-quick,150ms)] active:scale-[0.98]"
+              }
             >
-              <Play className="size-5" />
-              {clocked ? t("yard.playAgain") : t("yard.play")}
+              <Play className={clocked && !signed ? "size-4" : "size-5"} />
+              {clocked || signed ? t("yard.playAgain") : t("yard.play")}
             </button>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -194,6 +211,7 @@ export function Yard({
                 {t("yard.shop")}
               </button>
             </div>
+            {clocked && !signed ? null : (
             <button
               type="button"
               onClick={onSign}
@@ -201,8 +219,9 @@ export function Yard({
               className="flex h-12 w-full items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-semibold text-muted disabled:opacity-50"
             >
               <Wallet className="size-4" />
-              {signBusy ? t("yard.signing") : signed ? t("yard.signed") : clocked ? t("yard.sign") : t("yard.need1200")}
+              {signBusy ? t("yard.signing") : signed ? t("yard.signed") : t("yard.need1200")}
             </button>
+            )}
             {signError ? (
               <p className="text-center text-xs text-accent">
                 {signError === "need-apk" ? t("yard.needApk") : signError === "wallet" ? t("yard.walletOff") : signError}
@@ -286,8 +305,8 @@ export function Yard({
 
           {!native && (
           <a
-            href="/Solarchik-CLOCK-IN-0.19.52.apk"
-            download="Solarchik-CLOCK-IN-0.19.52.apk"
+            href="/Solarchik-CLOCK-IN-0.19.51.apk"
+            download="Solarchik-CLOCK-IN-0.19.51.apk"
             className="mt-3 flex h-12 items-center justify-center gap-2 rounded-md bg-elevated px-5 text-sm font-semibold text-fg"
           >
             <Download className="size-4" />

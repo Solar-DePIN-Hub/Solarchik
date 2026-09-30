@@ -1,12 +1,19 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { BTC_WINDOWS, CLASS_META, eventsDaysOf, kindsForClass, laneEnabledOn, lanesForStrategy, workLabel, aprLabel } from "@/lib/agents/classes";
 import { useAgents } from "@/lib/agents/store";
+import { ARB_TREASURY } from "@/lib/game/pay";
 import { readTitanKey, writeTitanKey } from "@/lib/agents/titan-key";
 import type { AgentNft, PredLane, StrategyBundle } from "@/lib/agents/types";
 import { Button } from "@/components/ui/button";
 
 const field =
   "h-11 w-full rounded-md border border-border bg-surface px-3 text-sm text-fg outline-none focus-visible:outline-2 focus-visible:outline-accent";
+
+const ARB_PRESETS: { name: string; side: StrategyBundle["dex"]["side"]; slippageBps: number; dcaAmountSol: number; dcaIntervalSec: number }[] = [
+  { name: "A · Backpack дешевше", side: "sell", slippageBps: 10, dcaAmountSol: 0.1, dcaIntervalSec: 60 },
+  { name: "B · Titan дешевше", side: "buy", slippageBps: 10, dcaAmountSol: 0.1, dcaIntervalSec: 60 },
+  { name: "Обидва боки", side: "both", slippageBps: 15, dcaAmountSol: 0.1, dcaIntervalSec: 60 },
+];
 
 const LANE_LABEL: Record<PredLane, string> = {
   crypto: "Крипто",
@@ -16,10 +23,14 @@ const LANE_LABEL: Record<PredLane, string> = {
 
 export function StrategyDesk({ nft }: { nft: AgentNft }) {
   const saveStrategy = useAgents((s) => s.saveStrategy);
+  const fundArbDesk = useAgents((s) => s.fundArbDesk);
+  const chainBusy = useAgents((s) => s.chainBusy);
+  const credit = useAgents((s) => s.arbCredit[nft.asset] ?? 0);
   const notes = useAgents((s) => s.laneNotes);
   const kinds = kindsForClass(nft.classId);
   const [titanKey, setTitanKey] = useState("");
   const [draft, setDraft] = useState<StrategyBundle>(nft.strategy);
+  const [arbTopup, setArbTopup] = useState("0.005");
   useEffect(() => {
     setTitanKey(readTitanKey());
   }, []);
@@ -177,27 +188,50 @@ export function StrategyDesk({ nft }: { nft: AgentNft }) {
       {kinds.includes("dex") ? (
         <fieldset className="grid gap-3 sm:grid-cols-2">
           <legend className="text-xs uppercase tracking-wide text-muted mb-1">Titan × Backpack</legend>
+          <div className="sm:col-span-2 flex flex-col gap-2">
+            <p className="text-xs text-muted">Готові варіанти. Натисни, перевір числа і запиши.</p>
+            <div className="flex flex-wrap gap-2">
+              {ARB_PRESETS.map((preset) => (
+                <button
+                  key={preset.name}
+                  type="button"
+                  className="h-11 rounded-md border border-border px-3 text-sm text-fg"
+                  onClick={() =>
+                    patch("dex", {
+                      pair: "SOL/USDC",
+                      side: preset.side,
+                      slippageBps: preset.slippageBps,
+                      dcaAmountSol: preset.dcaAmountSol,
+                      dcaIntervalSec: preset.dcaIntervalSec,
+                    })
+                  }
+                >
+                  {preset.name}
+                </button>
+              ))}
+            </div>
+          </div>
           <Label text="Пара">
             <select className={field} data-testid="strat-pair" value={draft.dex.pair} onChange={(e) => patch("dex", { pair: e.target.value })}>
-              {options(draft.dex.pair, ["SOL/USDC", "BTC/USDC"]).map((v) => (
+              {options(draft.dex.pair, ["SOL/USDC"]).map((v) => (
                 <option key={v}>{v}</option>
               ))}
             </select>
           </Label>
-          <Label text="Інтервал DCA, сек">
+          <Label text="Пауза, сек">
             <input className={field} data-testid="strat-interval" inputMode="numeric" value={draft.dex.dcaIntervalSec} onChange={(e) => patch("dex", { dcaIntervalSec: Number(e.target.value) })} />
           </Label>
-          <Label text="Сума DCA">
+          <Label text="Розмір, SOL">
             <input className={field} data-testid="strat-amount" inputMode="decimal" value={draft.dex.dcaAmountSol} onChange={(e) => patch("dex", { dcaAmountSol: Number(e.target.value) })} />
           </Label>
-          <Label text="Поріг краю, bps">
+          <Label text="Поріг чистого краю, bps">
             <input className={field} data-testid="strat-slip" inputMode="numeric" value={draft.dex.slippageBps} onChange={(e) => patch("dex", { slippageBps: Number(e.target.value) })} />
           </Label>
-          <Label text="Сторона">
+          <Label text="Варіант">
             <select className={field} data-testid="strat-side" value={draft.dex.side} onChange={(e) => patch("dex", { side: e.target.value as StrategyBundle["dex"]["side"] })}>
-              <option value="both">buy і sell</option>
-              <option value="buy">тільки buy</option>
-              <option value="sell">тільки sell</option>
+              <option value="sell">A · купити на Backpack</option>
+              <option value="buy">B · купити через Titan</option>
+              <option value="both">Обидва боки</option>
             </select>
           </Label>
           <Label text="Ключ Titan">
@@ -207,7 +241,7 @@ export function StrategyDesk({ nft }: { nft: AgentNft }) {
               autoComplete="off"
               data-testid="titan-key"
               value={titanKey}
-              placeholder="встав, коли прийде"
+              placeholder="вже на столі, можна замінити"
               onChange={(e) => {
                 setTitanKey(e.target.value);
                 writeTitanKey(e.target.value);
@@ -215,8 +249,38 @@ export function StrategyDesk({ nft }: { nft: AgentNft }) {
             />
           </Label>
           <p className="text-xs text-muted leading-snug sm:col-span-2" data-testid="dex-hint">
-            DRY_RUN. Книга Backpack жива. Ончейн — Titan, щойно ключ у полі. Поки ключа немає, цифра з Jupiter і так підписана. Ногу не відправляю.
+            Бот читає ці числа: варіант, поріг, розмір, паузу. Котирування Titan на цей розмір. Чистий край уже без 0,10% Backpack і 5 bps запасу. Ордер не йде, поки каса Backpack порожня.
           </p>
+          <div className="sm:col-span-2 rounded-md border border-border bg-bg p-3 flex flex-col gap-2">
+            <p className="text-xs text-muted leading-snug">Каса арбу. Не секретар.</p>
+            <button
+              type="button"
+              className="h-11 rounded-md border border-border px-3 font-mono text-xs text-fg text-left break-all"
+              data-testid="arb-treasury"
+              onClick={() => void navigator.clipboard.writeText(ARB_TREASURY)}
+            >
+              {ARB_TREASURY}
+            </button>
+            <p className="text-xs text-fg">Кредит {credit.toFixed(4)} SOL</p>
+            <div className="flex flex-wrap gap-2">
+              <input
+                className={field}
+                data-testid="arb-topup"
+                inputMode="decimal"
+                value={arbTopup}
+                onChange={(e) => setArbTopup(e.target.value)}
+                aria-label="Сума на касу арбу"
+              />
+              <Button
+                type="button"
+                data-testid="arb-fund"
+                disabled={chainBusy}
+                onClick={() => void fundArbDesk(nft.asset, Number(arbTopup.replace(",", ".")))}
+              >
+                На касу арбу
+              </Button>
+            </div>
+          </div>
         </fieldset>
       ) : null}
 

@@ -27,6 +27,9 @@ import { readTitanKey } from "./titan-key";
 import { coachAgent } from "./coach";
 import { encodeBase58 } from "./base58";
 import { confirmMainnetTx, peekMainnetSig, prepareMainnetSend, prepareMainnetSweep, readMainnetBalance, readMainnetUsdc, sendMainnetTx } from "./mainnet";
+import { addArbCredit, readArbCredit, takeArbCredit } from "./arb-credit";
+import { fireArb, readArbHouse, type ArbHouse } from "./arb-house";
+import { ARB_TREASURY } from "@/lib/game/pay";
 import { GROK_MODEL } from "./grok-model";
 import { decideBet } from "./decide";
 import { stepWeex } from "./weex";
@@ -149,10 +152,14 @@ type AgentsState = {
   withdraw: (to: string, amount: number) => Promise<void>;
   sweepMainnetSol: () => Promise<void>;
   withdrawMainnet: (to: string, amount: number) => Promise<void>;
+  fundArbDesk: (asset: string, sol: number) => Promise<void>;
+  arbCredit: Record<string, number>;
+  arbHouse: ArbHouse | null;
   withdrawPusd: (to: string, amount: number) => Promise<void>;
   buySlice: (mint: string, sol: number) => Promise<void>;
   buyLiveSku: (id: string) => Promise<boolean>;
   pressWork: () => Promise<void>;
+  armArb: () => void;
   stopWork: () => void;
   tick: (now: number) => void;
   pollQuote: () => Promise<void>;
@@ -431,6 +438,7 @@ function revertLock(fillId: string, asset: string) {
 
 let chainQueue: Promise<void> = Promise.resolve();
 let brainFlight = false;
+let arbFlight = false;
 const brainAsked = new Set<string>();
 let sidePrefer: "events" | "weather" = "events";
 const BET_CAP = 6;
@@ -1868,6 +1876,8 @@ export const useAgents = create<AgentsState>((set, get) => ({
   roomMainnetSolKnown: false,
   roomMainnetUsdc: null,
   roomMainnetUsdcKnown: false,
+  arbCredit: {},
+  arbHouse: null,
   liveArmed: false,
   liveAck: false,
   autoRun: false,
@@ -2672,6 +2682,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
       solKnown: false,
       paperSol: 0,
       nfts,
+      arbCredit: Object.fromEntries(nfts.filter((n) => n.classId === 2).map((n) => [n.asset, readArbCredit(n.asset)])),
       listings: saved.listings,
       log: saved.log,
       fills: saved.fills,
@@ -2698,6 +2709,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
       track,
       brain: STACK,
     });
+    get().armArb();
     void (async () => {
       try {
         const found = await (await loadChain()).fetchOwnedAgents(wallet.pubkey);
@@ -2728,6 +2740,16 @@ export const useAgents = create<AgentsState>((set, get) => ({
           );
         }
         set({ nfts: [...byAsset.values()] });
+        const live = get();
+        const real = [...byAsset.values()].find((n) => n.classId === 2 && n.asset !== "local-dex-arb" && n.owner === wallet.pubkey);
+        if (real && live.agents.dex.sourceAsset === "local-dex-arb") {
+          set({
+            agents: {
+              ...live.agents,
+              dex: { ...live.agents.dex, sourceAsset: real.asset, config: real.strategy.dex },
+            },
+          });
+        }
       } catch {
         /* RPC quiet — keep what was already saved for this room */
       }
@@ -3083,6 +3105,71 @@ export const useAgents = create<AgentsState>((set, get) => ({
     }
   },
 
+  async fundArbDesk(asset, sol) {
+    if (get().chainBusy) {
+      set({ notice: "Ще йде транзакція. Зачекайте." });
+      return;
+    }
+    const room = get().wallet?.pubkey;
+    const nft = get().nfts.find((n) => n.asset === asset && n.classId === 2 && n.owner === room);
+    if (!nft || !room) {
+      set({ notice: "Немає NFT арбітражу на цьому ключі." });
+      return;
+    }
+    const amount = Math.round(Number(sol) * 1e9) / 1e9;
+    if (!Number.isFinite(amount) || amount < 0.005 || amount > MAX_TRADE_SOL) {
+      set({ notice: `На касу арбу від 0.005 до ${MAX_TRADE_SOL} SOL.` });
+      return;
+    }
+    const kp = await loadKeypair();
+    if (!kp || kp.publicKey.toBase58() !== room) {
+      set({ notice: "Ключ агента не підписав. Нічого не відправлено." });
+      return;
+    }
+    set({ chainBusy: true, notice: "Шлю SOL на касу арбу…" });
+    try {
+      const built = await prepareMainnetSend({
+        data: { from: room, to: ARB_TREASURY, sol: amount, memo: asset },
+      });
+      if (!built.ok) {
+        set({ chainBusy: false, notice: built.error });
+        return;
+      }
+      const raw = Uint8Array.from(atob(built.tx), (c) => c.charCodeAt(0));
+      const tx = Transaction.from(raw);
+      tx.sign(kp);
+      let bin = "";
+      tx.serialize().forEach((b) => {
+        bin += String.fromCharCode(b);
+      });
+      const sent = await sendMainnetTx({ data: { tx: btoa(bin) } });
+      if (!sent.ok) {
+        set({ chainBusy: false, notice: sent.error });
+        return;
+      }
+      const confirmed = await confirmMainnetTx({ data: { signature: sent.signature } });
+      const main = await readMainnetBalance({ data: { owner: room } });
+      const credit = confirmed.ok ? addArbCredit(asset, amount) : readArbCredit(asset);
+      set((s) => ({
+        chainBusy: false,
+        arbCredit: { ...s.arbCredit, [asset]: credit },
+        ...(typeof main === "number" ? { roomMainnetSol: main } : {}),
+        notice: confirmed.ok
+          ? `На касу арбу ${amount} SOL. Кредит ${credit.toFixed(4)}.`
+          : `Підпис пішов, кредит ще не зарахував · ${sent.signature}`,
+        log: pushLog(s.log, {
+          id: sent.signature,
+          at: Date.now(),
+          kind: "system",
+          text: `Каса арбу ${amount} SOL → ${ARB_TREASURY} · ${asset} · ${sent.signature}`,
+        }),
+      }));
+      get().persist();
+    } catch (e) {
+      set({ chainBusy: false, notice: errText(e) });
+    }
+  },
+
   async withdrawPusd(to, amount) {
     if (get().chainBusy) {
       set({ notice: "Ще йде транзакція. Зачекайте." });
@@ -3310,6 +3397,53 @@ export const useAgents = create<AgentsState>((set, get) => ({
     }
   },
 
+  armArb() {
+    const wallet = get().wallet;
+    if (!wallet || get().agents.dex.status === "working") return;
+    const track = get().track;
+    let owned = get().nfts.filter((n) => n.owner === wallet.pubkey && n.classId === 2 && n.track === track);
+    if (!owned.length) {
+      const now = Date.now();
+      const local: AgentNft = {
+        asset: "local-dex-arb",
+        collection: "SolarchikAgents",
+        classId: 2,
+        name: "Titan × Backpack",
+        owner: wallet.pubkey,
+        mintedAt: now,
+        updatedAt: now,
+        track,
+        trainedDays: 0,
+        graduated: false,
+        strategy: defaultStrategy(),
+        metrics: { xp: 0, jobs: 0, wins: 0, losses: 0, pnlSol: 0, lastJobAt: null, workedSec: 0, aprPct: null },
+      };
+      set((s) => ({ nfts: s.nfts.some((n) => n.asset === local.asset) ? s.nfts : [...s.nfts, local] }));
+      owned = [get().nfts.find((n) => n.asset === local.asset) ?? local];
+    }
+    const asset = owned[0];
+    if (!asset) return;
+    const agents = { ...get().agents };
+    agents.dex = {
+      kind: "dex",
+      status: "working",
+      sourceAsset: asset.asset,
+      sourceClass: 2,
+      config: asset.strategy.dex,
+      lastLine: "Читаю стратегію з токена…",
+      brain: "Titan × Backpack",
+      clockMin: 120,
+      anchorPx: null,
+      anchorLabel: null,
+      epochStartedAt: Date.now(),
+    };
+    set({
+      working: true,
+      agents,
+      notice: "Арбітраж працює сам. Стріляє лише коли є край і каса.",
+    });
+  },
+
   async pressWork() {
     const wallet = await get().ensureWallet();
     const track = get().track;
@@ -3498,9 +3632,50 @@ export const useAgents = create<AgentsState>((set, get) => ({
         quote,
         free,
         liveDex: false,
+        creditSol: get().arbCredit[nft.asset] ?? readArbCredit(nft.asset),
+        house: get().arbHouse,
+        liveMaxSol: LIVE_MAX_SOL,
         decider:
           kind !== "prediction" ? "rule" : brainFlight ? "wait" : get().betCalls >= BET_CAP ? "capped" : "grok",
       });
+      if (kind === "dex" && step.arbFire && !arbFlight) {
+        arbFlight = true;
+        const dir = step.arbFire.dir;
+        const symbol = step.arbFire.symbol;
+        const asset = nft.asset;
+        void fireArb({ data: { dir, symbol } })
+          .then((res) => {
+            if (res.ok) {
+              const left = takeArbCredit(asset, res.size);
+              useAgents.setState((s) => ({
+                ...(left == null ? {} : { arbCredit: { ...s.arbCredit, [asset]: left } }),
+                notice: `${dir} ${res.qty} ${res.base} · Backpack ${res.bp} · Titan ${res.titan}`,
+                log: pushLog(s.log, {
+                  id: res.titan,
+                  at: Date.now(),
+                  kind: "dex",
+                  text: `${dir} ${res.qty} ${res.base} · Backpack ${res.bp} · Titan ${res.titan}`,
+                }),
+              }));
+              return;
+            }
+            useAgents.setState((s) => ({
+              notice: res.reason,
+              log: pushLog(s.log, {
+                id: `arb-${Date.now()}`,
+                at: Date.now(),
+                kind: "dex",
+                text: res.broken ? "Зламано, чекає зведення." : res.reason,
+              }),
+            }));
+          })
+          .catch(() => {
+            useAgents.setState({ notice: "Ончейн не відповів." });
+          })
+          .finally(() => {
+            arbFlight = false;
+          });
+      }
       let evolved = step.nft;
       if (step.counted || step.log) {
         nextNfts = nextNfts.map((n) => (n.asset === nft.asset ? evolved : n));
@@ -3698,12 +3873,24 @@ export const useAgents = create<AgentsState>((set, get) => ({
     rollBetWindow();
     try {
       const keywords = new Set<string>();
+      let sizeSol = 0.1;
+      let side: "buy" | "sell" | "both" = "both";
       for (const n of get().nfts) {
         const p = n.strategy?.prediction;
         if (p?.venue === "polymarket" && p.market) keywords.add(p.market);
+        const dex = n.strategy?.dex;
+        if (dex && n.classId === 2 && typeof dex.dcaAmountSol === "number") sizeSol = dex.dcaAmountSol;
+        if (dex && n.classId === 2 && (dex.side === "buy" || dex.side === "sell" || dex.side === "both")) side = dex.side;
       }
-      const quote = await liveQuotes({ data: { keywords: [...keywords].slice(0, 4), titanKey: readTitanKey() } });
-      if (quote && typeof quote === "object" && "solUsd" in quote && "btcUsd" in quote) set({ quote });
+      const [quote, house] = await Promise.all([
+        liveQuotes({ data: { keywords: [...keywords].slice(0, 4), titanKey: readTitanKey(), sizeSol, side } }),
+        readArbHouse().catch(() => null),
+      ]);
+      if (quote && typeof quote === "object" && "solUsd" in quote && "btcUsd" in quote) {
+        set({ quote, ...(house ? { arbHouse: house } : {}) });
+      } else if (house) {
+        set({ arbHouse: house });
+      }
     } catch {
       /* keep the last quote */
     }

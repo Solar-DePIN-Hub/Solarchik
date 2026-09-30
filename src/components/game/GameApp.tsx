@@ -196,6 +196,36 @@ export function GameApp() {
 
   const WorkDeskView = workDesk;
 
+  const doSign = () => {
+    const snap = hold.current;
+    if (!snap || signBusy || snap.signedDay === todayKey()) return;
+    if (!isNativeApp()) {
+      setSignBusy(true);
+      setSignError("");
+      void signClockInMwa(snap.lastDistance || snap.bestDistance || 0, snap.lastScore || snap.bestScore || 0, snap.streak || 0).then((proof) => {
+        setSignBusy(false);
+        if (!proof.ok) {
+          setSignError(proof.error === "no-wallet" ? "need-apk" : proof.error === "wallet" ? "wallet" : proof.error);
+          return;
+        }
+        setSignError("");
+        setSave((s) => (s ? stampClock(s, proof) : s));
+      });
+      return;
+    }
+    setSignBusy(true);
+    setSignError("");
+    void signClockIn(snap.lastDistance || snap.bestDistance || 0, snap.lastScore || snap.bestScore || 0, snap.streak || 0).then((proof) => {
+      setSignBusy(false);
+      if (!proof.ok) {
+        setSignError(proof.error === "timeout" || proof.error === "wallet-missing" ? "wallet" : proof.error);
+        return;
+      }
+      setSignError("");
+      setSave((s) => (s ? stampClock(s, proof) : s));
+    });
+  };
+
   return (
     <GameCatch onReset={resetToYard}>
       {screen === "run" ? (
@@ -219,6 +249,11 @@ export function GameApp() {
             onResult={commit}
             onRetry={() => start(daily)}
             onYard={goYard}
+            onClock={doSign}
+            signed={view.signedDay === todayKey()}
+            signBusy={signBusy}
+            signError={signError}
+            save={view}
           />
         </div>
       ) : screen === "shop" ? (
@@ -288,35 +323,7 @@ export function GameApp() {
             save={view}
             t={t}
             onRun={() => start(true)}
-            onSign={() => {
-              const snap = hold.current;
-              if (!snap || signBusy) return;
-              if (!isNativeApp()) {
-                setSignBusy(true);
-                setSignError("");
-                void signClockInMwa(snap.lastDistance || snap.bestDistance || 0, snap.lastScore || snap.bestScore || 0, snap.streak || 0).then((proof) => {
-                  setSignBusy(false);
-                  if (!proof.ok) {
-                    setSignError(proof.error === "no-wallet" ? "need-apk" : proof.error === "wallet" ? "wallet" : proof.error);
-                    return;
-                  }
-                  setSignError("");
-                  setSave((s) => (s ? stampClock(s, proof) : s));
-                });
-                return;
-              }
-              setSignBusy(true);
-              setSignError("");
-              void signClockIn(snap.lastDistance || snap.bestDistance || 0, snap.lastScore || snap.bestScore || 0, snap.streak || 0).then((proof) => {
-                setSignBusy(false);
-                if (!proof.ok) {
-                  setSignError(proof.error === "timeout" || proof.error === "wallet-missing" ? "wallet" : proof.error);
-                  return;
-                }
-                setSignError("");
-                setSave((s) => (s ? stampClock(s, proof) : s));
-              });
-            }}
+            onSign={doSign}
             signBusy={signBusy}
             signError={signError}
             onFarm={() => setScreen("pet")}

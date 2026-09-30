@@ -1,6 +1,6 @@
 import { CLASS_META } from "@/lib/agents/classes";
 import { useAgents } from "@/lib/agents/store";
-import type { ArbQuote } from "@/lib/agents/engine";
+import { arbNets, type ArbHouseView, type ArbQuote } from "@/lib/agents/engine";
 import type { AgentKind, AgentNft, AgentRuntime, StrategyBundle } from "@/lib/agents/types";
 import { cn } from "@/lib/utils";
 import { IconPulse, IconSwap } from "./icons";
@@ -12,13 +12,15 @@ const ICONS: Record<AgentKind, typeof IconPulse> = {
 
 const TITLES: Record<AgentKind, string> = {
   prediction: "Prediction",
-  dex: "Арб",
+  dex: "Арбітраж",
 };
 
 export function AgentBay({ runtime, nft }: { runtime: AgentRuntime; nft: AgentNft | null }) {
   const Icon = ICONS[runtime.kind];
   const live = runtime.status === "working";
   const arb = useAgents((s) => (runtime.kind === "dex" ? s.quote?.arb ?? null : null));
+  const credit = useAgents((s) => (nft && runtime.kind === "dex" ? s.arbCredit[nft.asset] ?? 0 : 0));
+  const house = useAgents((s) => (runtime.kind === "dex" ? s.arbHouse : null));
   const bookLine = runtime.kind === "dex" ? arbText(arb) : "";
 
   return (
@@ -56,9 +58,9 @@ export function AgentBay({ runtime, nft }: { runtime: AgentRuntime; nft: AgentNf
             />
           </dl>
           <p className="text-xs font-mono text-muted leading-snug">{strategyLine(runtime)}</p>
-          {runtime.kind === "dex" ? <p className="text-xs text-fg leading-snug">{live && runtime.lastLine ? runtime.lastLine : bookLine}</p> : null}
-          {live && runtime.kind !== "dex" && runtime.lastLine ? <p className="text-xs text-fg leading-snug">{runtime.lastLine}</p> : null}
-          <p className="text-xs text-muted">{runtime.kind === "dex" ? "DRY_RUN · угоду не відправляю" : "Ончейн · тестовий SOL"}</p>
+          {runtime.kind === "dex" ? <p className="text-xs text-fg leading-snug">{bookLine}</p> : null}
+          {live && runtime.lastLine ? <p className="text-xs text-fg leading-snug">{runtime.lastLine}</p> : null}
+          <p className="text-xs text-muted">{runtime.kind === "dex" ? houseLine(credit, house) : "Ончейн · тестовий SOL"}</p>
         </>
       ) : runtime.kind === "dex" ? (
         <p className="mt-auto text-xs text-fg leading-snug">{bookLine}</p>
@@ -69,16 +71,31 @@ export function AgentBay({ runtime, nft }: { runtime: AgentRuntime; nft: AgentNf
   );
 }
 
+function houseLine(credit: number, house: ArbHouseView | null): string {
+  if (!house) return `Кредит ${credit.toFixed(4)} SOL. Чекаю касу.`;
+  const n = (v: number | null) => (v == null ? "…" : v.toFixed(4));
+  return `Кредит ${credit.toFixed(4)} · Backpack ${n(house.bpSol)} SOL ${n(house.bpUsdc)} USDC · ончейн ${n(house.chainSol)} SOL ${n(house.chainUsdc)} USDC`;
+}
+
+function px(n: number): string {
+  if (!(n > 0)) return "—";
+  if (n >= 1000) return n.toFixed(2);
+  if (n >= 1) return n.toFixed(4);
+  if (n >= 0.01) return n.toFixed(5);
+  return n.toPrecision(3);
+}
+
 function arbText(book: ArbQuote | null): string {
   if (!book || !(book.bid > 0) || !(book.ask > book.bid)) return "Читаю книгу Backpack…";
+  const name = book.base ? `${book.base}/USDC` : "пара";
   if (!(book.sellPx > 0) || !(book.buyPx > 0)) {
-    return `Backpack ${book.bid.toFixed(2)}/${book.ask.toFixed(2)}. Ончейн не відповів. DRY_RUN.`;
+    return `${name} ${px(book.bid)}/${px(book.ask)}. Ончейн не відповів.`;
   }
   const src = book.chain === "titan" ? "Titan" : book.chain === "jupiter" ? "Jupiter" : "ончейн";
-  const edgeA = book.sellPx / book.ask - 1;
-  const edgeB = book.bid / book.buyPx - 1;
-  const bps = Math.max(edgeA, edgeB) * 10_000;
-  return `Backpack ${book.bid.toFixed(2)}/${book.ask.toFixed(2)} · ${src} ${book.sellPx.toFixed(2)}/${book.buyPx.toFixed(2)} · край ${bps.toFixed(1)} bps`;
+  const { netA, netB } = arbNets(book);
+  const a = (netA * 10_000).toFixed(1);
+  const b = (netB * 10_000).toFixed(1);
+  return `${name} · A ${a} bps · B ${src} ${b} bps · ${book.scanned || 1} пар · ${px(book.bid)}/${px(book.ask)}`;
 }
 
 function strategyLine(runtime: AgentRuntime): string {
@@ -92,7 +109,8 @@ function strategyLine(runtime: AgentRuntime): string {
   }
   if (runtime.kind === "dex") {
     const s = config as StrategyBundle["dex"];
-    return `Titan × Backpack · SOL/USDC · поріг ${s.slippageBps} bps · DRY_RUN`;
+    const variant = s.side === "sell" ? "A · Backpack" : s.side === "buy" ? "B · Titan" : "обидва";
+    return `${variant} · поріг ${s.slippageBps} bps · ${s.dcaAmountSol} SOL · пауза ${s.dcaIntervalSec} с · усі Solana-пари`;
   }
   return "";
 }

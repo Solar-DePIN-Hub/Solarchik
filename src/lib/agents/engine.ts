@@ -2,7 +2,14 @@ import { clampStrategy, clampWindows, dynamicSize, STRATEGY_MINUTES_PER_TICK } f
 import { rigDecide } from "./rig";
 import type { AgentFill, AgentKind, AgentNft, LogEntry, OpenBook, PredictionStrategy, StrategyBundle, Track } from "./types";
 
-/** One Gamma market. yes is the price of yesLabel, 0–1. */
+/** Deck costs: 0.10% Backpack taker plus 5 bps for priority fee and a missed leg. */
+export const ARB_COSTS = 0.0015;
+
+export function arbNets(book: { ask: number; bid: number; sellPx: number; buyPx: number }): { netA: number; netB: number } {
+  const netA = book.sellPx > 0 && book.ask > 0 ? book.sellPx / book.ask - 1 - ARB_COSTS : -1;
+  const netB = book.buyPx > 0 && book.bid > 0 ? book.bid / book.buyPx - 1 - ARB_COSTS : -1;
+  return { netA, netB };
+}
 export type PolyMarketQuote = {
   id: string;
   question: string;
@@ -31,11 +38,11 @@ export type Quote = {
   btcUsd: number;
   polymarkets: PolyMarketQuote[];
   whirlpools: WhirlQuote[];
-  /** SOL/USDC book from Backpack plus an on-chain quote. Null when Backpack did not answer. */
+  /** Best book across Backpack spot markets that settle on Solana. Null when Backpack did not answer. */
   arb?: ArbQuote | null;
 };
 
-/** Best bid/ask and the on-chain price of 1 SOL. Prices are USDC per SOL. */
+/** Best bid/ask and the on-chain price of 1 base token, in USDC. */
 export type ArbQuote = {
   bid: number;
   ask: number;
@@ -43,6 +50,21 @@ export type ArbQuote = {
   buyPx: number;
   chain: "titan" | "jupiter" | "none";
   sizeSol: number;
+  /** Backpack base symbol, e.g. SOL or JUP. */
+  base: string;
+  /** How many pairs had a fresh quote when this one was chosen. */
+  scanned: number;
+  minQty: number;
+};
+
+export type ArbHouseView = {
+  bpSol: number | null;
+  bpUsdc: number | null;
+  chainSol: number | null;
+  chainUsdc: number | null;
+  houseKey: boolean;
+  /** Base symbol → available on Backpack and on the Solana desk. Absent until both reads land. */
+  tokens?: Record<string, { bp: number; chain: number }> | null;
 };
 
 export type ChainJob =
@@ -73,6 +95,8 @@ export type StepResult = {
   brain: string | null;
   fill: AgentFill | null;
   fillPatch: FillPatch | null;
+  /** Set only when credit, both treasuries, and the house key are all in place. */
+  arbFire?: { dir: "A" | "B"; symbol: string } | null;
   /** Set when this tick should ask Grok instead of locking immediately. */
   ask?: BrainAsk | null;
 };
@@ -309,6 +333,11 @@ export function advanceAgent(args: {
   decider?: "grok" | "wait" | "rule" | "capped";
   /** Live Jupiter path. Clock only — size and send live in the store, not from Devnet free. */
   liveDex?: boolean;
+  /** Credit already confirmed on ARB_TREASURY for this NFT. */
+  creditSol?: number;
+  /** House balances. Null until the server has answered. */
+  house?: ArbHouseView | null;
+  liveMaxSol?: number;
 }): StepResult {
   const strategy = clampStrategy(args.nft.strategy);
   const nft = { ...args.nft, strategy };
@@ -327,6 +356,7 @@ export function advanceAgent(args: {
     fill: null,
     fillPatch: null,
     ask: null,
+    arbFire: null,
   });
 
   if (args.kind === "dex") {
@@ -341,6 +371,14 @@ export function advanceAgent(args: {
   return hold("Цей агент не торгує");
 }
 
+function px(n: number): string {
+  if (!(n > 0)) return "0";
+  if (n >= 1000) return n.toFixed(2);
+  if (n >= 1) return n.toFixed(4);
+  if (n >= 0.01) return n.toFixed(5);
+  return n.toPrecision(3);
+}
+
 function arbDex(
   nft: AgentNft,
   args: {
@@ -348,56 +386,90 @@ function arbDex(
     clockMin: number;
     quote: Quote | null;
     free: number;
+    creditSol?: number;
+    house?: ArbHouseView | null;
+    liveMaxSol?: number;
   },
   hold: (line: string, extra?: Partial<StepResult>) => StepResult,
   quiet: boolean,
 ): StepResult {
   const book = args.quote?.arb;
   if (!book || !(book.bid > 0) || !(book.ask > book.bid)) {
-    return hold("Backpack не віддав книгу SOL/USDC", { clockMin: args.clockMin });
-  }
-  if (!nft.strategy.dex.pair.toUpperCase().includes("SOL")) {
-    return hold("Цей бот читає лише SOL/USDC", { clockMin: args.clockMin });
+    return hold("Backpack не віддав книгу", { clockMin: args.clockMin });
   }
   if (!(book.sellPx > 0) || !(book.buyPx > 0)) {
-    return hold(`Backpack ${book.bid.toFixed(2)}/${book.ask.toFixed(2)}. Ончейн не відповів. DRY_RUN, не стріляю.`, {
+    return hold(`${book.base}/USDC ${px(book.bid)}/${px(book.ask)}. Ончейн не відповів.`, {
       anchorPx: book.ask,
-      anchorLabel: "backpack",
+      anchorLabel: book.base,
     });
   }
   const src = book.chain === "titan" ? "Titan" : "Jupiter";
-  const edgeA = book.sellPx > 0 ? book.sellPx / book.ask - 1 : -1;
-  const edgeB = book.buyPx > 0 ? book.bid / book.buyPx - 1 : -1;
+  const { netA, netB } = arbNets(book);
   const side = nft.strategy.dex.side;
   const allowA = side !== "buy";
   const allowB = side !== "sell";
-  const best = Math.max(allowA ? edgeA : -1, allowB ? edgeB : -1);
-  const dir =
-    allowA && edgeA >= edgeB
-      ? `A: купити SOL на Backpack, продати через ${src}`
-      : `B: купити SOL через ${src}, продати на Backpack`;
+  const pickA = allowA && netA >= netB;
+  const best = Math.max(allowA ? netA : -1, allowB ? netB : -1);
+  const dir = pickA
+    ? `A: купити ${book.base} на Backpack, продати через ${src}`
+    : `B: купити ${book.base} через ${src}, продати на Backpack`;
   const bps = best * 10_000;
   const minBps = nft.strategy.dex.slippageBps;
-  const head = `Backpack ${book.bid.toFixed(2)}/${book.ask.toFixed(2)} · ${src} продаж ${book.sellPx.toFixed(2)} купівля ${book.buyPx.toFixed(2)}`;
-  if (!(best > minBps / 10_000) || quiet) {
-    return hold(`${head}. Край ${bps.toFixed(1)} bps, поріг ${minBps}. DRY_RUN, не стріляю.`, {
-      anchorPx: book.ask,
-      anchorLabel: "backpack",
-    });
+  const head = `${book.base}/USDC ${px(book.bid)}/${px(book.ask)} · ${src} ${px(book.sellPx)}/${px(book.buyPx)} · ${book.scanned} пар`;
+  const mark = { anchorPx: book.ask, anchorLabel: book.base };
+  if (quiet) {
+    return hold(`${head}. Чистий край ${bps.toFixed(1)} bps, поріг ${minBps}. Чекаю.`, mark);
   }
-  const text = `${head}. ${dir}. Край ${bps.toFixed(1)} bps. DRY_RUN, ногу не відправляю.`;
+  if (!(best > minBps / 10_000)) {
+    return hold(`${head}. Чистий край ${bps.toFixed(1)} bps, поріг ${minBps}. Край.`, mark);
+  }
+  const liveMax = args.liveMaxSol ?? 0.005;
+  const credit = args.creditSol ?? 0;
+  if (!(credit + 1e-9 >= liveMax)) {
+    return hold(`${head}. Немає кредиту.`, mark);
+  }
+  const solPx = args.quote?.solUsd && args.quote.solUsd > 0 ? args.quote.solUsd : book.base === "SOL" ? book.ask : 0;
+  if (!(solPx > 0)) return hold(`${head}. Чекаю ціну SOL.`, mark);
+  const qty = book.base === "SOL" ? liveMax : (liveMax * solPx) / book.ask;
+  if (book.minQty > 0 && !(qty + 1e-9 >= book.minQty)) {
+    return hold(`${head}. Нога менша за мінімум біржі.`, mark);
+  }
+  const house = args.house;
+  const needUsdc = qty * book.ask;
+  const row = house?.tokens?.[book.base];
+  const bpBase = book.base === "SOL" ? house?.bpSol : row?.bp;
+  const chainBase = book.base === "SOL" ? house?.chainSol : row?.chain;
+  const covered = (base: number | null | undefined, usdc: number | null | undefined) =>
+    base != null && usdc != null && base + 1e-12 >= qty && usdc + 1e-9 >= needUsdc;
+  if (!house || house.bpUsdc == null || (book.base !== "SOL" && !house.tokens)) {
+    return hold(`${head}. Чекаю касу.`, mark);
+  }
+  if (!covered(bpBase, house.bpUsdc)) {
+    return hold(`${head}. Каса Backpack порожня.`, mark);
+  }
+  if (house.chainUsdc == null || (book.base === "SOL" ? house.chainSol == null : chainBase == null)) {
+    return hold(`${head}. Чекаю касу.`, mark);
+  }
+  if (!covered(chainBase, house.chainUsdc)) {
+    return hold(`${head}. Ончейн-каса порожня.`, mark);
+  }
+  if (!house.houseKey) {
+    return hold(`${head}. Немає ключа каси ончейн.`, mark);
+  }
+  const text = `${head}. ${dir}. Чистий край ${bps.toFixed(1)} bps. Нога ${qty.toPrecision(4)} ${book.base}.`;
   return {
     nft,
     log: { id: uid(), at: args.now, kind: "dex", text },
     line: text,
     clockMin: 0,
     anchorPx: book.ask,
-    anchorLabel: "backpack",
+    anchorLabel: book.base,
     chain: null,
-    counted: false,
+    counted: true,
     brain: "Titan × Backpack",
     fill: null,
     fillPatch: null,
+    arbFire: { dir: pickA ? "A" : "B", symbol: book.base },
   };
 }
 

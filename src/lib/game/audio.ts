@@ -428,6 +428,15 @@ function beep(freq: number, dur: number, type: OscillatorType, vol: number, slid
   osc.stop(t + dur + 0.02);
 }
 
+export function buzz(ms: number) {
+  if (typeof navigator === "undefined" || typeof navigator.vibrate !== "function") return;
+  try {
+    navigator.vibrate(ms);
+  } catch {
+    /* no vibrator */
+  }
+}
+
 let lastSfx = 0;
 const BUSY = new Set(["near", "collect", "land", "grind"]);
 
@@ -446,6 +455,7 @@ export function play(kind: string) {
       beep(784, 0.22, "sine", 0.12, 40, 0.28);
       break;
     case "jump":
+      buzz(18);
       beep(520, 0.09, "square", 0.16, 180);
       break;
     case "double":
@@ -470,6 +480,7 @@ export function play(kind: string) {
       beep(1046, 0.18, "triangle", 0.1, 0, 0.2);
       break;
     case "hurt":
+      buzz(40);
       beep(180, 0.2, "sawtooth", 0.2, -90);
       beep(90, 0.16, "square", 0.12, -40);
       break;
@@ -481,7 +492,8 @@ export function play(kind: string) {
       beep(440, 0.06, "square", 0.12);
       break;
     case "near":
-      beep(1240, 0.05, "sine", 0.08);
+      beep(1100, 0.06, "sine", 0.16, -520);
+      beep(640, 0.08, "triangle", 0.1, -260);
       break;
     case "stomp":
       beep(180, 0.1, "square", 0.22, -50);
@@ -519,6 +531,12 @@ export function play(kind: string) {
       beep(392, 0.08, "triangle", 0.12);
       beep(523, 0.1, "triangle", 0.13, 0, 0.07);
       beep(784, 0.16, "sine", 0.14, 0, 0.14);
+      break;
+    case "clock":
+      buzz(55);
+      beep(523, 0.08, "triangle", 0.15);
+      beep(784, 0.12, "sine", 0.16, 60, 0.08);
+      beep(1046, 0.2, "sine", 0.14, 0, 0.16);
       break;
     default:
       break;

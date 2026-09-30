@@ -17,3 +17,8 @@ public/Solarchik-CLOCK-IN-0.19.50.apk
 artifacts/Solarchik-CLOCK-IN-0.19.48.apk
 artifacts/Solarchik-CLOCK-IN-0.19.49.apk
 artifacts/Solarchik-CLOCK-IN-0.19.50.apk
+server/*.secret
+server/*.key
+.env
+.env.*
+*.log

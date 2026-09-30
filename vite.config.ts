@@ -12,7 +12,6 @@ import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
 import { isMigrationFile } from "./scripts/migration-plan.mjs";
-import { QUICKNODE_ORIGIN, QUICKNODE_PATH } from "./server/quicknode.mjs";
 
 /** The files `src/lib/db.ts` globs — same directory, same non-recursive scope. */
 function hasGlobbedMigrations(root: string): boolean {
@@ -63,18 +62,6 @@ function pgliteBootstrapPlugin(): Plugin {
  * and returns the 302 / completion HTML. Deployed apps do not use the popup
  * (full-page OAuth redirect), so `apply: "serve"` is enough.
  */
-function bufferShimPlugin(): Plugin {
-  const shim = fileURLToPath(new URL("./src/polyfill.ts", import.meta.url));
-  return {
-    name: "solarchik-buffer-shim",
-    enforce: "pre",
-    resolveId(id, _importer, options) {
-      if (id !== "buffer" || options?.ssr) return null;
-      return shim;
-    },
-  };
-}
-
 function authPopupPlugin(): Plugin {
   return {
     name: "app-builder:auth-popup",
@@ -164,16 +151,6 @@ export default defineConfig(({ command, isPreview }) => ({
     host: "0.0.0.0",
     port: 8080,
     strictPort: true,
-    allowedHosts: true,
-    proxy: {
-      "/solana-rpc": {
-        target: QUICKNODE_ORIGIN,
-        changeOrigin: true,
-        secure: true,
-        ws: true,
-        rewrite: () => QUICKNODE_PATH,
-      },
-    },
   },
   preview: {
     host: "127.0.0.1",
@@ -188,7 +165,6 @@ export default defineConfig(({ command, isPreview }) => ({
   },
   plugins: [
     pgliteBootstrapPlugin(),
-    bufferShimPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
     authPopupPlugin(),
     // Dev-only /__app-env, read by scripts/check-auth-invariant.mjs.

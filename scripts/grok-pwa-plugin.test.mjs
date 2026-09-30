@@ -20,8 +20,6 @@ import {
 import { renderInstallPage } from "./grok-pwa-plugin.mjs";
 
 const TEMPLATE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-// Injector tests that omit `cwd` must not read this app's site.json or public/og.jpg.
-process.chdir(mkdtempSync(join(tmpdir(), "grok-pwa-cwd-")));
 
 test("injects before </head>", () => {
   const out = injectGrokPwaHead("<html><head><title>x</title></head><body></body></html>");

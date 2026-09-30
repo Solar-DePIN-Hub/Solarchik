@@ -1,8 +1,7 @@
-import { type PlatSkin, type RunState, speedAt } from "./sim";
+import { type DayMod, type PlatSkin, type RunState, speedAt } from "./sim";
 import { SKIN_PAL } from "./skins";
 import { robotFilter, robotOf, type RobotId } from "./robots";
 import { SPR, blit, heroFrame, ready } from "./sprites";
-import { readGhost, todayKey } from "./save";
 
 function roundRect(
   ctx: CanvasRenderingContext2D,
@@ -52,49 +51,87 @@ function hillPath(
 }
 
 function paintSun(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, t: number) {
-  const glow = ctx.createRadialGradient(x, y, r * 0.25, x, y, r * 2.4);
-  glow.addColorStop(0, "rgba(255, 220, 150, 0.85)");
-  glow.addColorStop(0.35, "rgba(255, 186, 110, 0.28)");
-  glow.addColorStop(1, "rgba(255, 170, 90, 0)");
+  ctx.save();
+  const glow = ctx.createRadialGradient(x, y, r * 0.3, x, y, r * 2.1);
+  glow.addColorStop(0, "rgba(255, 214, 90, 0.4)");
+  glow.addColorStop(1, "rgba(255, 190, 70, 0)");
   ctx.fillStyle = glow;
   ctx.beginPath();
-  ctx.arc(x, y, r * 2.4, 0, Math.PI * 2);
+  ctx.arc(x, y, r * 2.1, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.save();
   ctx.translate(x, y);
-  ctx.globalAlpha = 0.1;
-  ctx.strokeStyle = "#ffe6b0";
-  ctx.lineWidth = 7;
+  ctx.strokeStyle = "rgba(255, 186, 60, 0.9)";
+  ctx.lineWidth = Math.max(3, r * 0.08);
   ctx.lineCap = "round";
-  for (let i = 0; i < 6; i++) {
-    const a = -0.9 + i * 0.28 + Math.sin(t * 0.12 + i) * 0.02;
+  const spin = t * 0.12;
+  for (let i = 0; i < 10; i++) {
+    const a = spin + (i / 10) * Math.PI * 2;
     ctx.beginPath();
-    ctx.moveTo(Math.cos(a) * r * 1.1, Math.sin(a) * r * 1.1);
-    ctx.lineTo(Math.cos(a) * r * 2.6, Math.sin(a) * r * 2.6);
+    ctx.moveTo(Math.cos(a) * (r + 6), Math.sin(a) * (r + 6));
+    ctx.lineTo(Math.cos(a) * (r + 16), Math.sin(a) * (r + 16));
     ctx.stroke();
   }
-  ctx.restore();
-
-  const core = ctx.createRadialGradient(x - r * 0.18, y - r * 0.18, r * 0.1, x, y, r);
-  core.addColorStop(0, "#fff6d8");
-  core.addColorStop(0.5, "#ffd27a");
-  core.addColorStop(1, "#f0a24a");
+  const core = ctx.createRadialGradient(-r * 0.28, -r * 0.32, r * 0.08, 0, 0, r);
+  core.addColorStop(0, "#fff6c8");
+  core.addColorStop(0.42, "#ffd24a");
+  core.addColorStop(1, "#f0a31a");
   ctx.fillStyle = core;
   ctx.beginPath();
-  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
   ctx.fill();
+  ctx.strokeStyle = "#e09018";
+  ctx.lineWidth = Math.max(2.5, r * 0.05);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,0.7)";
+  ctx.beginPath();
+  ctx.ellipse(-r * 0.28, -r * 0.3, r * 0.2, r * 0.12, -0.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function puffCloud(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, a: number) {
   ctx.save();
   ctx.globalAlpha = a;
-  ctx.fillStyle = "#fff4e6";
+  ctx.fillStyle = "#fffdf8";
   ctx.beginPath();
   ctx.ellipse(x, y, 38 * s, 16 * s, 0, 0, Math.PI * 2);
   ctx.ellipse(x - 22 * s, y + 4 * s, 22 * s, 12 * s, 0, 0, Math.PI * 2);
   ctx.ellipse(x + 24 * s, y + 3 * s, 20 * s, 11 * s, 0, 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
+}
+
+function drawGroundPanel(ctx: CanvasRenderingContext2D, x: number, y: number, s: number) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  ctx.fillStyle = "rgba(16, 24, 12, 0.28)";
+  ctx.beginPath();
+  ctx.ellipse(0, 4, 26, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#6a5038";
+  ctx.fillRect(-2, -10, 4, 16);
+  ctx.rotate(-0.28);
+  ctx.fillStyle = "#ffe34a";
+  roundRect(ctx, -30, -18, 60, 24, 3);
+  ctx.fill();
+  ctx.fillStyle = "#1248a8";
+  roundRect(ctx, -26, -15, 52, 18, 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(8, 20, 48, 0.45)";
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    ctx.beginPath();
+    ctx.moveTo(-26 + i * 13, -15);
+    ctx.lineTo(-26 + i * 13, 3);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  ctx.beginPath();
+  ctx.moveTo(-26, -6);
+  ctx.lineTo(26, -6);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -231,78 +268,58 @@ function drawPlat(
   skin: PlatSkin = "flag",
   kind: "roof" | "wire" = "roof",
   live = false,
+  mod: DayMod = "calm",
 ) {
   if (kind === "wire") {
     drawWire(ctx, x, y, w, t, live);
     return;
   }
   const pal = SKIN[skin] ?? SKIN.flag;
-  const wallH = Math.min(46, Math.max(26, thick * 2.1));
+  const lip = skin === "flag" ? "#f0c14d" : pal.lip;
+  const cell = skin === "flag" ? "#6aafd8" : pal.cell;
+  const deep = skin === "flag" ? "#3e86c4" : pal.deep;
+  const H = Math.max(48, thick * 2.7);
+  const r = H * 0.48;
   ctx.save();
-  ctx.fillStyle = "rgba(10, 22, 48, 0.28)";
-  ctx.beginPath();
-  ctx.ellipse(x + w / 2, y + thick + wallH + 4, Math.max(18, w * 0.42), 6, 0, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(40, 70, 40, 0.16)";
+  roundRect(ctx, x + 4, y + 8, w, H, r);
   ctx.fill();
-
-  ctx.fillStyle = "#f3e6d0";
-  ctx.fillRect(x + 6, y + 6, w - 12, wallH);
-  ctx.fillStyle = "#e2d0b4";
-  ctx.fillRect(x + 6, y + wallH, w - 12, 7);
-  if (w > 88) {
-    const wy = y + 14;
-    ctx.fillStyle = "#1d4e8f";
-    ctx.fillRect(x + w * 0.62, wy, 18, 14);
-    ctx.fillStyle = "rgba(255, 226, 150, 0.9)";
-    ctx.fillRect(x + w * 0.62 + 2, wy + 2, 6, 5);
-  }
-  if (w > 150) {
-    ctx.fillStyle = "#6a3824";
-    ctx.fillRect(x + 18, y + wallH - 16, 14, 22);
-  }
-
-  ctx.fillStyle = pal.deep;
-  roundRect(ctx, x, y + 1, w, thick + 7, 6);
+  ctx.fillStyle = "#3a2c22";
+  roundRect(ctx, x - 4, y - 5, w + 8, H + 10, r + 3);
   ctx.fill();
-  ctx.fillStyle = pal.band;
-  roundRect(ctx, x + 2, y + 2, w - 4, thick * 0.78, 5);
+  const body = ctx.createLinearGradient(x, y, x, y + H);
+  body.addColorStop(0, cell);
+  body.addColorStop(1, deep);
+  ctx.fillStyle = body;
+  roundRect(ctx, x, y - 1, w, H, r);
   ctx.fill();
-  ctx.fillStyle = pal.cell;
-  roundRect(ctx, x + 8, y + 6, w - 16, Math.max(8, thick * 0.42), 3);
+  ctx.fillStyle = lip;
+  roundRect(ctx, x, y - 1, w, H * 0.4, r);
   ctx.fill();
-
-  ctx.strokeStyle = pal.grid;
-  ctx.lineWidth = 1;
-  const cols = Math.max(3, Math.floor(w / 18));
-  for (let i = 1; i < cols; i++) {
-    const gx = x + 8 + (i * (w - 16)) / cols;
+  ctx.fillStyle = cell;
+  ctx.fillRect(x + 5, y + H * 0.26, w - 10, H * 0.12);
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  roundRect(ctx, x + 16, y + 4, Math.min(72, w * 0.24), Math.max(5, H * 0.1), 6);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.28)";
+  ctx.lineWidth = 2;
+  ctx.lineCap = "round";
+  const seams = Math.max(1, Math.floor(w / 120));
+  for (let i = 1; i < seams; i++) {
+    const sx = x + (w * i) / seams;
     ctx.beginPath();
-    ctx.moveTo(gx, y + 7);
-    ctx.lineTo(gx, y + 6 + Math.max(8, thick * 0.42));
+    ctx.moveTo(sx, y + H * 0.42);
+    ctx.lineTo(sx, y + H * 0.72);
     ctx.stroke();
   }
-  ctx.beginPath();
-  ctx.moveTo(x + 8, y + 6 + thick * 0.22);
-  ctx.lineTo(x + w - 8, y + 6 + thick * 0.22);
-  ctx.stroke();
-
-  const glint = 0.18 + 0.16 * (0.5 + 0.5 * Math.sin(t * 2.1 + x * 0.015)) + glow * 0.2;
-  ctx.fillStyle = pal.hi;
-  ctx.globalAlpha = Math.min(0.65, glint);
-  ctx.fillRect(x + 12, y + 8, Math.min(36, w * 0.22), 3);
-  ctx.globalAlpha = 1;
-
-  ctx.fillStyle = pal.lip;
-  roundRect(ctx, x - 2, y - 5, w + 4, 10, 4);
-  ctx.fill();
-  ctx.fillStyle = pal.hi;
-  ctx.fillRect(x + 8, y - 4, w - 16, 3);
   if (glow > 0) {
-    ctx.fillStyle = pal.lip;
-    ctx.globalAlpha = 0.14 * glow;
-    roundRect(ctx, x - 6, y - 10, w + 12, thick + wallH + 8, 10);
+    ctx.globalAlpha = 0.12 * glow;
+    ctx.fillStyle = pal.hi;
+    roundRect(ctx, x - 2, y - 8, w + 4, 14, 6);
     ctx.fill();
     ctx.globalAlpha = 1;
   }
+  void mod;
   ctx.restore();
 }
 
@@ -383,13 +400,10 @@ function drawPickup(
     ctx.restore();
     return;
   }
-  const r = gold ? 18 : 15;
-  const halo = ctx.createRadialGradient(0, 0, 2, 0, 0, r * 1.8);
-  halo.addColorStop(0, "rgba(255, 210, 90, 0.85)");
-  halo.addColorStop(1, "rgba(255, 180, 60, 0)");
-  ctx.fillStyle = halo;
+  const r = gold ? 14 : 12;
+  ctx.fillStyle = "#1c140e";
   ctx.beginPath();
-  ctx.arc(0, 0, r * 1.8, 0, Math.PI * 2);
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
   ctx.fill();
   ctx.rotate(Math.sin(t * 1.6 + x) * 0.15);
   const core = ctx.createRadialGradient(-r * 0.2, -r * 0.2, 1, 0, 0, r);
@@ -502,9 +516,9 @@ function paintAurora(ctx: CanvasRenderingContext2D, w: number, h: number, t: num
 function paintSky(ctx: CanvasRenderingContext2D, w: number, h: number, mood = 0) {
   const dusk = Math.min(1, mood);
   const night = Math.max(0, mood - 1);
-  const top = mix3([111, 164, 196], mix3([55, 62, 130], [8, 14, 38], night), dusk);
-  const mid = mix3([240, 199, 160], mix3([220, 110, 90], [28, 42, 92], night), dusk);
-  const bot = mix3([217, 180, 138], mix3([120, 70, 80], [18, 28, 52], night), dusk);
+  const top = mix3([126, 206, 255], mix3([55, 62, 130], [8, 14, 38], night), dusk);
+  const mid = mix3([186, 230, 255], mix3([220, 110, 90], [28, 42, 92], night), dusk);
+  const bot = mix3([214, 242, 196], mix3([120, 70, 80], [18, 28, 52], night), dusk);
   const g = ctx.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, rgb(top[0], top[1], top[2]));
   g.addColorStop(0.42, rgb(mid[0], mid[1], mid[2]));
@@ -744,9 +758,15 @@ export function drawWorld(
   paintAurora(ctx, w, h, clock, s.bonus ? 0 : Math.max(0, night - 0.15));
 
   ctx.save();
-  ctx.translate(ox, oy);
+  const fallLook = s.phase === "dead" && s.death === "FALL" && !reduced ? 78 : 0;
+  ctx.translate(ox, oy - fallLook);
+  if (s.hearts === 1 && s.phase === "running" && !reduced) {
+    ctx.translate(w * 0.5, h * 0.55);
+    ctx.scale(1.045, 1.045);
+    ctx.translate(-w * 0.5, -h * 0.55);
+  }
 
-  const heroH = Math.min(h * 0.22, 138);
+  const heroH = Math.min(h * 0.125, 84);
   const hillTop = h * 0.87;
   const playTop = h * 0.52;
   const playBot = hillTop - 14;
@@ -757,10 +777,6 @@ export function drawWorld(
   const spd = speedAt(s);
 
   if (!s.bonus) {
-  const sunY = h * (0.1 + dusk * 0.16 + night * 0.22);
-  ctx.globalAlpha = Math.max(0, 1 - night * 1.1);
-  paintSun(ctx, w * 0.88, sunY, Math.min(h * 0.07, 52), clock);
-  ctx.globalAlpha = 1;
   if (night > 0.35) {
     ctx.fillStyle = `rgba(230, 236, 255, ${Math.min(0.85, night * 0.7)})`;
     ctx.beginPath();
@@ -768,58 +784,65 @@ export function drawWorld(
     ctx.fill();
   }
 
-  puffCloud(ctx, ((-camX * 0.08) % (w + 260)) + 40, h * 0.12, 1.15, 0.55 - night * 0.35);
-  puffCloud(ctx, ((-camX * 0.12 + 420) % (w + 300)) + 20, h * 0.2, 0.75, 0.4 - night * 0.25);
-  puffCloud(ctx, ((-camX * 0.07 + 880) % (w + 240)) + 10, h * 0.1, 1.0, 0.48 - night * 0.3);
+  puffCloud(ctx, ((-camX * 0.08) % (w + 260)) + 40, h * 0.14, 1.85, 0.9 - night * 0.35);
+  puffCloud(ctx, ((-camX * 0.12 + 420) % (w + 300)) + 20, h * 0.28, 1.35, 0.75 - night * 0.25);
+  puffCloud(ctx, ((-camX * 0.07 + 880) % (w + 240)) + 10, h * 0.1, 1.6, 0.85 - night * 0.3);
+  ctx.globalAlpha = Math.max(0, 1 - night * 1.1);
+  paintSun(ctx, w * 0.84, h * (0.13 + dusk * 0.06), Math.min(h * 0.075, 58), clock);
+  ctx.globalAlpha = 1;
 
-  hillPath(ctx, w, h, h * 0.42, h * 0.03, camX * 0.1, 0.005, 0.4);
+  hillPath(ctx, w, h, h * 0.64, h * 0.03, camX * 0.1, 0.005, 0.4);
   ctx.fillStyle = rgb(...mix3([155, 184, 178], [40, 55, 90], Math.max(dusk, night)));
   ctx.fill();
 
   hillPath(ctx, w, h, h * 0.72, h * 0.038, camX * 0.28, 0.008, 1.1);
-  ctx.fillStyle = rgb(...mix3([111, 148, 88], [32, 58, 70], Math.max(dusk * 0.7, night)));
+  ctx.fillStyle = rgb(...mix3([118, 196, 78], [32, 58, 70], Math.max(dusk * 0.7, night)));
   ctx.fill();
 
   hillPath(ctx, w, h, h * 0.86, h * 0.028, camX * 0.48, 0.011, 2.2);
-  ctx.fillStyle = rgb(...mix3([86, 122, 68], [24, 48, 52], Math.max(dusk * 0.6, night)));
+  ctx.fillStyle = rgb(...mix3([72, 168, 64], [24, 48, 52], Math.max(dusk * 0.6, night)));
   ctx.fill();
 
-  const housePar = camX * 0.4;
-  const scenery = [SPR.cottage, SPR.greenhouse, SPR.cottage, SPR.tracker];
-  for (let i = 0; i < scenery.length; i++) {
-    const px = ((i * 360 - housePar) % (w + 260) + w + 260) % (w + 260) - 40;
-    const img = scenery[i]();
-    const hgt = i % 2 === 0 ? 92 : 78;
-    if (!blit(ctx, img, px, hillTop + 8, hgt)) cottage(ctx, px, hillTop + 18, 0.42, i % 2 === 0);
-  }
-
-  const polePar = camX * 0.5;
+  const housePar = camX * 0.32;
+  const polePar = camX * 0.4;
+  ctx.save();
   const poles: { x: number; y: number }[] = [];
-  for (let i = 0; i < 6; i++) {
-    const px = ((i * 220 - polePar + 40) % (w + 200) + w + 200) % (w + 200) - 30;
-    const py = hillTop + 18 + Math.sin(i) * 4;
+  for (let i = 0; i < 4; i++) {
+    const px = ((i * 360 - polePar) % (w + 280) + w + 280) % (w + 280) - 20;
+    const py = h - 8;
     poles.push({ x: px, y: py });
-    pole(ctx, px, py, 34);
+    pole(ctx, px, py, 26);
   }
-  poles.sort((a, b) => a.x - b.x);
-  ctx.strokeStyle = "rgba(42, 30, 22, 0.35)";
-  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = "rgba(42, 30, 22, 0.28)";
+  ctx.lineWidth = 1;
   ctx.beginPath();
   for (let i = 0; i < poles.length - 1; i++) {
     const a = poles[i];
     const b = poles[i + 1];
-    if (b.x - a.x > 280) continue;
-    ctx.moveTo(a.x, a.y - 34);
-    ctx.quadraticCurveTo((a.x + b.x) / 2, Math.min(a.y, b.y) - 44, b.x, b.y - 34);
+    if (b.x - a.x > 320) continue;
+    ctx.moveTo(a.x, a.y - 26);
+    ctx.quadraticCurveTo((a.x + b.x) / 2, a.y - 38, b.x, b.y - 26);
   }
   ctx.stroke();
-
-  const nearPar = camX * 0.62;
-  const panel = SPR.panel();
-  for (let i = 0; i < 5; i++) {
-    const px = ((i * 250 - nearPar + 90) % (w + 160) + w + 160) % (w + 160) - 30;
-    if (!blit(ctx, panel, px, hillTop + 6, 62)) solarArray(ctx, px, hillTop + 18, 0.7, clock);
+  const houses = [SPR.cottage, SPR.greenhouse];
+  for (let i = 0; i < houses.length; i++) {
+    const span = w + 520;
+    const px = ((i * 640 - housePar) % span + span) % span - 40;
+    const hgt = 42;
+    const feet = h - 4;
+    ctx.fillStyle = "rgba(18, 28, 14, 0.2)";
+    ctx.beginPath();
+    ctx.ellipse(px, feet - 1, 16, 3.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    const img = houses[i]();
+    if (!blit(ctx, img, px, feet, hgt)) cottage(ctx, px, feet, 0.24, i === 0);
   }
+  for (let i = 0; i < 4; i++) {
+    const span = w + 200;
+    const px = ((i * 280 - housePar * 1.15 + 120) % span + span) % span - 20;
+    drawGroundPanel(ctx, px, h - 2, 0.72);
+  }
+  ctx.restore();
   } else {
     puffCloud(ctx, ((-camX * 0.16) % (w + 260)) + 40, h * 0.18, 1.35, 0.7);
     puffCloud(ctx, ((-camX * 0.22 + 420) % (w + 300)) + 20, h * 0.32, 1.05, 0.55);
@@ -836,7 +859,7 @@ export function drawWorld(
     const x = p.x - camX;
     if (x + p.w < -40 || x > w + 40) continue;
     const live = s.grind && s.grounded && s.x >= p.x - 12 && s.x <= p.x + p.w + 12 && p.kind === "wire";
-    drawPlat(ctx, x, sy(p.y), p.w, thick, clock, s.fever + night * 0.45, s.bonus ? "gold" : s.skin, p.kind, live);
+    drawPlat(ctx, x, sy(p.y), p.w, thick, clock, s.fever + night * 0.45, s.bonus ? "gold" : s.skin, p.kind, live, s.mod);
   }
   }
 
@@ -869,10 +892,24 @@ export function drawWorld(
     if (e.kind === "bush") {
       drawBush(ctx, x, ey, clock + e.t);
     } else if (e.kind === "mite") {
-      if (!blit(ctx, SPR.mite(), x, ey + 2, 64)) {
+      const step = Math.sin(e.t * 16);
+      const dir = e.vx >= 0 ? 1 : -1;
+      const feet = ey - 6 + Math.max(0, -step) * 3;
+      ctx.fillStyle = "rgba(16, 10, 8, 0.28)";
+      ctx.beginPath();
+      ctx.ellipse(x - dir * 2, ey - 1, 12, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      if (
+        !blit(ctx, SPR.mite(), x, feet, 44, {
+          flip: dir > 0,
+          squash: Math.max(0, -step) * 0.7,
+          stretch: Math.max(0, step) * 0.35,
+          rot: dir * 0.14,
+        })
+      ) {
         ctx.fillStyle = "#8a4a28";
         ctx.beginPath();
-        ctx.ellipse(x, ey - 18, 20, 16, 0, 0, Math.PI * 2);
+        ctx.ellipse(x, feet - 12, 16, 10, 0, 0, Math.PI * 2);
         ctx.fill();
       }
     } else if (e.kind === "drone") {
@@ -908,6 +945,14 @@ export function drawWorld(
       ctx.beginPath();
       ctx.arc(p.x - camX, sy(p.y), p.r, 0, Math.PI * 2);
       ctx.stroke();
+    } else if (p.streak) {
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 5;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(p.x - camX + 8, sy(p.y));
+      ctx.lineTo(p.x - camX - 46, sy(p.y));
+      ctx.stroke();
     } else {
       ctx.fillStyle = p.color;
       ctx.beginPath();
@@ -937,7 +982,7 @@ export function drawWorld(
   const blink = s.invuln > 0 && Math.floor(clock * 16) % 2 === 0;
   if (!blink || s.phase === "countdown") {
     const hx = s.x - camX;
-    const hy = sy(s.y) + 2;
+    const hy = sy(s.y) - 6;
     const sliding = s.slide > 0 && s.grounded;
     const rot = s.bonus ? Math.max(-0.5, Math.min(0.55, s.vy / 860)) : 0;
     const charged = s.fever > 0 || s.combo >= 4 || s.grind;
@@ -948,16 +993,13 @@ export function drawWorld(
     ctx.ellipse(hx, hy + 3, heroH * 0.22, 6, 0, 0, Math.PI * 2);
     ctx.fill();
     heroGlow(ctx, hx, hy, heroH, charged);
+    ctx.save();
+    ctx.shadowColor = "#1c140e";
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 3;
+    ctx.shadowOffsetY = 4;
     drawHero(ctx, hx, hy, heroH * (sliding ? 0.78 : 1), s.runPhase, s.grounded, squash, stretch, false, !s.grounded, s.vy, rot, 1, s.robot);
-    const ghost = readGhost();
-    if (ghost && ghost.day !== todayKey() && ghost.samples.length > 1) {
-      const i = ghost.samples.findIndex((p) => p.x > s.x);
-      const idx = i < 0 ? ghost.samples.length - 1 : Math.max(0, i - 1);
-      const p = ghost.samples[idx];
-      if (p) {
-        drawHero(ctx, p.x - camX, sy(p.y), heroH, s.runPhase, p.grounded, 0, 0, false, !p.grounded, 0, 0, 0.28, s.robot);
-      }
-    }
+    ctx.restore();
   }
 
   ctx.fillStyle = "#3a2416";

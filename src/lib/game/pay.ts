@@ -1,5 +1,7 @@
 /** Public receive address only. Never a secret. */
-export const PAY_WALLET = "H7zKmmnMNfnsMtib6mopdT8XsPYAyPBFuaQeWhBYTpQg";
+export const PAY_WALLET = "8J3hxf1XSYV1HKVUJtwtQtVwSvSeaAyW5RmL8EqC67ic";
+/** Arb desk treasury. Not PAY_WALLET. Public receive only. */
+export const ARB_TREASURY = "H7zKmmnMNfnsMtib6mopdT8XsPYAyPBFuaQeWhBYTpQg";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const RPC = "https://api.mainnet-beta.solana.com";
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";

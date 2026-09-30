@@ -157,12 +157,12 @@ missing. Postgres and Better Auth are pre-wired in `src/lib`, **opt-in per app**
   (platform chrome; `?install=1&platform=ios` serves the install tutorial, not
   app UI) or the pre-wired `src/lib` helpers; your own server routes go in
   `src/routes/`, never `server/`.
-- **`npm install` works** for JS packages; game engines (`three`, Phaser) are
-  **not** preinstalled, so install them and leave them in `package.json` for
-  deploy. **`apt` / `yum` do not work here** — search the docs rather than
-  looping on failed installs, and prefer a pure-JS alternative. Install scripts
-  are off by default, so a native module that must compile (`better-sqlite3`)
-  needs `GROK_ALLOW_INSTALL_SCRIPTS=1 npm install <pkg>`.
+- **`npm install <pkg>` works** for JS packages (never `-D`: `devDependencies`
+  are skipped on deploy); game engines (`three`, Phaser) are **not**
+  preinstalled, so install them. **`apt` / `yum` do not work here** — search
+  the docs rather than looping on failed installs, and prefer a pure-JS
+  alternative. Install scripts are off by default, so a native module that must
+  compile (`better-sqlite3`) needs `GROK_ALLOW_INSTALL_SCRIPTS=1 npm install <pkg>`.
 - **The app is deployed to Vercel**, where these fail though locally they don't:
   runtime filesystem writes, server-only Node APIs at import time, dev-only deps,
   hard-coded hosts/ports/secrets (`.grok/references/deploy-target.md`).

@@ -1,9 +1,10 @@
-import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import { PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { MAINNET_HTTP } from "../../../server/quicknode.mjs";
 
 const ROOM_SOLANA = "7xLj8JMp9o3TFgQMNmr6jSLcaaaRTpEbeCUB7uNh15vr";
 const SWEEP_DEST = "C7De9zogHG7ss4nFG3jVxrFcBNsB7iidLyExn5hLTrsf";
 const SWEEP_FEE = 5_000;
+const MEMO_PROGRAM = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 
 const PUBLIC_MAINNET = "https://api.mainnet-beta.solana.com";
 
@@ -191,6 +192,7 @@ export async function prepareMainnetSendOnServer(
   from: string,
   to: string,
   sol: number,
+  memo = "",
 ): Promise<{ ok: true; tx: string; lamports: number } | { ok: false; error: string }> {
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(from) || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(to)) {
     return { ok: false, error: "Адреса Solana не та. Нічого не відправлено." };
@@ -220,6 +222,16 @@ export async function prepareMainnetSendOnServer(
     const blockhash = hashBody?.result?.value?.blockhash;
     if (!blockhash) return { ok: false, error: "Mainnet не дав блокхеш. Нічого не відправлено." };
     const tx = new Transaction({ feePayer: fromKey, recentBlockhash: blockhash });
+    const note = memo.replace(/\s+/g, "").slice(0, 180);
+    if (note) {
+      tx.add(
+        new TransactionInstruction({
+          programId: MEMO_PROGRAM,
+          keys: [{ pubkey: fromKey, isSigner: true, isWritable: false }],
+          data: Buffer.from(note, "utf8"),
+        }),
+      );
+    }
     tx.add(SystemProgram.transfer({ fromPubkey: fromKey, toPubkey: toKey, lamports }));
     const raw = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
     return { ok: true, tx: Buffer.from(raw).toString("base64"), lamports };

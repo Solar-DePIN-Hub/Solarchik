@@ -121,8 +121,8 @@ export function blit(
   if (!ready(img) || !img) return false;
   const squash = opts?.squash ?? 0;
   const stretch = opts?.stretch ?? 0;
-  const sy = 1 - squash * 0.16 + stretch * 0.1;
-  const sx = (1 + squash * 0.16 - stretch * 0.08) * (opts?.flip ? -1 : 1);
+  const sy = 1 - squash * 0.34 + stretch * 0.28;
+  const sx = (1 + squash * 0.22 - stretch * 0.12) * (opts?.flip ? -1 : 1);
   const { w, h } = gfxSize(img);
   const aspect = w / h;
   const dw = hgt * aspect;

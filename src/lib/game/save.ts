@@ -273,7 +273,7 @@ export function loadSave(): SaveData {
       save.missions = emptyMissions();
       save.missionDay = today;
     }
-    if (save.lastClockDay && save.lastClockDay !== today && save.lastClockDay !== yesterdayKey()) {
+    if (!save.signedDay || (save.signedDay !== today && save.signedDay !== yesterdayKey())) {
       save.streak = 0;
     }
     if (save.runs === 0 && save.totalSuns === 0 && save.suns === 0 && !hasHouse(save.farm) && !save.pet.hatched) {
@@ -344,7 +344,6 @@ export function applyRun(
   if (result.suns >= 25) next.missions.suns = true;
   if (result.maxCombo >= 8) next.missions.combo = true;
   if (dist >= 1200 && next.lastClockDay !== today) {
-    next.streak = save.lastClockDay === yesterdayKey() ? save.streak + 1 : 1;
     next.lastClockDay = today;
   }
   return syncUnlocks(next);
@@ -601,10 +600,13 @@ export function stampClock(
   save: SaveData,
   proof: { address: string; signature: string; cluster: "mainnet" | "devnet"; kind: "tx" | "message" },
 ): SaveData {
+  const today = todayKey();
+  if (save.signedDay === today) return save;
   const address = proof.address.replace(/\s/g, "").slice(0, 48);
   return {
     ...save,
-    signedDay: todayKey(),
+    streak: save.signedDay === yesterdayKey() ? save.streak + 1 : 1,
+    signedDay: today,
     playerWallet: address.length >= 32 ? address : save.playerWallet,
     clockSig: proof.signature.replace(/\s/g, "").slice(0, 100),
     clockCluster: proof.cluster,
@@ -634,10 +636,10 @@ function parseKey(key: string): Date | null {
 }
 
 export function clockedOn(save: SaveData, key: string): boolean {
-  if (!save.lastClockDay || save.streak <= 0) return false;
-  const last = parseKey(save.lastClockDay);
+  if (!save.signedDay || save.streak <= 0) return false;
+  const last = parseKey(save.signedDay);
   const target = parseKey(key);
-  if (!last || !target) return save.lastClockDay === key;
+  if (!last || !target) return save.signedDay === key;
   const diff = Math.round((last.getTime() - target.getTime()) / 86400000);
   return diff >= 0 && diff < save.streak;
 }
