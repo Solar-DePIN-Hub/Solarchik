@@ -105,6 +105,10 @@ export function RoofRun({
     SPR.jump();
     SPR.mite();
     SPR.drone();
+    SPR.cottage();
+    SPR.greenhouse();
+    SPR.panel();
+    SPR.tracker();
 
     let raf = 0;
     let last = 0;
@@ -324,8 +328,8 @@ export function RoofRun({
         onPointerCancel={onPointerUp}
       />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between px-4 pt-[max(0.9rem,env(safe-area-inset-top))]">
-        <div className="flex items-center gap-2">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-between gap-2 px-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <div className="flex min-w-0 items-center gap-2">
           {hud.phase !== "dead" && (
             <button
               type="button"
@@ -351,30 +355,21 @@ export function RoofRun({
             {hud.score}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <div className="rounded-md bg-bg/80 px-2.5 py-1.5 font-display text-lg font-semibold tabular-nums text-fg backdrop-blur-[2px]">
+            {hud.distance}m
+          </div>
+          <div className="rounded-md bg-bg/80 px-2 py-0.5 font-display text-[11px] font-semibold tracking-wide text-primary backdrop-blur-[2px]">
+            {hud.chapterLabel}
+          </div>
+          {hud.grind && !hud.bonus && (
+            <div className="rounded-md bg-ok px-2.5 py-1 font-display text-sm font-semibold text-bg">Grind</div>
+          )}
           {hud.bonus && (
-            <div className="rounded-md bg-primary px-2.5 py-1.5 font-display text-sm font-semibold text-primary-fg">
+            <div className="rounded-md bg-primary px-2.5 py-1 font-display text-sm font-semibold text-primary-fg">
               {t("run.flight")} {Math.ceil(hud.bonusLeft)}s
             </div>
           )}
-          {hud.grind && !hud.bonus && (
-            <div className="rounded-md bg-ok px-2.5 py-1.5 font-display text-sm font-semibold text-bg">
-              Grind
-            </div>
-          )}
-          {hud.combo > 1 && (
-            <div className="rounded-md bg-primary px-2.5 py-1.5 font-display text-sm font-semibold text-primary-fg shadow-[0_0_18px_color-mix(in_oklab,var(--color-primary)_45%,transparent)]">
-              {hud.combo}x heat
-            </div>
-          )}
-          <div className="flex flex-col items-end gap-1">
-            <div className="rounded-md bg-bg/55 px-2.5 py-1.5 font-display text-lg font-semibold tabular-nums backdrop-blur-[2px]">
-              {hud.distance}m
-            </div>
-            <div className="rounded-md bg-bg/55 px-2 py-0.5 font-display text-[11px] font-semibold tracking-wide text-primary backdrop-blur-[2px]">
-              {hud.chapterLabel}
-            </div>
-          </div>
         </div>
       </div>
 
@@ -443,8 +438,8 @@ export function RoofRun({
       )}
 
       {hud.phase === "countdown" && !paused && (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center">
-          <p className="font-display text-7xl font-semibold text-primary drop-shadow-sm">
+        <div className="pointer-events-none absolute inset-x-0 top-[28%] z-20 text-center">
+          <p className="font-display text-6xl font-semibold text-primary drop-shadow-sm">
             {hud.countdown > 0.28 ? Math.ceil(hud.countdown) : "GO"}
           </p>
         </div>

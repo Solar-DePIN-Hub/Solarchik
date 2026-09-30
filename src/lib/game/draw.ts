@@ -236,56 +236,69 @@ function drawPlat(
     return;
   }
   const pal = SKIN[skin] ?? SKIN.flag;
+  const wallH = Math.min(46, Math.max(26, thick * 2.1));
   ctx.save();
-  ctx.fillStyle = "rgba(10, 22, 48, 0.3)";
-  roundRect(ctx, x + 5, y + 8, w, thick + 2, 7);
+  ctx.fillStyle = "rgba(10, 22, 48, 0.28)";
+  ctx.beginPath();
+  ctx.ellipse(x + w / 2, y + thick + wallH + 4, Math.max(18, w * 0.42), 6, 0, 0, Math.PI * 2);
   ctx.fill();
 
+  ctx.fillStyle = "#f3e6d0";
+  ctx.fillRect(x + 6, y + 6, w - 12, wallH);
+  ctx.fillStyle = "#e2d0b4";
+  ctx.fillRect(x + 6, y + wallH, w - 12, 7);
+  if (w > 88) {
+    const wy = y + 14;
+    ctx.fillStyle = "#1d4e8f";
+    ctx.fillRect(x + w * 0.62, wy, 18, 14);
+    ctx.fillStyle = "rgba(255, 226, 150, 0.9)";
+    ctx.fillRect(x + w * 0.62 + 2, wy + 2, 6, 5);
+  }
+  if (w > 150) {
+    ctx.fillStyle = "#6a3824";
+    ctx.fillRect(x + 18, y + wallH - 16, 14, 22);
+  }
+
+  ctx.fillStyle = pal.deep;
+  roundRect(ctx, x, y + 1, w, thick + 7, 6);
+  ctx.fill();
   ctx.fillStyle = pal.band;
-  roundRect(ctx, x, y, w, thick + 6, 7);
+  roundRect(ctx, x + 2, y + 2, w - 4, thick * 0.78, 5);
   ctx.fill();
-  ctx.fillStyle = pal.deep;
-  roundRect(ctx, x + 2, y + thick * 0.62, w - 4, thick * 0.5 + 3, 5);
-  ctx.fill();
-
-  ctx.fillStyle = glow > 0.2 ? pal.cell : pal.cell;
-  roundRect(ctx, x + 4, y + 5, w - 8, thick * 0.62, 4);
-  ctx.fill();
-  ctx.fillStyle = pal.deep;
-  roundRect(ctx, x + 6, y + thick * 0.34, w - 12, thick * 0.28, 3);
+  ctx.fillStyle = pal.cell;
+  roundRect(ctx, x + 8, y + 6, w - 16, Math.max(8, thick * 0.42), 3);
   ctx.fill();
 
   ctx.strokeStyle = pal.grid;
   ctx.lineWidth = 1;
-  const cols = Math.max(2, Math.floor(w / 22));
+  const cols = Math.max(3, Math.floor(w / 18));
   for (let i = 1; i < cols; i++) {
-    const gx = x + 4 + (i * (w - 8)) / cols;
+    const gx = x + 8 + (i * (w - 16)) / cols;
     ctx.beginPath();
-    ctx.moveTo(gx, y + 6);
-    ctx.lineTo(gx, y + thick * 0.62);
+    ctx.moveTo(gx, y + 7);
+    ctx.lineTo(gx, y + 6 + Math.max(8, thick * 0.42));
     ctx.stroke();
   }
   ctx.beginPath();
-  ctx.moveTo(x + 6, y + thick * 0.34);
-  ctx.lineTo(x + w - 6, y + thick * 0.34);
+  ctx.moveTo(x + 8, y + 6 + thick * 0.22);
+  ctx.lineTo(x + w - 8, y + 6 + thick * 0.22);
   ctx.stroke();
 
-  const glint = 0.16 + 0.2 * (0.5 + 0.5 * Math.sin(t * 2.1 + x * 0.015)) + glow * 0.25;
+  const glint = 0.18 + 0.16 * (0.5 + 0.5 * Math.sin(t * 2.1 + x * 0.015)) + glow * 0.2;
   ctx.fillStyle = pal.hi;
-  ctx.globalAlpha = Math.min(0.7, glint);
-  const gw = Math.min(28, w * 0.22);
-  ctx.fillRect(x + 10, y + 7, gw, 3);
+  ctx.globalAlpha = Math.min(0.65, glint);
+  ctx.fillRect(x + 12, y + 8, Math.min(36, w * 0.22), 3);
   ctx.globalAlpha = 1;
 
   ctx.fillStyle = pal.lip;
-  roundRect(ctx, x - 1, y - 6, w + 2, 11, 5);
+  roundRect(ctx, x - 2, y - 5, w + 4, 10, 4);
   ctx.fill();
   ctx.fillStyle = pal.hi;
-  ctx.fillRect(x + 8, y - 6, w - 16, 3);
+  ctx.fillRect(x + 8, y - 4, w - 16, 3);
   if (glow > 0) {
     ctx.fillStyle = pal.lip;
-    ctx.globalAlpha = 0.16 * glow;
-    roundRect(ctx, x - 6, y - 10, w + 12, thick + 18, 10);
+    ctx.globalAlpha = 0.14 * glow;
+    roundRect(ctx, x - 6, y - 10, w + 12, thick + wallH + 8, 10);
     ctx.fill();
     ctx.globalAlpha = 1;
   }
@@ -732,7 +745,7 @@ export function drawWorld(
   ctx.save();
   ctx.translate(ox, oy);
 
-  const heroH = Math.min(h * 0.16, 108);
+  const heroH = Math.min(h * 0.22, 138);
   const hillTop = h * 0.87;
   const playTop = h * 0.52;
   const playBot = hillTop - 14;
@@ -771,9 +784,12 @@ export function drawWorld(
   ctx.fill();
 
   const housePar = camX * 0.4;
-  for (let i = 0; i < 3; i++) {
-    const px = ((i * 380 - housePar) % (w + 240) + w + 240) % (w + 240) - 40;
-    cottage(ctx, px, hillTop + 28, 0.42 + (i % 2) * 0.05, i % 2 === 0);
+  const scenery = [SPR.cottage, SPR.greenhouse, SPR.cottage, SPR.tracker];
+  for (let i = 0; i < scenery.length; i++) {
+    const px = ((i * 360 - housePar) % (w + 260) + w + 260) % (w + 260) - 40;
+    const img = scenery[i]();
+    const hgt = i % 2 === 0 ? 92 : 78;
+    if (!blit(ctx, img, px, hillTop + 8, hgt)) cottage(ctx, px, hillTop + 18, 0.42, i % 2 === 0);
   }
 
   const polePar = camX * 0.5;
@@ -798,9 +814,10 @@ export function drawWorld(
   ctx.stroke();
 
   const nearPar = camX * 0.62;
+  const panel = SPR.panel();
   for (let i = 0; i < 5; i++) {
     const px = ((i * 250 - nearPar + 90) % (w + 160) + w + 160) % (w + 160) - 30;
-    solarArray(ctx, px, hillTop + 26, 0.72 + (i % 2) * 0.1, clock);
+    if (!blit(ctx, panel, px, hillTop + 6, 62)) solarArray(ctx, px, hillTop + 18, 0.7, clock);
   }
   } else {
     puffCloud(ctx, ((-camX * 0.16) % (w + 260)) + 40, h * 0.18, 1.35, 0.7);
@@ -938,26 +955,29 @@ export function drawWorld(
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (const pop of s.pops) {
+    const py = sy(pop.y);
+    if (py < 78 || py > h - 24) continue;
     ctx.globalAlpha = Math.min(1, pop.life * 2);
     ctx.fillStyle = "#143a8c";
-    ctx.fillText(pop.text, pop.x - camX + 1, sy(pop.y) + 1);
+    ctx.fillText(pop.text, pop.x - camX + 1, py + 1);
     ctx.fillStyle = "#ffe34a";
-    ctx.fillText(pop.text, pop.x - camX, sy(pop.y));
+    ctx.fillText(pop.text, pop.x - camX, py);
   }
   ctx.globalAlpha = 1;
 
-  if (!s.hasJumped && s.phase === "running" && s.x < 780) {
-    const gx = 824 - camX;
-    const hx = s.x - camX;
-    if (gx > hx + 70 && gx < w - 30) {
+  const intro = s.plats.find((p) => p.kind === "roof" && p.x < 40);
+  const lip = intro ? intro.x + intro.w : 1020;
+  if (!s.bonus && s.phase === "running" && s.grounded && s.x > lip - 380 && s.x < lip - 18) {
+    const gx = lip - 28 - camX;
+    if (gx > 48 && gx < w - 36) {
       const pulse = 0.72 + Math.sin(clock * 5) * 0.18;
       ctx.globalAlpha = pulse;
-      roundRect(ctx, gx - 38, sy(216) - 118, 76, 32, 16);
-      ctx.fillStyle = "rgba(26, 20, 16, 0.55)";
+      roundRect(ctx, gx - 42, sy(intro?.y ?? 216) - 126, 84, 34, 16);
+      ctx.fillStyle = "rgba(26, 20, 16, 0.72)";
       ctx.fill();
       ctx.fillStyle = "#f6ead8";
-      ctx.font = `600 ${Math.max(18, h * 0.032)}px Fredoka, sans-serif`;
-      ctx.fillText("TAP", gx, sy(216) - 102);
+      ctx.font = `600 ${Math.max(18, h * 0.03)}px Fredoka, sans-serif`;
+      ctx.fillText("TAP", gx, sy(intro?.y ?? 216) - 109);
     }
     ctx.globalAlpha = 1;
   }

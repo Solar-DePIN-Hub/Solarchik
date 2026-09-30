@@ -175,7 +175,7 @@ const STOMP_V = -640;
 const TERMINAL = 1150;
 const SPEED0 = 188;
 const SPEED_CAP = 355;
-const COYOTE = 0.16;
+const COYOTE = 0.22;
 const BUFFER = 0.16;
 const FEET = 12;
 const FALL_Y = 348;
@@ -290,10 +290,9 @@ function spawnChunk(s: RunState, fromX: number, count: number) {
     const dist = Math.max(s.x, x);
     const diff = Math.min(1, Math.max(0, (dist - 3800) / 9000));
     const spd = speedAtDist(dist);
-    // A lip-jump clears about 0.38s of open air. Stay under that so a tap lands.
-    const reach = spd * 0.38;
-    const minGap = Math.max(56, reach * 0.62);
-    const maxGap = Math.max(minGap + 6, Math.min(reach, 132));
+    const reach = spd * 0.28;
+    const minGap = Math.max(36, reach * 0.5);
+    const maxGap = Math.max(minGap + 8, Math.min(reach, 96));
     let gap = minGap + rand(s, 0, Math.max(4, maxGap - minGap));
     gap = Math.max(minGap, Math.min(maxGap, gap));
 
@@ -515,11 +514,11 @@ export function createRun(seed: number, opts?: { skin?: PlatSkin; robot?: RobotI
   };
 
   addPlat(s, 0, BANDS[1], 1020);
-  addPlat(s, 1092, BANDS[1], 300);
-  addPlat(s, 1464, BANDS[0], 280);
-  addPlat(s, 1816, BANDS[1], 320);
-  addPlat(s, 2208, BANDS[1], 300);
-  addPlat(s, 2580, BANDS[2], 320);
+  addPlat(s, 1066, BANDS[1], 320);
+  addPlat(s, 1432, BANDS[0], 300);
+  addPlat(s, 1778, BANDS[1], 340);
+  addPlat(s, 2164, BANDS[1], 320);
+  addPlat(s, 2530, BANDS[2], 340);
   s.picks.push(
     { x: 480, y: BANDS[1] - 48, gold: false, shield: false, taken: false },
     { x: 820, y: BANDS[1] - 48, gold: false, shield: false, taken: false },
@@ -540,7 +539,7 @@ export function createRun(seed: number, opts?: { skin?: PlatSkin; robot?: RobotI
     s.pops.push({ x: 1180, y: BANDS[1] - 130, text: "FLY GATE", life: 3.2 });
   }
   s.lastBand = 2;
-  s.spawnX = 2972;
+  s.spawnX = 2916;
   spawnChunk(s, s.spawnX, 16);
   return s;
 }

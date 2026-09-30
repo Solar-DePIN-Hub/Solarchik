@@ -91,6 +91,10 @@ export const SPR = {
   drone: () => load("/sprites/foe-drone.png"),
   robotSide: (id: string) => load(`/sprites/robots/${id}-side.png`),
   robotRun: (id: string) => [1, 2, 3, 4].map((i) => load(`/sprites/robots/${id}-run-${i}.png`)),
+  cottage: () => load("/sprites/farm/cottage.png"),
+  greenhouse: () => load("/sprites/farm/greenhouse.png"),
+  panel: () => load("/sprites/farm/panel.png"),
+  tracker: () => load("/sprites/farm/tracker.png"),
 };
 
 function gfxSize(img: Gfx) {
