@@ -1,0 +1,391 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0b1620;
+  --color-surface: #122533;
+  --color-elevated: #183041;
+  --color-fg: #e8f0f5;
+  --color-muted: #8aa0ae;
+  --color-subtle: #5e7382;
+  --color-primary: #e8b931;
+  --color-primary-fg: #0b1620;
+  --color-accent: #e8b931;
+  --color-accent-fg: #0b1620;
+  --color-accent-hover: #f0cb4e;
+  --color-scrim: color-mix(in oklab, var(--color-bg) 78%, transparent);
+  --color-ok: #6fbf4a;
+  --color-danger: #e0564a;
+  --color-sky: #e8c9a0;
+  --color-line: #1a1410;
+  --color-border: color-mix(in oklab, var(--color-fg) 12%, transparent);
+
+  --color-farm-sky: #8ec4e4;
+  --color-farm-dusk: #f4d7a4;
+  --color-farm-sun: #ffe08a;
+  --color-farm-hill: #6f934f;
+  --color-farm-grass: #4e6f38;
+  --color-farm-soil: #6a5136;
+  --color-farm-soil-deep: #5a432c;
+  --color-farm-wood: #c4a574;
+  --color-farm-door: #3a2416;
+  --color-farm-glass: #7ec8ff;
+  --color-farm-fence: #8b6239;
+  --color-farm-cloud: #f6f3ea;
+
+  --font-display: "Fredoka", "Nunito", ui-rounded, system-ui, sans-serif;
+  --font-sans: "Nunito", ui-sans-serif, system-ui, sans-serif;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  --shadow-card: 0 18px 40px color-mix(in oklab, #000 35%, transparent);
+}
+
+@layer base {
+  html,
+  body,
+  #app,
+  #root {
+    height: 100%;
+    min-height: 100%;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    overscroll-behavior: none;
+    overflow: hidden;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@keyframes farm-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+@keyframes farm-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-primary) 50%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+
+@keyframes farm-pop {
+  0% {
+    transform: translateY(10px) scale(0.72);
+    opacity: 0;
+  }
+  70% {
+    transform: translateY(-3px) scale(1.05);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes farm-sun-bob {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-10px) scale(1.06);
+  }
+}
+
+.farm-bob {
+  animation: farm-bob 2.4s ease-in-out infinite;
+}
+
+.farm-pulse {
+  animation: farm-pulse 1.8s ease-out infinite;
+}
+
+.farm-pop {
+  animation: farm-pop 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.farm-sun-bob {
+  animation: farm-sun-bob 1.6s ease-in-out infinite;
+}
+
+@keyframes pet-fall {
+  from {
+    transform: translate(-50%, -12%);
+    opacity: 1;
+  }
+  to {
+    transform: translate(-50%, 128%);
+    opacity: 0.15;
+  }
+}
+
+.pet-fall {
+  animation-name: pet-fall;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.pet-sleep {
+  transform: rotate(-8deg) translateY(10px);
+  filter: brightness(0.78);
+}
+
+.pet-dusty {
+  filter: saturate(0.72) brightness(0.92);
+}
+
+.pet-dust {
+  pointer-events: none;
+  position: absolute;
+  inset: 18% 22% 12%;
+  background:
+    radial-gradient(circle at 30% 40%, color-mix(in oklab, var(--color-fg) 35%, transparent) 0 4px, transparent 5px),
+    radial-gradient(circle at 68% 28%, color-mix(in oklab, var(--color-fg) 30%, transparent) 0 3px, transparent 4px),
+    radial-gradient(circle at 52% 62%, color-mix(in oklab, var(--color-fg) 28%, transparent) 0 5px, transparent 6px);
+}
+
+.pet-vignette {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 28%, transparent 45%, color-mix(in oklab, var(--color-bg) 42%, transparent) 100%),
+    linear-gradient(to top, var(--color-bg) 0%, transparent 18%);
+}
+
+.pet-speech {
+  position: relative;
+  max-width: 34ch;
+  background: color-mix(in oklab, var(--color-bg) 78%, transparent);
+  border-radius: 18px;
+  padding: 0.55rem 0.9rem;
+}
+
+.pet-speech::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 12px;
+  height: 12px;
+  translate: -50% 0;
+  rotate: 45deg;
+  background: color-mix(in oklab, var(--color-bg) 78%, transparent);
+}
+
+.pet-dock {
+  background: linear-gradient(to top, var(--color-bg) 78%, color-mix(in oklab, var(--color-bg) 70%, transparent));
+}
+
+.pet-sheet {
+  background: var(--color-surface);
+  border-top-left-radius: var(--radius-xl);
+  border-top-right-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+  min-height: 42%;
+}
+
+.pet-hype {
+  animation: pet-hype 0.7s ease-in-out infinite;
+}
+
+.pet-droop {
+  transform: translateY(8px) rotate(-4deg);
+  filter: saturate(0.85) brightness(0.9);
+}
+
+.pet-hungry {
+  animation: pet-hungry 1.8s ease-in-out infinite;
+}
+
+.pet-talk {
+  animation: pet-talk 0.28s ease-in-out infinite;
+}
+
+.pet-think {
+  animation: pet-think 1.6s ease-in-out infinite;
+}
+
+.pet-mic {
+  animation: pet-mic 1s ease-out infinite;
+}
+
+@keyframes pet-hype {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(3deg);
+  }
+}
+
+@keyframes pet-hungry {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+    filter: brightness(0.92);
+  }
+  50% {
+    transform: translateY(-3px) scale(0.98);
+    filter: brightness(0.8);
+  }
+}
+
+@keyframes pet-talk {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.03) translateY(-2px);
+  }
+}
+
+@keyframes pet-think {
+  0%,
+  100% {
+    transform: rotate(-4deg) translateY(0);
+  }
+  50% {
+    transform: rotate(5deg) translateY(-4px);
+  }
+}
+
+@keyframes pet-mic {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-danger) 50%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 16px transparent;
+  }
+}
+
+.farm-stage {
+  perspective: 920px;
+  perspective-origin: 50% 28%;
+}
+
+.farm-ground {
+  transform: rotateX(58deg) rotateZ(-20deg);
+  transform-origin: center center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.pet-booth-phone {
+  position: absolute;
+  z-index: 80;
+  top: 36%;
+  right: 7%;
+  display: grid;
+  width: 5.25rem;
+  height: 5.25rem;
+  place-items: center;
+  pointer-events: auto;
+  color: #fff;
+  background: #c81e1e;
+  border: 3px solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pet-work-layer header {
+  padding-left: 3.5rem;
+}
+
+.pet-work-btn {
+  position: absolute;
+  z-index: 80;
+  top: 36%;
+  left: 7%;
+  display: grid;
+  min-width: 5.25rem;
+  height: 5.25rem;
+  place-items: center;
+  padding: 0 0.7rem;
+  pointer-events: auto;
+  color: #0b1620;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  background: #e8b931;
+  border: 3px solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pet-sec-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: #0b1620;
+}
+
+/* Yard: art fills the screen, the desk sits under it on a phone and beside it on a wide screen. */
+.yard-grid {
+  display: grid;
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(240px, 58dvh) minmax(0, 1fr);
+  grid-template-areas:
+    "art"
+    "desk";
+}
+
+.yard-grid-art {
+  grid-area: art;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.yard-grid-desk {
+  grid-area: desk;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+@media (min-width: 1024px) {
+  .yard-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: "art desk";
+  }
+}

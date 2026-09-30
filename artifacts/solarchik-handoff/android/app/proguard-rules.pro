@@ -1,0 +1,6 @@
+-keep class net.solardepin.solarchik.** { *; }
+-keep class com.solana.mobilewalletadapter.** { *; }
+-keep class kotlinx.coroutines.** { *; }
+-dontwarn com.solana.**
+-dontwarn javax.annotation.**
+-dontwarn kotlinx.coroutines.**

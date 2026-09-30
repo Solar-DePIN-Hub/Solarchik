@@ -1,50 +1,36 @@
-# Solarchik
+# Solarchik CLOCK IN
 
-A small solar robot friend on your phone.
+A solar robot you run with, then sign the day with Solana Mobile Stack.
 
-In the **room** you talk to him by voice or text.  
-In the **runner** he runs with you and answers when you tap the mic.  
-In the **red phone booth** he becomes a secretary: who called, why, what to do next — then he speaks the report.
+APK = Clock In submission, native yard, no WebView. Site = Colosseum demo in the browser.
 
-One character. One voice. Play, talk, handle the call.
+## What to tap
 
-## Modes
+On the APK yard: **Забіг** (tap to jump, finish 1200 m), then **CLOCK IN**. That opens Seed Vault through Mobile Wallet Adapter 2.0.7. Seeker uses mainnet. Any other phone uses devnet. A declined wallet does not stamp the day. A message signature is shown as a signature, not a transaction link.
 
-| Mode | What he does |
-|---|---|
-| Friend | Room chat, tap-to-talk mic, voice you pick at first setup |
-| Runner | Roof run companion. Short lines every 30–40s. Stays quiet if you already opened a conversation |
-| Secretary | Booth desk: on/off, new / archive / book, session credit, spoken summary |
+On Android Chrome the same CLOCK IN button uses Mobile Wallet Adapter. On a desktop browser it says the APK / Seed Vault is required and does not stamp the day.
 
-## Stack
+The desk arb reads a live Backpack SOL/USDC book. Titan only if a key answered. Otherwise Jupiter. It does not send the trade.
 
-- React + TypeScript (room, runner HUD, secretary desk)
-- Gemini primary replies, OpenAI / Featherless fallback
-- Android `SpeechRecognizer` in the APK, Web Speech API on web
-- On-device TTS for the chosen voice
-- No API keys in this repo
+## Build the APK
 
-## Architecture
+See [artifacts/solarchik-handoff/BUILD.md](artifacts/solarchik-handoff/BUILD.md).
 
 ```
-Player voice
-    │
-    ▼
-Speech-to-text (Android / web)
-    │
-    ▼
-Solarchik brain (Gemini → fallback)
-    │
-    ├── room chat (1–2 spoken sentences)
-    ├── runner line (one sentence, same voice)
-    └── secretary report (who / why / next action)
-    │
-    ▼
-TTS out + on-screen caption
+cd artifacts/solarchik-handoff/android
+# local.properties must set sdk.dir
+bash ./gradlew :app:assembleRelease --no-daemon
 ```
 
-## Links
+`keystore.properties` and the release `.jks` are not in git. Without them, `assembleDebug` still builds a debuggable APK signed with the debug key. The file shipped for review is `public/Solarchik-CLOCK-IN-0.19.51.apk`: release, not debuggable, Mobile Wallet Adapter, no WebView.
 
-- Site: [solardepin.net](https://solardepin.net)
-- X: [@SolarDePin](https://x.com/SolarDePin)
-- Built by Solar DePin (Vadym), Ukraine
+## Web
+
+```
+npm install
+npm run dev
+```
+
+## Not in this repo
+
+A demo video from a live phone and a pitch deck are submission files, not source. Do not treat old screen recordings as the Clock In video.

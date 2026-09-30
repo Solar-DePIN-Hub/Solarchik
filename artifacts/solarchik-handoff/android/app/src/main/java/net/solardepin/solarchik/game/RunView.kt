@@ -1,0 +1,224 @@
+package net.solardepin.solarchik.game
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
+import android.view.MotionEvent
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import kotlin.math.max
+import kotlin.random.Random
+
+class RunView(context: Context, private val onDone: (meters: Int, score: Int) -> Unit) :
+    SurfaceView(context), SurfaceHolder.Callback, Runnable {
+
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 42f
+        isFakeBoldText = true
+    }
+    private val hud = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#F5C542")
+        textSize = 36f
+        isFakeBoldText = true
+    }
+
+    private var thread: Thread? = null
+    private var running = false
+    private var finished = false
+
+    private val runFrames = loadSheet("sprites/hero-run", 8)
+    private val jumpFrames = loadSheet("sprites/hero-jump", 4)
+    private val mite = load("sprites/foe-mite.png")
+    private val drone = load("sprites/foe-drone.png")
+    private val sky = load("yard-bg.jpg")
+
+    private var ground = 0f
+    private var px = 0f
+    private var py = 0f
+    private var vy = 0f
+    private var onFloor = true
+    private var meters = 0f
+    private var score = 0
+    private var frame = 0
+    private var tick = 0
+    private var lives = 3
+    private var hurt = 0
+    private var exitIn = 0
+    private val foes = mutableListOf<Foe>()
+    private var spawnIn = 110
+
+    init {
+        holder.addCallback(this)
+        isFocusable = true
+    }
+
+    override fun surfaceCreated(holder: SurfaceHolder) {
+        if (running) return
+        running = true
+        finished = false
+        thread = Thread(this, "solarchik-run").also { it.start() }
+    }
+
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        ground = height * 0.78f
+        px = width * 0.18f
+        if (py == 0f) py = ground
+    }
+
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        running = false
+        thread?.join(400)
+        thread = null
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.action == MotionEvent.ACTION_DOWN && onFloor && !finished) {
+            vy = -22f
+            onFloor = false
+        }
+        return true
+    }
+
+    override fun run() {
+        var last = System.nanoTime()
+        while (running) {
+            val now = System.nanoTime()
+            val dt = ((now - last) / 16_666_666f).coerceIn(0.5f, 2.2f)
+            last = now
+            if (!finished) step(dt)
+            val canvas = holder.lockCanvas() ?: continue
+            drawFrame(canvas)
+            holder.unlockCanvasAndPost(canvas)
+            if (finished) {
+                exitIn--
+                if (exitIn <= 0) {
+                    running = false
+                    val m = meters.toInt().coerceAtMost(GameSave.GOAL_M)
+                    val sc = score
+                    post { onDone(m, sc) }
+                }
+            }
+        }
+    }
+
+    private fun step(dt: Float) {
+        val w = width.takeIf { it > 0 } ?: return
+        val h = height.takeIf { it > 0 } ?: return
+        if (ground == 0f) ground = h * 0.78f
+        if (px == 0f) px = w * 0.18f
+
+        tick++
+        if (hurt > 0) hurt--
+        meters += 0.85f * dt
+        score = meters.toInt() + foes.count { it.hit } * 20
+
+        vy += 1.15f * dt
+        py += vy * dt
+        if (py >= ground) {
+            py = ground
+            vy = 0f
+            onFloor = true
+        }
+
+        if (--spawnIn <= 0) {
+            val air = Random.nextFloat() < 0.35f
+            foes += Foe(
+                x = w + 40f,
+                y = if (air) ground - 160f else ground,
+                air = air,
+            )
+            spawnIn = 130 + Random.nextInt(80)
+        }
+        val speed = 6.2f + meters / 700f
+        val it = foes.iterator()
+        while (it.hasNext()) {
+            val f = it.next()
+            f.x -= speed * dt
+            if (f.x < -120f) it.remove()
+            else if (!f.hit && hurt <= 0 && hits(f)) {
+                f.hit = true
+                lives -= 1
+                hurt = 48
+                if (lives <= 0) {
+                    endRun()
+                    return
+                }
+            }
+        }
+        if (meters >= GameSave.GOAL_M) endRun()
+        if (tick % 5 == 0) frame++
+    }
+
+    private fun hits(foe: Foe): Boolean {
+        val hero = RectF(px - 36f, py - 92f, px + 36f, py + 8f)
+        val box = if (foe.air) RectF(foe.x - 28f, foe.y - 36f, foe.x + 28f, foe.y + 20f)
+        else RectF(foe.x - 30f, foe.y - 40f, foe.x + 30f, foe.y + 8f)
+        return RectF.intersects(hero, box)
+    }
+
+    private fun endRun() {
+        if (finished) return
+        finished = true
+        meters = meters.coerceAtMost(GameSave.GOAL_M.toFloat())
+        exitIn = 54
+    }
+
+    private fun drawFrame(c: Canvas) {
+        val w = c.width.toFloat()
+        val h = c.height.toFloat()
+        c.drawColor(Color.parseColor("#07131C"))
+        sky?.let {
+            val src = android.graphics.Rect(0, 0, it.width, it.height)
+            c.drawBitmap(it, src, android.graphics.RectF(0f, 0f, w, h), paint)
+        }
+        paint.color = Color.parseColor("#12324A")
+        c.drawRect(0f, ground + 8f, w, h, paint)
+        paint.color = Color.parseColor("#F5C542")
+        c.drawRect(0f, ground + 6f, w, ground + 12f, paint)
+
+        for (foe in foes) {
+            val bmp = if (foe.air) drone else mite
+            drawSprite(c, bmp, foe.x, foe.y, if (foe.air) 88f else 80f)
+        }
+
+        val hero = if (onFloor) runFrames.getOrNull(frame % runFrames.size.coerceAtLeast(1)) else jumpFrames.getOrNull((frame / 2) % jumpFrames.size.coerceAtLeast(1))
+        if (hurt == 0 || tick % 4 < 2) drawSprite(c, hero, px, py, 120f)
+
+        c.drawText("${meters.toInt()} / ${GameSave.GOAL_M} m", 32f, 64f, hud)
+        c.drawText("очки $score   серця $lives", 32f, 110f, text)
+        if (finished) c.drawText(if (meters >= GameSave.GOAL_M) "1200 м" else "ще раз", 32f, 164f, hud)
+        else c.drawText("тап — стрибок", 32f, h - 36f, text)
+    }
+
+    private fun drawSprite(c: Canvas, bmp: Bitmap?, cx: Float, baseline: Float, size: Float) {
+        if (bmp == null) {
+            paint.color = Color.parseColor("#7AD1FF")
+            c.drawCircle(cx, baseline - size / 2f, size / 3f, paint)
+            return
+        }
+        val ratio = bmp.width.toFloat() / max(1, bmp.height)
+        val dw = size * ratio
+        val dest = RectF(cx - dw / 2f, baseline - size, cx + dw / 2f, baseline)
+        c.drawBitmap(bmp, null, dest, paint)
+    }
+
+    private fun load(path: String): Bitmap? = try {
+        context.assets.open(path).use { BitmapFactory.decodeStream(it) }
+    } catch (_: Throwable) {
+        null
+    }
+
+    private fun loadSheet(prefix: String, count: Int): List<Bitmap> {
+        val out = ArrayList<Bitmap>(count)
+        for (i in 1..count) load("$prefix-$i.png")?.let { out += it }
+        return out
+    }
+
+    private class Foe(var x: Float, var y: Float, val air: Boolean, var hit: Boolean = false)
+}
