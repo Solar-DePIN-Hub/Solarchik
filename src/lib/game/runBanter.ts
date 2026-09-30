@@ -1,4 +1,4 @@
-import type { Locale } from "./i18n";
+import type { Locale, MsgKey } from "./i18n";
 import type { PetVibe } from "./pet";
 import type { ChapterId, Ev, RunState } from "./sim";
 
@@ -138,6 +138,19 @@ export function pickBanter(kind: BanterKind, locale: Locale, vibe: PetVibe, chap
   const line = src[Math.floor(Math.random() * src.length)] || "";
   lastLine = line;
   return line;
+}
+
+export function scriptedBanter(state: RunState, events: Ev[]): MsgKey | null {
+  if (events.includes("dead")) {
+    const meters = state.distance / 10;
+    if (state.death === "FALL" && meters < 200) return "banter.firstRoof";
+    if (meters >= 1200) return "banter.clockReady";
+  }
+  if (events.includes("hurt") && state.hearts === 1 && !state.lastHeartSaid) {
+    state.lastHeartSaid = true;
+    return "banter.lastHeart";
+  }
+  return null;
 }
 
 export function eventToBanter(ev: Ev): BanterKind | null {

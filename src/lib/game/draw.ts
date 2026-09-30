@@ -2,6 +2,7 @@ import { type PlatSkin, type RunState, speedAt } from "./sim";
 import { SKIN_PAL } from "./skins";
 import { robotFilter, robotOf, type RobotId } from "./robots";
 import { SPR, blit, heroFrame, ready } from "./sprites";
+import { readGhost, todayKey } from "./save";
 
 function roundRect(
   ctx: CanvasRenderingContext2D,
@@ -948,6 +949,15 @@ export function drawWorld(
     ctx.fill();
     heroGlow(ctx, hx, hy, heroH, charged);
     drawHero(ctx, hx, hy, heroH * (sliding ? 0.78 : 1), s.runPhase, s.grounded, squash, stretch, false, !s.grounded, s.vy, rot, 1, s.robot);
+    const ghost = readGhost();
+    if (ghost && ghost.day !== todayKey() && ghost.samples.length > 1) {
+      const i = ghost.samples.findIndex((p) => p.x > s.x);
+      const idx = i < 0 ? ghost.samples.length - 1 : Math.max(0, i - 1);
+      const p = ghost.samples[idx];
+      if (p) {
+        drawHero(ctx, p.x - camX, sy(p.y), heroH, s.runPhase, p.grounded, 0, 0, false, !p.grounded, 0, 0, 0.28, s.robot);
+      }
+    }
   }
 
   ctx.fillStyle = "#3a2416";
@@ -1000,5 +1010,9 @@ export function drawWorld(
     ctx.fillRect(0, 0, w, h);
   }
   paintVignette(ctx, w, h);
+  if (s.hearts === 1 && s.phase === "running") {
+    ctx.fillStyle = "rgba(8, 16, 28, 0.18)";
+    ctx.fillRect(0, 0, w, h);
+  }
   void ready;
 }

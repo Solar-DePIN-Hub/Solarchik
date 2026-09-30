@@ -76,5 +76,16 @@
             android:textColor="#7AD1FF"
             android:textIsSelectable="true"
             android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/share"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="12dp"
+            android:backgroundTint="#F5C542"
+            android:text="Поділитись"
+            android:textAllCaps="false"
+            android:textColor="#07131C"
+            android:visibility="gone" />
     </LinearLayout>
 </ScrollView>

@@ -51,6 +51,10 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
     private var hurt = 0
     private var exitIn = 0
     private val foes = mutableListOf<Foe>()
+    private val ghosts = mutableListOf<GhostPt>()
+    private var replay: List<GhostPt> = emptyList()
+    private var mod = "calm"
+    private var foeSlot = 0
     private var spawnIn = 110
 
     init {
@@ -59,6 +63,9 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
+        val save = GameSave(context)
+        mod = save.dayMod()
+        replay = save.readGhost()?.takeIf { it.day != save.today() }?.samples ?: emptyList()
         if (running) return
         running = true
         finished = false
@@ -79,7 +86,7 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.action == MotionEvent.ACTION_DOWN && onFloor && !finished) {
-            vy = -22f
+            vy = if (mod == "wind") -20.5f else -22f
             onFloor = false
         }
         return true
@@ -127,15 +134,23 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
         }
 
         if (--spawnIn <= 0) {
-            val air = Random.nextFloat() < 0.35f
-            foes += Foe(
-                x = w + 40f,
-                y = if (air) ground - 160f else ground,
-                air = air,
-            )
-            spawnIn = 130 + Random.nextInt(80)
+            foeSlot += 1
+            val skip = mod == "gold" && foeSlot % 3 == 0
+            if (!skip) {
+                val air = when {
+                    mod == "wire" && foeSlot % 4 == 0 -> true
+                    mod == "drones" -> Random.nextFloat() < 0.55f
+                    else -> Random.nextFloat() < 0.35f
+                }
+                foes += Foe(
+                    x = w + 40f,
+                    y = if (air) ground - 160f else ground,
+                    air = air,
+                )
+            }
+            spawnIn = if (mod == "drones") 100 + Random.nextInt(50) else 130 + Random.nextInt(80)
         }
-        val speed = 6.2f + meters / 700f
+        val speed = (6.2f + meters / 700f) * if (mod == "wind") 1.08f else 1f
         val it = foes.iterator()
         while (it.hasNext()) {
             val f = it.next()
@@ -152,6 +167,9 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
             }
         }
         if (meters >= GameSave.GOAL_M) endRun()
+        if (tick % 8 == 0 && ghosts.size < 80) {
+            ghosts += GhostPt(meters, py, onFloor)
+        }
         if (tick % 5 == 0) frame++
     }
 
@@ -167,6 +185,8 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
         finished = true
         meters = meters.coerceAtMost(GameSave.GOAL_M.toFloat())
         exitIn = 54
+        val doneMeters = meters.toInt()
+        if (doneMeters >= 400) GameSave(context).writeGhost(doneMeters, ghosts)
     }
 
     private fun drawFrame(c: Canvas) {
@@ -188,12 +208,36 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
         }
 
         val hero = if (onFloor) runFrames.getOrNull(frame % runFrames.size.coerceAtLeast(1)) else jumpFrames.getOrNull((frame / 2) % jumpFrames.size.coerceAtLeast(1))
+        paintGhost(c)
         if (hurt == 0 || tick % 4 < 2) drawSprite(c, hero, px, py, 120f)
+        if (lives == 1 && !finished) {
+            val veil = Paint(paint)
+            veil.color = Color.parseColor("#07131C")
+            veil.alpha = 46
+            c.drawRect(0f, 0f, w, h, veil)
+        }
 
         c.drawText("${meters.toInt()} / ${GameSave.GOAL_M} m", 32f, 64f, hud)
         c.drawText("очки $score   серця $lives", 32f, 110f, text)
         if (finished) c.drawText(if (meters >= GameSave.GOAL_M) "1200 м" else "ще раз", 32f, 164f, hud)
         else c.drawText("тап — стрибок", 32f, h - 36f, text)
+    }
+
+    private fun paintGhost(c: Canvas) {
+        if (replay.size < 2) return
+        var prev: GhostPt? = null
+        for (g in replay) {
+            if (g.x > meters) break
+            prev = g
+        }
+        val g = prev ?: return
+        if (g.x < meters - 80f || g.x > meters + 900f) return
+        val bmp = if (g.grounded) runFrames.getOrNull(frame % runFrames.size.coerceAtLeast(1)) else jumpFrames.getOrNull((frame / 2) % jumpFrames.size.coerceAtLeast(1))
+        val gx = width * 0.18f + (g.x - meters) * 0.35f
+        val old = paint.alpha
+        paint.alpha = 70
+        drawSprite(c, bmp, gx, g.y, 120f)
+        paint.alpha = old
     }
 
     private fun drawSprite(c: Canvas, bmp: Bitmap?, cx: Float, baseline: Float, size: Float) {

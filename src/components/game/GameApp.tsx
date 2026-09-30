@@ -8,6 +8,7 @@ import { GameCatch } from "./GameCatch";
 import {
   applyRun,
   daySeed,
+  dayMod,
   loadSave,
   petDoChat,
   petDoPoke,
@@ -207,6 +208,7 @@ export function GameApp() {
             robot={view.robot}
             offerBonus={offerBonus}
             careBoost={petShieldOn(view)}
+            mod={dayMod(todayKey())}
             t={t}
             locale={view.locale}
             buddyName={view.pet.setupDone && view.pet.name ? view.pet.name : "Sol"}

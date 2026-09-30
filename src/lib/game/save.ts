@@ -1,5 +1,5 @@
-import type { PlatSkin } from "./skins";
-import { SKINS, isPlatSkin } from "./skins";
+import type { DayMod } from "./sim";
+import { SKINS, isPlatSkin, type PlatSkin } from "./skins";
 import {
   type FarmState,
   type GearId,
@@ -40,6 +40,12 @@ import { bindNativePlayer, nativePlayerId, setNativeScreening } from "./buddyNet
 
 const KEY = "solarchik-clock-in-v8";
 const SAVE_VERSION = 8;
+const GHOST_KEY = "solarchik-ghost-v1";
+
+export type GhostSample = { x: number; y: number; grounded: boolean };
+export type GhostTape = { day: string; meters: number; samples: GhostSample[] };
+
+export type { DayMod };
 
 export type MissionId = "clock" | "suns" | "combo";
 
@@ -140,9 +146,9 @@ export const defaultSave = (): SaveData => ({
 });
 
 export function todayKey(d = new Date()): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
 
@@ -155,10 +161,14 @@ export function daySeed(key = todayKey()): number {
   return h >>> 0;
 }
 
+const DAY_MODS: DayMod[] = ["calm", "wind", "gold", "drones", "wire"];
+
+export function dayMod(day = todayKey()): DayMod {
+  return DAY_MODS[Math.abs(daySeed(day)) % DAY_MODS.length] ?? "calm";
+}
+
 function yesterdayKey(d = new Date()): string {
-  const x = new Date(d);
-  x.setDate(x.getDate() - 1);
-  return todayKey(x);
+  return todayKey(new Date(d.getTime() - 86_400_000));
 }
 
 function legacyUnlocks(save: SaveData): PlatSkin[] {
@@ -633,20 +643,70 @@ export function clockedOn(save: SaveData, key: string): boolean {
 }
 
 export function weekStamps(save: SaveData, now = new Date()) {
-  const mondayOffset = (now.getDay() + 6) % 7;
+  const utcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const mondayOffset = (new Date(utcDay).getUTCDay() + 6) % 7;
   const today = todayKey(now);
   return [0, 1, 2, 3, 4, 5, 6].map((i) => {
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset + i);
+    const d = new Date(utcDay);
+    d.setUTCDate(d.getUTCDate() - mondayOffset + i);
     const key = todayKey(d);
     return { key, i, done: clockedOn(save, key), isToday: key === today };
   });
 }
 
 export function untilMidnightLabel(now = new Date()): string {
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  const ms = Math.max(0, end.getTime() - now.getTime());
+  const end = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  const ms = Math.max(0, end - now.getTime());
   const h = Math.floor(ms / 3600000);
   const m = Math.floor((ms % 3600000) / 60000);
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
+}
+
+let ghostMem: GhostTape | null | undefined;
+
+function thinSamples(samples: GhostSample[], limit = 80): GhostSample[] {
+  if (samples.length <= limit) return samples;
+  const out: GhostSample[] = [];
+  const step = (samples.length - 1) / (limit - 1);
+  for (let i = 0; i < limit; i++) {
+    const p = samples[Math.round(i * step)];
+    if (p) out.push(p);
+  }
+  return out;
+}
+
+export function readGhost(): GhostTape | null {
+  if (ghostMem !== undefined) return ghostMem;
+  ghostMem = null;
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(GHOST_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw) as Partial<GhostTape>;
+    if (!o || typeof o.day !== "string" || !Array.isArray(o.samples)) return null;
+    const samples = o.samples
+      .filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y))
+      .slice(0, 80)
+      .map((p) => ({ x: Number(p.x), y: Number(p.y), grounded: !!p.grounded }));
+    if (samples.length < 2) return null;
+    ghostMem = { day: o.day, meters: Number(o.meters) || 0, samples };
+    return ghostMem;
+  } catch {
+    return null;
+  }
+}
+
+export function writeGhost(day: string, meters: number, samples: GhostSample[]) {
+  if (typeof window === "undefined") return;
+  if (meters < 400 || samples.length < 2) return;
+  const prev = readGhost();
+  if (prev && prev.day === day && meters < prev.meters) return;
+  const tape: GhostTape = { day, meters, samples: thinSamples(samples) };
+  ghostMem = tape;
+  try {
+    localStorage.setItem(GHOST_KEY, JSON.stringify(tape));
+  } catch {
+    /* quota */
+  }
 }

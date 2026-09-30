@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Download, Flame, Globe, Play, Store, Sun, Trophy, Wallet, Bot, Volume2, VolumeX } from "lucide-react";
 import {
+  dayMod,
   daySeed,
   todayKey,
   untilMidnightLabel,
@@ -14,6 +15,7 @@ import { LOCALE_META } from "@/lib/game/i18n";
 import { LangModal } from "./LangModal";
 import { isMuted, setMuted, startMusic, stopMusic, unlockAudio } from "@/lib/game/audio";
 import { isNativeApp } from "@/lib/game/buddyNet";
+import { DayCard } from "./DayCard";
 
 export function Yard({
   save,
@@ -40,6 +42,8 @@ export function Yard({
   const clocked = save.lastClockDay === today;
   const signed = save.signedDay === today;
   const shift = shiftName(daySeed(today));
+  const mod = dayMod(today);
+  const modLabel = t(`yard.mod.${mod}` as MsgKey);
   const week = weekStamps(save);
   const labels = WEEK_LABELS[save.locale] ?? WEEK_LABELS.en;
   const left = untilMidnightLabel();
@@ -49,11 +53,13 @@ export function Yard({
     { id: "combo" as const, label: t("mission.combo"), done: save.missions.combo },
   ];
   const doneCount = missions.filter((m) => m.done).length;
-  const urgency = clocked
-    ? t("urgency.kept", { n: save.streak })
-    : save.streak > 0
-      ? t("urgency.burns", { n: save.streak, left })
-      : t("urgency.open", { shift });
+  const urgency = signed
+    ? t("banter.signed")
+    : clocked
+      ? t("banter.signNow")
+      : save.streak > 0
+        ? t("urgency.burns", { n: save.streak, left })
+        : t("urgency.open", { shift, mod: modLabel });
 
   const [langOpen, setLangOpen] = useState(false);
   const [muted, setMutedUi] = useState(isMuted);
@@ -110,8 +116,8 @@ export function Yard({
               </button>
               {!native && (
               <a
-                href="/Solarchik-CLOCK-IN-0.19.51.apk"
-                download="Solarchik-CLOCK-IN-0.19.51.apk"
+                href="/Solarchik-CLOCK-IN-0.19.52.apk"
+                download="Solarchik-CLOCK-IN-0.19.52.apk"
                 className="flex h-11 items-center gap-1.5 rounded-md bg-elevated px-3 text-sm font-semibold text-fg"
               >
                 <Download className="size-4" />
@@ -125,6 +131,7 @@ export function Yard({
             <div className="mb-2 flex items-center justify-between">
               <p className="text-xs font-semibold tracking-wide text-primary">{t("yard.week")}</p>
               <p className="font-display text-sm font-semibold text-fg">{shift}</p>
+              <p className="text-xs font-semibold text-muted">{modLabel}</p>
             </div>
             <ol className="grid grid-cols-7 gap-1.5">
               {week.map((d) => (
@@ -222,6 +229,7 @@ export function Yard({
                 {save.clockSig.slice(0, 4)}…{save.clockSig.slice(-4)} · {save.clockCluster} · підпис
               </p>
             ) : null}
+            {signed ? <DayCard save={save} t={t} shift={shift} modLabel={modLabel} /> : null}
           </div>
 
           <section className="mt-4 rounded-lg bg-surface p-3">
@@ -278,8 +286,8 @@ export function Yard({
 
           {!native && (
           <a
-            href="/Solarchik-CLOCK-IN-0.19.51.apk"
-            download="Solarchik-CLOCK-IN-0.19.51.apk"
+            href="/Solarchik-CLOCK-IN-0.19.52.apk"
+            download="Solarchik-CLOCK-IN-0.19.52.apk"
             className="mt-3 flex h-12 items-center justify-center gap-2 rounded-md bg-elevated px-5 text-sm font-semibold text-fg"
           >
             <Download className="size-4" />

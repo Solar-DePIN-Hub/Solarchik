@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { ChevronsDown, Heart, Home, Pause, Play, Shield, Volume2, VolumeX } from "lucide-react";
-import { createRun, step, chapterLabel, type Ev, type PlatSkin, type RunState, HEARTS } from "@/lib/game/sim";
+import { createRun, step, chapterLabel, type DayMod, type Ev, type PlatSkin, type RunState, HEARTS } from "@/lib/game/sim";
 import { drawWorld } from "@/lib/game/draw";
 import { isMuted, play, pauseMusic, setMuted, startMusic, stopMusic, unlockAudio } from "@/lib/game/audio";
 import type { RobotId } from "@/lib/game/robots";
@@ -8,6 +8,7 @@ import { SPR } from "@/lib/game/sprites";
 import type { Locale, TFunc } from "@/lib/game/i18n";
 import type { PetVibe, PetVoice } from "@/lib/game/pet";
 import { RunRadio } from "./RunRadio";
+import { todayKey, writeGhost } from "@/lib/game/save";
 
 type Props = {
   seed: number;
@@ -16,6 +17,7 @@ type Props = {
   robot: RobotId;
   offerBonus: boolean;
   careBoost?: boolean;
+  mod?: DayMod;
   t: TFunc;
   locale: Locale;
   buddyName: string;
@@ -41,6 +43,7 @@ export function RoofRun({
   robot,
   offerBonus,
   careBoost,
+  mod = "calm",
   t,
   locale,
   buddyName,
@@ -53,7 +56,7 @@ export function RoofRun({
   onRetry,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef<RunState>(createRun(seed, { skin, robot, offerBonus, careBoost }));
+  const stateRef = useRef<RunState>(createRun(seed, { skin, robot, offerBonus, careBoost, mod }));
   const inputRef = useRef({
     jumpPressed: false,
     jumpHeld: false,
@@ -62,8 +65,21 @@ export function RoofRun({
   });
   const ptrRef = useRef({ id: -1, y: 0, sliding: false });
   const reported = useRef(false);
+  const ghostWrote = useRef(false);
   const onResultRef = useRef(onResult);
   onResultRef.current = onResult;
+  const flushGhost = () => {
+    if (ghostWrote.current) return;
+    const s = stateRef.current;
+    const meters = Math.round(s.distance / 10);
+    if (meters < 400) return;
+    ghostWrote.current = true;
+    writeGhost(todayKey(), meters, s.ghostTape);
+  };
+  const leaveYard = () => {
+    flushGhost();
+    onYard();
+  };
   const [hud, setHud] = useState(() => snapshot(stateRef.current));
   const [muted, setMutedUi] = useState(isMuted);
   const [portrait, setPortrait] = useState(false);
@@ -226,6 +242,7 @@ export function RoofRun({
         radioRef.current?.push(events, state);
         if (state.phase === "dead" && !reported.current) {
           reported.current = true;
+          flushGhost();
           onResultRef.current({
             score: Math.round(state.score),
             suns: state.suns,
@@ -473,7 +490,7 @@ export function RoofRun({
               <button
                 type="button"
                 className="flex h-12 items-center justify-center gap-2 rounded-md bg-elevated font-semibold"
-                onClick={onYard}
+                onClick={leaveYard}
               >
                 <Home className="size-4" />
                 {t("run.yard")}
@@ -510,7 +527,7 @@ export function RoofRun({
               <button
                 type="button"
                 className="flex h-12 items-center justify-center gap-2 rounded-md bg-elevated font-semibold"
-                onClick={onYard}
+                onClick={leaveYard}
               >
                 <Home className="size-4" />
                 {t("run.yard")}

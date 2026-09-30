@@ -3,10 +3,12 @@ package net.solardepin.solarchik
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ShareCompat
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +41,7 @@ class MainActivity : ComponentActivity() {
         }
         findViewById<Button>(R.id.clock).setOnClickListener { clockIn() }
         findViewById<TextView>(R.id.proof).setOnClickListener { openProof() }
+        findViewById<Button>(R.id.share).setOnClickListener { shareDay() }
         render()
     }
 
@@ -60,6 +63,7 @@ class MainActivity : ComponentActivity() {
             append("Найкращий  ${save.bestDistance} м\n")
             append("Очки  ${save.lastScore}   streak ${save.streak}\n")
             append("Мережа  ${wallet.clusterName}\n")
+            append(modLine(save.dayMod()) + "\n")
             append("Стек  Solana Mobile · MWA")
         }
         val clock = findViewById<Button>(R.id.clock)
@@ -70,10 +74,12 @@ class MainActivity : ComponentActivity() {
             clocked -> "CLOCK IN"
             else -> "Спочатку 1200 м"
         }
+        findViewById<Button>(R.id.share).visibility = if (signed) View.VISIBLE else View.GONE
         findViewById<TextView>(R.id.status).text = when {
             signed && save.clockKind == "tx" -> "Транзакція на ${save.clockCluster}"
             signed && save.clockKind == "message" -> "Підпис повідомлення · ${save.clockCluster}"
-            clocked -> "Забіг зараховано. Підпиши день у Seed Vault."
+            save.lastDistance >= GameSave.GOAL_M && !signed -> "Забіг зараховано. Підпиши день…"
+            save.lastDistance in 1..399 -> "Перший дах зʼїв. Ще раз."
             else -> "Пробіжи 1200 м, потім CLOCK IN відкриє гаманець."
         }
         findViewById<TextView>(R.id.proof).text = when {
@@ -102,6 +108,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun shareDay() {
+        if (!save.signedToday() || save.clockSig.isBlank()) return
+        val text = "CLOCK IN ${save.lastDistance}m · streak ${save.streak}\n${shortSig(save.clockSig)} · ${save.clockCluster}"
+        val body = if (save.clockKind == "tx") {
+            val url = if (save.clockCluster == "devnet") {
+                "https://explorer.solana.com/tx/${save.clockSig}?cluster=devnet"
+            } else {
+                "https://explorer.solana.com/tx/${save.clockSig}"
+            }
+            "$text\n$url"
+        } else text
+        ShareCompat.IntentBuilder(this)
+            .setType("text/plain")
+            .setText(body)
+            .setChooserTitle("Поділитись")
+            .startChooser()
+    }
+
     private fun openProof() {
         if (save.clockKind != "tx" || save.clockSig.isBlank()) return
         val url = if (save.clockCluster == "devnet") {
@@ -110,6 +134,14 @@ class MainActivity : ComponentActivity() {
             "https://explorer.solana.com/tx/${save.clockSig}"
         }
         runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    }
+
+    private fun modLine(mod: String): String = when (mod) {
+        "wind" -> "Сьогодні вітер"
+        "gold" -> "Сьогодні золото"
+        "drones" -> "Сьогодні дрони"
+        "wire" -> "Сьогодні дріт"
+        else -> "Сьогодні спокій"
     }
 
     private fun shortSig(sig: String): String {

@@ -1,5 +1,6 @@
 import { Connection, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { encodeBase58 } from "@/lib/agents/base58";
+import { dayMod, todayKey } from "./save";
 
 const MEMO = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 let registered = false;
@@ -66,7 +67,7 @@ async function memoBytes(payer: PublicKey, rpc: string, memo: string): Promise<U
   return tx.serialize({ requireAllSignatures: false, verifySignatures: false });
 }
 
-export async function signClockInMwa(meters: number, score: number, streak: number): Promise<MwaProof> {
+export async function signClockInMwa(meters: number, _score: number, streak: number): Promise<MwaProof> {
   if (!androidPhone()) return { ok: false, error: "no-wallet" };
   try {
     await ensureWallet();
@@ -86,8 +87,8 @@ export async function signClockInMwa(meters: number, score: number, streak: numb
     const chain = account.chains.includes("solana:mainnet") ? "solana:mainnet" : "solana:devnet";
     const cluster = chain === "solana:mainnet" ? "mainnet" : "devnet";
     const rpc = cluster === "mainnet" ? "https://api.mainnet-beta.solana.com" : "https://api.devnet.solana.com";
-    const day = new Date().toISOString().slice(0, 10);
-    const memo = `SOLARCHIK CLOCK IN ${day} ${meters | 0}m score=${score | 0} streak=${streak | 0}`;
+    const day = todayKey();
+    const memo = `solarchik clock ${day} ${meters | 0}m s${streak | 0} ${dayMod(day)}`;
     const send = wallet.features["solana:signAndSendTransaction"];
     if (send) {
       try {

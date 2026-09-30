@@ -22,7 +22,7 @@ cd artifacts/solarchik-handoff/android
 bash ./gradlew :app:assembleRelease --no-daemon
 ```
 
-`keystore.properties` and the release `.jks` are not in git. Without them, `assembleDebug` still builds a debuggable APK signed with the debug key. The file shipped for review is `public/Solarchik-CLOCK-IN-0.19.51.apk`: release, not debuggable, Mobile Wallet Adapter, no WebView.
+`keystore.properties` and the release `.jks` are not in git. Without them, `assembleDebug` still builds a debuggable APK signed with the debug key. Source version is `0.19.52`. Rebuild `assembleRelease` and copy it to `public/Solarchik-CLOCK-IN-0.19.52.apk` before submit. The previous review file `public/Solarchik-CLOCK-IN-0.19.51.apk` does not include the day mod. Release, not debuggable, Mobile Wallet Adapter, no WebView.
 
 ## Web
 

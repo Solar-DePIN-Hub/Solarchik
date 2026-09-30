@@ -4,7 +4,7 @@ import type { Locale, TFunc } from "@/lib/game/i18n";
 import { cleanSpeech, isPetVoice, type PetVibe, type PetVoice } from "@/lib/game/pet";
 import { liveAsk, liveHear, liveSpeak, canNativeListen, nativeListen, nativeStopListen } from "@/lib/game/buddyNet";
 import { duckMusic, isVoiceOn, play, playVoiceB64, speakLocal, stopLocalVoice, unlockAudio } from "@/lib/game/audio";
-import { eventToBanter, pickBanter, periodicKind, runContext, type BanterKind } from "@/lib/game/runBanter";
+import { eventToBanter, pickBanter, periodicKind, runContext, scriptedBanter, type BanterKind } from "@/lib/game/runBanter";
 import type { Ev, RunState } from "@/lib/game/sim";
 
 type SpeechRec = {
@@ -68,6 +68,8 @@ export function RunRadio({ locale, name, vibe, voice, history, t, paused, live, 
   pausedLive.current = paused;
   const historyRef = useRef(history);
   historyRef.current = history;
+  const tRef = useRef(t);
+  tRef.current = t;
   const voiceOf = (): PetVoice => (isPetVoice(voice) ? voice : "eve");
 
   const show = (text: string) => {
@@ -197,11 +199,14 @@ export function RunRadio({ locale, name, vibe, voice, history, t, paused, live, 
     bind.current = {
       push: (events, state) => {
         stateRef.current = state;
+        const lineKey = scriptedBanter(state, events);
+        if (lineKey) show(tRef.current(lineKey));
         if (state.phase === "running" && !started.current) {
           started.current = true;
           banter("go", state);
         }
         for (const ev of events) {
+          if (lineKey && ev === "dead") continue;
           const kind = eventToBanter(ev);
           if (kind) banter(kind, state);
         }

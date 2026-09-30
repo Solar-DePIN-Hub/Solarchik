@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import net.solardepin.solarchik.game.GameSave
 import java.time.LocalDate
 import java.time.ZoneOffset
 
@@ -72,7 +73,7 @@ class SolanaWallet(context: Context) {
         streak: Int,
     ): Result<ClockProof> {
         val day = LocalDate.now(ZoneOffset.UTC)
-        val memo = "SOLARCHIK CLOCK IN $day ${meters}m score=$score streak=$streak"
+        val memo = "solarchik clock $day ${meters}m s$streak ${GameSave.dayModOf(day.toString())}"
         val sent = sendMemo(sender, memo)
         if (sent.isSuccess) return sent
         val err = sent.exceptionOrNull()

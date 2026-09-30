@@ -36,6 +36,8 @@ export type Particle = {
   color: string;
   ring?: boolean;
 };
+export type DayMod = "calm" | "wind" | "gold" | "drones" | "wire";
+
 export type Phase = "countdown" | "running" | "dead";
 
 export type Ev =
@@ -121,6 +123,10 @@ export type RunState = {
   chapter: ChapterId;
   announce: string;
   announceLife: number;
+  mod: DayMod;
+  ghostTape: { x: number; y: number; grounded: boolean }[];
+  ghostBucket: number;
+  lastHeartSaid: boolean;
 };
 
 export const BANDS = [168, 216, 264] as const;
@@ -306,6 +312,13 @@ function spawnChunk(s: RunState, fromX: number, count: number) {
 
     const y = BANDS[band];
     addPlat(s, x, y, w);
+    if (s.mod === "wire" && w >= 220 && chance(s, 0.22)) {
+      const plat = s.plats[s.plats.length - 1];
+      if (plat) {
+        plat.kind = "wire";
+        plat.w = w * 0.4;
+      }
+    }
 
     s.picks.push({ x: x + w * 0.22, y: y - 48, gold: false, shield: false, taken: false });
     if (chance(s, 0.65)) {
@@ -314,7 +327,7 @@ function spawnChunk(s: RunState, fromX: number, count: number) {
     s.picks.push({
       x: x + w + gap * 0.5,
       y: y - 66 - rand(s, 0, 20),
-      gold: chance(s, 0.14),
+      gold: chance(s, s.mod === "gold" ? 0.28 : 0.14),
       shield: false,
       taken: false,
     });
@@ -325,18 +338,19 @@ function spawnChunk(s: RunState, fromX: number, count: number) {
       s.picks.push({ x: x + w * 0.55, y: y - 58, gold: false, shield: true, taken: false });
     }
 
-    const canHazard = !s.bonus && x > 8000 && w >= 200 && s.sinceHazard >= 2;
+    const canHazard = !s.bonus && x > (s.mod === "drones" ? 4200 : 8000) && w >= 200 && s.sinceHazard >= 2;
     let placed = false;
     if (canHazard && chance(s, 0.42 + diff * 0.18)) {
       const pick = rand(s, 0, 1);
       const hx = x + Math.max(100, w * 0.58);
+      const droneAt = s.mod === "drones" ? 0.5 : 0.72;
       if (pick < 0.4) {
         addEnemy(s, "mite", hx, y);
         placed = true;
-      } else if (pick < 0.72) {
+      } else if (pick < droneAt) {
         addEnemy(s, "bush", x + w * 0.52, y);
         placed = true;
-      } else if (x > 5200 && w >= 220) {
+      } else if (s.mod === "drones" || (x > 5200 && w >= 220)) {
         addEnemy(s, "drone", x + w * 0.62, y);
         placed = true;
       } else {
@@ -454,7 +468,7 @@ function exitBonus(s: RunState) {
   spawnChunk(s, s.spawnX, 16);
 }
 
-export function createRun(seed: number, opts?: { skin?: PlatSkin; robot?: RobotId; offerBonus?: boolean; careBoost?: boolean }): RunState {
+export function createRun(seed: number, opts?: { skin?: PlatSkin; robot?: RobotId; offerBonus?: boolean; careBoost?: boolean; mod?: DayMod }): RunState {
   const s: RunState = {
     seed,
     phase: "countdown",
@@ -511,6 +525,10 @@ export function createRun(seed: number, opts?: { skin?: PlatSkin; robot?: RobotI
     chapter: "sunrise",
     announce: "",
     announceLife: 0,
+    mod: opts?.mod ?? "calm",
+    ghostTape: [],
+    ghostBucket: -1,
+    lastHeartSaid: false,
   };
 
   addPlat(s, 0, BANDS[1], 1020);
@@ -545,7 +563,7 @@ export function createRun(seed: number, opts?: { skin?: PlatSkin; robot?: RobotI
 }
 
 function doJump(s: RunState, events: Ev[], doubleJump: boolean) {
-  s.vy = doubleJump ? DOUBLE_V : JUMP_V;
+  s.vy = doubleJump ? DOUBLE_V : s.mod === "wind" ? JUMP_V * 0.94 : JUMP_V;
   s.grounded = false;
   s.coyote = 0;
   s.jumpBuf = 0;
@@ -733,8 +751,17 @@ export function step(prev: RunState, dtRaw: number, input: Input): { state: RunS
 
   const spd = speedAt(s);
   s.x += spd * dt;
+  if (s.mod === "wind") s.x += 18 * dt;
   s.distance = s.x;
   s.runPhase += dt * (s.grounded ? 6.4 + spd * 0.006 : 3);
+  if (s.phase === "running") {
+    const bucket = (s.x | 0) / 48 | 0;
+    if (bucket !== s.ghostBucket) {
+      s.ghostBucket = bucket;
+      s.ghostTape.push({ x: s.x, y: s.y, grounded: s.grounded });
+      if (s.ghostTape.length > 480) s.ghostTape.splice(0, s.ghostTape.length - 480);
+    }
+  }
 
   if (!s.bonus) {
     const ch = chapterAt(s.distance);
