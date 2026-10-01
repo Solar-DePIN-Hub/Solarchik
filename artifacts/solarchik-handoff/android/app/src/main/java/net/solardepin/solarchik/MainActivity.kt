@@ -141,13 +141,12 @@ class MainActivity : ComponentActivity() {
         Ui.init(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(buildRoot())
-        val start = intent?.getStringExtra(EXTRA_TAB)?.let { name -> Tab.entries.firstOrNull { it.name == name } }
-            ?: savedInstanceState?.getString("tab")?.let { name -> Tab.entries.firstOrNull { it.name == name } } ?: Tab.YARD
-        select(start)
+        select(startTab(savedInstanceState?.getString("tab"), intent?.getStringExtra(EXTRA_TAB)))
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         intent.getStringExtra(EXTRA_TAB)?.let { name -> Tab.entries.firstOrNull { it.name == name } }?.let { select(it) }
     }
 
@@ -205,6 +204,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        screens.values.forEach { runCatching { it.onDestroy() } }
         main.removeCallbacksAndMessages(null)
         scope.cancel()
         super.onDestroy()
@@ -367,6 +367,14 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        /**
+         * Tab to open. A recreated activity (rotation on some OEMs, locale change, process death)
+         * returns to the tab the player was on; a notification's tab applies to a fresh start.
+         */
+        /** The tab restored after rotation / process death wins over the launch intent; unknown names fall through. */
+        fun startTab(saved: String?, fromIntent: String?): Tab =
+            listOfNotNull(saved, fromIntent).firstNotNullOfOrNull { name -> Tab.entries.firstOrNull { it.name == name } } ?: Tab.YARD
+
         private val TOAST = Any()
         private const val TICK_MS = 30_000L
         const val EXTRA_TAB = "net.solardepin.solarchik.TAB"

@@ -49,6 +49,8 @@ abstract class Screen(val host: MainActivity) {
     open fun render() {}
     open fun onShow() { render() }
     open fun onHide() {}
+    /** The activity is going away: release services (TTS, recognizer). */
+    open fun onDestroy() {}
 }
 
 object Fmt {

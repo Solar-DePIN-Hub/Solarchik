@@ -1,5 +1,6 @@
 package net.solardepin.solarchik.screen
 
+import android.os.Build
 import android.telecom.Call
 import android.telecom.CallScreeningService
 import android.util.Log
@@ -7,18 +8,15 @@ import org.json.JSONObject
 
 class IncomingScreenService : CallScreeningService() {
     override fun onScreenCall(details: Call.Details) {
-        if (details.callDirection != Call.Details.DIRECTION_INCOMING) {
-            respondToCall(details, CallResponse.Builder().build())
-            return
-        }
-        if (!PlayerIds.screeningOn(this)) {
-            respondToCall(details, CallResponse.Builder().build())
-            return
-        }
+        // Call.Details.getCallDirection() exists only on API 29+; before that the
+        // service is only bound for incoming calls.
+        val incoming = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            details.callDirection == Call.Details.DIRECTION_INCOMING
         val number = details.handle?.schemeSpecificPart.orEmpty()
-        val hit = ContactsGate.lookup(this, number)
-
-        if (hit.known) {
+        val readable = ContactsGate.canRead(this)
+        val screeningOn = incoming && PlayerIds.screeningOn(this)
+        val hit = if (screeningOn && readable) ContactsGate.lookup(this, number) else ContactsGate.Hit(false, "", number)
+        if (!shouldReject(incoming, screeningOn, readable, hit.known)) {
             respondToCall(details, CallResponse.Builder().build())
             return
         }
@@ -60,5 +58,15 @@ class IncomingScreenService : CallScreeningService() {
             .put("needTopup", out.needTopup)
         DeskStore.addMessage(this, row)
         IncomingBus.emit(row)
+    }
+
+    companion object {
+        /**
+         * Reject only an incoming call, with screening on, that we could check
+         * against the phone book and did not find. Without READ_CONTACTS every
+         * caller would look unknown, so we let the call through.
+         */
+        fun shouldReject(incoming: Boolean, screeningOn: Boolean, contactsReadable: Boolean, known: Boolean): Boolean =
+            incoming && screeningOn && contactsReadable && !known
     }
 }

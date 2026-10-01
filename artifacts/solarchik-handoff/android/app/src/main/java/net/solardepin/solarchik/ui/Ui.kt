@@ -254,10 +254,19 @@ object Ui {
     }
 
     // ---------- color helpers ----------
+    /** Accessibility: tappable chips get at least a 44dp touch height. */
+    fun <T : TextView> tappable(v: T): T = v.apply {
+        minHeight = context.dp(TAP_MIN_DP)
+        minimumHeight = context.dp(TAP_MIN_DP)
+    }
+
+    const val TAP_MIN_DP = 44
+
     fun switchRow(ctx: Context, label: String, on: Boolean, cb: (android.widget.CompoundButton, Boolean) -> Unit): LinearLayout {
         val r = row(ctx)
         r.addView(weight(body(ctx, label)))
         val sw = android.widget.Switch(ctx).apply {
+            contentDescription = label
             isChecked = on
             thumbTintList = android.content.res.ColorStateList(
                 arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()), intArrayOf(GOLD, MUTED),
@@ -268,6 +277,9 @@ object Ui {
             setOnCheckedChangeListener(cb)
         }
         r.addView(sw)
+        r.minimumHeight = ctx.dp(48)
+        r.isClickable = true
+        r.setOnClickListener { sw.toggle() }
         return r
     }
 
@@ -285,7 +297,7 @@ object Ui {
                 background = if (on) gradient(intArrayOf(GOLD, AMBER), ctx.dp(14).toFloat(), GradientDrawable.Orientation.LEFT_RIGHT) else null
                 setOnClickListener { if (!on) { it.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY); onPick(i) } }
             }
-            seg.addView(tv, LinearLayout.LayoutParams(0, ctx.dp(40), 1f))
+            seg.addView(tv, LinearLayout.LayoutParams(0, ctx.dp(TAP_MIN_DP), 1f))
         }
         return seg
     }

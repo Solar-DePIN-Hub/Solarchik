@@ -15,13 +15,10 @@
     <string name="network_devnet">Devnet</string>
     <string name="network_mainnet">Mainnet</string>
     <string name="wallet_connect">Connect wallet</string>
-    <string name="wallet_none">No wallet</string>
     <string name="copied">Copied</string>
     <string name="open_explorer">Explorer</string>
     <string name="share">Share</string>
     <string name="share_title">Share your day</string>
-    <string name="refresh">Refresh</string>
-    <string name="soon">Soon</string>
 
     <!-- Yard -->
     <string name="yard_tagline">Clock in daily. Grow your solar crew.</string>
@@ -29,7 +26,6 @@
     <string name="yard_today_title">Today\'s shift</string>
     <string name="yard_run_progress">%1$d / %2$d m</string>
     <string name="yard_best">Best %1$d m</string>
-    <string name="yard_score">Score %1$d</string>
     <string name="yard_go_run">Run %1$d m</string>
     <string name="yard_clock_in">CLOCK IN</string>
     <string name="yard_signing">Waiting for wallet…</string>
@@ -51,14 +47,14 @@
     <string name="yard_fee_ready_more">%1$d rewards waiting. They start only when you tap.</string>
     <string name="yard_fee_ready_one">It starts only when you tap. Use it when your agents trade.</string>
     <string name="yard_fee_active">Fee-free window active</string>
-    <string name="yard_fee_active_sub">Positions opened now pay 0% performance fee, even if they close later.</string>
+    <string name="yard_fee_active_sub" formatted="false">Positions opened now pay 0% performance fee, even if they close later.</string>
     <string name="yard_fee_activate">Activate fee-free window</string>
     <string name="yard_fee_rules">Every 7 signed days: 48h fee-free. Every 30: 7 days fee-free.</string>
     <string name="window_48h">48h</string>
     <string name="window_7d">7-day</string>
     <string name="yard_crew_title">Your crew</string>
     <string name="yard_crew_empty">No agents yet. Mint a free strategy NFT, or try any strategy on paper.</string>
-    <string name="yard_crew_line">%1$d agents · P&amp;L %2$s SOL · fees saved %3$s SOL</string>
+    <string name="yard_crew_line">Agents: %1$d · P&amp;L %2$s SOL · fees saved %3$s SOL</string>
     <string name="yard_sol_title">Sol says</string>
     <string name="yard_granted">New reward: %1$s fee-free window!</string>
     <string name="yard_activated">Fee-free window started</string>
@@ -93,9 +89,9 @@
     <string name="agents_sub">Each strategy is a Metaplex Core NFT you own. It forecasts and acts only within your limits.</string>
     <string name="tier_free">Free</string>
     <string name="tier_pro">Pro</string>
-    <string name="tier_free_line">Free mint · one per wallet · 5% fee on realized profit only</string>
+    <string name="tier_free_line" formatted="false">Free mint · one per wallet · 5% fee on realized profit only</string>
     <string name="tier_pro_line">%1$s SOL · 0%% performance fee · forever</string>
-    <string name="tier_royalty">Both tiers: 5% royalty on resale.</string>
+    <string name="tier_royalty" formatted="false">Both tiers: 5% royalty on resale.</string>
     <string name="mint_free">Mint free</string>
     <string name="mint_pro">Mint Pro · %1$s SOL</string>
     <string name="mint_busy">Minting…</string>
@@ -103,7 +99,7 @@
     <string name="mint_pro_off">Pro on mainnet soon</string>
     <string name="mint_ok">Minted %1$s. Verifying on chain…</string>
     <string name="mint_verified">%1$s is on chain and yours.</string>
-    <string name="mint_err_free">This wallet already has its free agent. Go Pro for 0% fee.</string>
+    <string name="mint_err_free" formatted="false">This wallet already has its free agent. Go Pro for 0% fee.</string>
     <string name="mint_err_pro_off">Paid Pro mint is off on mainnet for now. Switch to devnet in Settings.</string>
     <string name="mint_err_big">Transaction too big. Nothing was sent.</string>
     <string name="mint_lanes">Market: %1$s</string>
@@ -120,9 +116,9 @@
     <string name="agent_fee_line">Performance fee %1$s</string>
     <string name="ledger_title">Fee ledger</string>
     <string name="ledger_empty">No closed positions yet. Start a strategy on the desk; every close lands here with its fee decision.</string>
-    <string name="ledger_summary">%1$d positions · P&amp;L %2$s SOL</string>
+    <string name="ledger_summary">Positions: %1$d · P&amp;L %2$s SOL</string>
     <string name="ledger_fees">Charged %1$s · owed %2$s · waived %3$s SOL</string>
-    <string name="reason_pro">Pro · 0% fee</string>
+    <string name="reason_pro" formatted="false">Pro · 0% fee</string>
     <string name="reason_window">Fee-free window · waived</string>
     <string name="reason_loss">Loss · no fee</string>
     <string name="reason_paper">Paper · not sent</string>
@@ -142,25 +138,18 @@
     <string name="class_combo_blurb">One strategy: crypto 15m, events and weather. Takes the strongest forecast.</string>
 
     <!-- SKUs (web catalog.ts) -->
-    <string name="sku_alpha_blurb">Bitcoin 15-minute windows on the live Coinbase price. Forecasts up or down and enters only when confidence ≥65%.</string>
-    <string name="sku_events_blurb">Polymarket events beyond Bitcoin. Follows the favorite outcome only when it is at ≥65%.</string>
-    <string name="sku_weather_blurb">Kyiv temperature from Open-Meteo in 1-hour windows. Forecasts the next move, enters at ≥65% confidence.</string>
-    <string name="sku_combo_blurb">Three markets in one strategy: Bitcoin 15m, events, weather. Takes the strongest forecast at ≥65%.</string>
-    <string name="sku_arb_blurb">SOL/USDC on Backpack in 10-minute windows. Enters only when the move clears the edge and confidence ≥65%.</string>
+    <string name="sku_alpha_blurb" formatted="false">Bitcoin 15-minute windows on the live Coinbase price. Forecasts up or down and enters only when confidence ≥65%.</string>
+    <string name="sku_events_blurb" formatted="false">Polymarket events beyond Bitcoin. Follows the favorite outcome only when it is at ≥65%.</string>
+    <string name="sku_weather_blurb" formatted="false">Kyiv temperature from Open-Meteo in 1-hour windows. Forecasts the next move, enters at ≥65% confidence.</string>
+    <string name="sku_combo_blurb" formatted="false">Three markets in one strategy: Bitcoin 15m, events, weather. Takes the strongest forecast at ≥65%.</string>
+    <string name="sku_arb_blurb" formatted="false">SOL/USDC on Backpack in 10-minute windows. Enters only when the move clears the edge and confidence ≥65%.</string>
 
     <!-- Sol -->
     <string name="sol_title">Sol</string>
     <string name="sol_sub">Your pocket solar friend. Talk or type; Sol answers in your language.</string>
-    <string name="sol_report_title">Daily report</string>
-    <string name="sol_report_streak">Streak: %1$d days.</string>
-    <string name="sol_report_signed">Today is signed. Nice shift.</string>
-    <string name="sol_report_unsigned">Today is not signed yet.</string>
-    <string name="sol_report_agents">Agents: %1$d. Closed positions: %2$d.</string>
-    <string name="sol_report_window">Fee-free window: %1$s left.</string>
-    <string name="sol_chat_soon">Chat and voice with Sol arrive in the next update.</string>
     <string name="sol_tip_1">Run first, then sign. The streak only counts signed days.</string>
     <string name="sol_tip_2">Save a fee-free window for the days your agents trade the most.</string>
-    <string name="sol_tip_3">Pro agents never pay a performance fee. Free agents pay 5% only on profit.</string>
+    <string name="sol_tip_3" formatted="false">Pro agents never pay a performance fee. Free agents pay 5% only on profit.</string>
     <string name="sol_tip_4">Your ghost from yesterday runs with you. Beat it.</string>
     <string name="sol_tip_5">Losses never pay a fee. Only realized profit does.</string>
 
@@ -195,7 +184,6 @@
     <string name="err_failed">Wallet error: %1$s</string>
 
     <!-- Notifications (copy from the Grok export, scheduling lands in milestone B) -->
-    <string name="fee_activate">Activate fee-free window</string>
     <string name="note_channel">Solarchik</string>
     <string name="note_streak_title">Streak</string>
     <string name="note_streak_body">Sign today or the streak ends in about 3 hours.</string>
@@ -212,7 +200,7 @@
     <string name="desk_tab">Desk</string>
     <string name="strategies_tab">Strategies</string>
     <string name="desk_title">Agent desk</string>
-    <string name="desk_sub">Strategies forecast on live market data and hold each position for one window. Positions are simulated; on Devnet the Free-tier 5% fee settles in devnet SOL.</string>
+    <string name="desk_sub" formatted="false">Strategies forecast on live market data and hold each position for one window. Positions are simulated; on Devnet the Free-tier 5% fee settles in devnet SOL.</string>
     <string name="track_paper">Paper</string>
     <string name="track_devnet">Devnet</string>
     <string name="track_paper_hint">Paper: a virtual 1 SOL purse. Any strategy, no mint needed. Fees are only recorded.</string>
@@ -229,7 +217,7 @@
     <string name="desk_status_stopped">Stopped</string>
     <string name="desk_status_holding">In position</string>
     <string name="desk_open_line">%1$s · %2$s SOL · closes in %3$s</string>
-    <string name="desk_stats">%1$d positions · %2$d W / %3$d L · %4$s SOL</string>
+    <string name="desk_stats">Positions: %1$d · %2$d W / %3$d L · %4$s SOL</string>
     <string name="desk_devnet_empty">Mint a strategy NFT on devnet (Strategies tab) to run it here. Paper works without a mint.</string>
     <string name="desk_devnet_connect">Connect a devnet wallet to run your own strategy NFTs.</string>
     <string name="desk_trial">Trial</string>
@@ -249,7 +237,7 @@
     <string name="ev_close">%1$s closed %2$s · %3$s · %4$s SOL</string>
     <string name="ev_nodata">%1$s: market data did not load. Waiting.</string>
     <string name="block_paused">Desk paused</string>
-    <string name="block_losses">%1$d losses in a row (limit)</string>
+    <string name="block_losses">Losses in a row: %1$d (limit)</string>
     <string name="block_trade">Position limit %1$s SOL</string>
     <string name="block_day_cap">Day limit %1$s SOL</string>
     <string name="block_day_loss">Day loss stop %1$s SOL</string>
@@ -262,8 +250,8 @@
     <string name="risk_pause">Pause all strategies</string>
     <string name="risk_hard">max %1$s</string>
     <string name="fees_title">Fees</string>
-    <string name="fees_owed">Owed %1$s SOL from %2$d profitable Free-tier positions.</string>
-    <string name="fees_none">Nothing owed. Pro pays 0%; losses, paper and fee-free windows pay nothing.</string>
+    <string name="fees_owed">Owed %1$s SOL · profitable Free-tier positions: %2$d.</string>
+    <string name="fees_none" formatted="false">Nothing owed. Pro pays 0%; losses, paper and fee-free windows pay nothing.</string>
     <string name="fees_pay">Pay %1$s SOL on devnet</string>
     <string name="fees_paid">Fees paid on devnet</string>
     <string name="fees_devnet_only">Fees settle on devnet only. Turn on Force devnet in Settings.</string>
@@ -278,7 +266,6 @@
     <string name="report_none">No closed positions today.</string>
     <string name="report_positions">Closed positions: %1$d, in profit: %2$d. P&amp;L %3$s SOL.</string>
     <string name="report_fees">Fees charged %1$s, owed %2$s, waived %3$s SOL.</string>
-    <string name="report_streak">Streak: %1$d days.</string>
     <string name="report_signed">Today is signed.</string>
     <string name="report_unsigned">Today is not signed yet.</string>
     <string name="report_run">Roof run today: %1$d m.</string>
@@ -301,7 +288,6 @@
     <string name="chat_mic_denied">Microphone access is off. Typing still works.</string>
     <string name="chat_tts_missing">This phone has no voice for this language. Replies stay as text.</string>
     <string name="chat_fallback">server fallback</string>
-    <string name="chat_offline">offline</string>
     <string name="chat_clear">Clear</string>
     <string name="yard_crew_desk">Desk: %1$d running · %2$d in position</string>
     <string name="rule_window">Every %1$d signed days in a row earn a %2$d-hour fee-free window, and every %3$d days a %4$d-day one. It starts only when you tap Activate. A position opened inside an activated window pays no fee, even if it closes later.</string>
@@ -309,4 +295,14 @@
     <string name="rule_fee">Free strategies pay %1$d%% only on realized profit; losses pay nothing. Pro costs %2$s SOL once and pays 0%%. Both carry a %3$d%% royalty on resale.</string>
     <string name="rule_risk">Hard limits: %1$s SOL per position, %2$s SOL per day, stop after %3$d losses in a row or %4$s SOL lost in a day. You can only set them lower on the desk.</string>
     <string name="chat_rules">Sol · game rules</string>
+    <string name="chat_mic">Speak to Sol</string>
+    <string name="share_text">CLOCK IN %1$dm · streak %2$d</string>
+    <string name="fees_pending">The last fee payment is still being confirmed. Try again in a few minutes.</string>
+    <string name="agents_cluster">METAPLEX CORE · %1$s</string>
+    <string name="risk_less">Lower: %1$s</string>
+    <string name="risk_more">Raise: %1$s</string>
+    <plurals name="report_streak_days">
+        <item quantity="one">Streak: %1$d day.</item>
+        <item quantity="other">Streak: %1$d days.</item>
+    </plurals>
 </resources>

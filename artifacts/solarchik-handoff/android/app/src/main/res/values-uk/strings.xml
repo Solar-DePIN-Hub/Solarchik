@@ -13,20 +13,16 @@
     <string name="network_devnet">Devnet</string>
     <string name="network_mainnet">Mainnet</string>
     <string name="wallet_connect">Підключити гаманець</string>
-    <string name="wallet_none">Без гаманця</string>
     <string name="copied">Скопійовано</string>
     <string name="open_explorer">Explorer</string>
     <string name="share">Поділитись</string>
     <string name="share_title">Поділитись днем</string>
-    <string name="refresh">Оновити</string>
-    <string name="soon">Скоро</string>
 
     <string name="yard_tagline">Відмічайся щодня. Рости свою сонячну команду.</string>
     <string name="yard_streak_label">днів поспіль</string>
     <string name="yard_today_title">Зміна</string>
     <string name="yard_run_progress">%1$d / %2$d м</string>
     <string name="yard_best">Найкращий %1$d м</string>
-    <string name="yard_score">Очки %1$d</string>
     <string name="yard_go_run">Забіг %1$d м</string>
     <string name="yard_clock_in">CLOCK IN</string>
     <string name="yard_signing">Чекаю гаманець…</string>
@@ -48,7 +44,7 @@
     <string name="yard_fee_ready_more">Чекає нагород: %1$d. Стартують лише після кнопки.</string>
     <string name="yard_fee_ready_one">Стартує лише після кнопки. Вмикай, коли агенти торгують.</string>
     <string name="yard_fee_active">Вікно без комісії активне</string>
-    <string name="yard_fee_active_sub">Позиції, відкриті зараз, платять 0% комісії, навіть якщо закриються пізніше.</string>
+    <string name="yard_fee_active_sub" formatted="false">Позиції, відкриті зараз, платять 0% комісії, навіть якщо закриються пізніше.</string>
     <string name="yard_fee_activate">Увімкнути вікно без комісії</string>
     <string name="yard_fee_rules">Кожні 7 підписаних днів — 48 год без комісії. Кожні 30 — 7 днів.</string>
     <string name="window_48h">48 год</string>
@@ -88,9 +84,9 @@
     <string name="agents_sub">Кожна стратегія — твій NFT Metaplex Core. Вона прогнозує і діє лише в межах твоїх лімітів.</string>
     <string name="tier_free">Free</string>
     <string name="tier_pro">Pro</string>
-    <string name="tier_free_line">Безкоштовно · один на гаманець · 5% лише з реалізованого прибутку</string>
+    <string name="tier_free_line" formatted="false">Безкоштовно · один на гаманець · 5% лише з реалізованого прибутку</string>
     <string name="tier_pro_line">%1$s SOL · 0%% комісії з прибутку · назавжди</string>
-    <string name="tier_royalty">Обидва рівні: 5% роялті при перепродажі.</string>
+    <string name="tier_royalty" formatted="false">Обидва рівні: 5% роялті при перепродажі.</string>
     <string name="mint_free">Збити безкоштовно</string>
     <string name="mint_pro">Pro · %1$s SOL</string>
     <string name="mint_busy">Збиваю…</string>
@@ -98,7 +94,7 @@
     <string name="mint_pro_off">Pro на mainnet — скоро</string>
     <string name="mint_ok">Збито %1$s. Перевіряю в мережі…</string>
     <string name="mint_verified">%1$s у мережі й твій.</string>
-    <string name="mint_err_free">Цей гаманець уже має безкоштовного агента. Pro — 0% комісії.</string>
+    <string name="mint_err_free" formatted="false">Цей гаманець уже має безкоштовного агента. Pro — 0% комісії.</string>
     <string name="mint_err_pro_off">Платний Pro на mainnet поки вимкнено. Увімкни devnet у Налаштуваннях.</string>
     <string name="mint_err_big">Транзакція завелика. Нічого не відправлено.</string>
     <string name="mint_lanes">Ринок: %1$s</string>
@@ -117,7 +113,7 @@
     <string name="ledger_empty">Закритих позицій ще немає. Запусти стратегію на пульті; кожне закриття потрапить сюди з рішенням про комісію.</string>
     <string name="ledger_summary">Позицій: %1$d · P&amp;L %2$s SOL</string>
     <string name="ledger_fees">Списано %1$s · борг %2$s · прощено %3$s SOL</string>
-    <string name="reason_pro">Pro · 0% комісії</string>
+    <string name="reason_pro" formatted="false">Pro · 0% комісії</string>
     <string name="reason_window">Вікно без комісії · прощено</string>
     <string name="reason_loss">Збиток · без комісії</string>
     <string name="reason_paper">Папір · не відправлено</string>
@@ -135,24 +131,17 @@
     <string name="class_combo_short">Комбо</string>
     <string name="class_combo_blurb">Одна стратегія: крипто 15 хв, події і погода. Бере найсильніший прогноз.</string>
 
-    <string name="sku_alpha_blurb">Вікна біткоїна по 15 хв на живій ціні Coinbase. Прогнозує вгору чи вниз і входить лише за впевненості ≥65%.</string>
-    <string name="sku_events_blurb">Події Polymarket поза біткоїном. Іде за фаворитом лише коли він має ≥65%.</string>
-    <string name="sku_weather_blurb">Температура Києва з Open-Meteo, вікна по 1 год. Прогнозує наступний рух, входить від 65% впевненості.</string>
-    <string name="sku_combo_blurb">Три ринки в одній стратегії: біткоїн 15 хв, події, погода. Бере найсильніший прогноз від 65%.</string>
-    <string name="sku_arb_blurb">SOL/USDC на Backpack, вікна по 10 хв. Входить лише коли рух більший за поріг і впевненість ≥65%.</string>
+    <string name="sku_alpha_blurb" formatted="false">Вікна біткоїна по 15 хв на живій ціні Coinbase. Прогнозує вгору чи вниз і входить лише за впевненості ≥65%.</string>
+    <string name="sku_events_blurb" formatted="false">Події Polymarket поза біткоїном. Іде за фаворитом лише коли він має ≥65%.</string>
+    <string name="sku_weather_blurb" formatted="false">Температура Києва з Open-Meteo, вікна по 1 год. Прогнозує наступний рух, входить від 65% впевненості.</string>
+    <string name="sku_combo_blurb" formatted="false">Три ринки в одній стратегії: біткоїн 15 хв, події, погода. Бере найсильніший прогноз від 65%.</string>
+    <string name="sku_arb_blurb" formatted="false">SOL/USDC на Backpack, вікна по 10 хв. Входить лише коли рух більший за поріг і впевненість ≥65%.</string>
 
     <string name="sol_title">Сол</string>
     <string name="sol_sub">Твій кишеньковий сонячний друг. Говори або пиши; Sol відповідає твоєю мовою.</string>
-    <string name="sol_report_title">Денний звіт</string>
-    <string name="sol_report_streak">Стрік: %1$d дн.</string>
-    <string name="sol_report_signed">Сьогодні підписано. Гарна зміна.</string>
-    <string name="sol_report_unsigned">Сьогодні ще не підписано.</string>
-    <string name="sol_report_agents">Агентів: %1$d. Закритих позицій: %2$d.</string>
-    <string name="sol_report_window">Вікно без комісії: лишилось %1$s.</string>
-    <string name="sol_chat_soon">Чат і голос із Солом — у наступному оновленні.</string>
     <string name="sol_tip_1">Спершу забіг, потім підпис. Стрік рахує лише підписані дні.</string>
     <string name="sol_tip_2">Бережи вікно без комісії для днів, коли агенти торгують найбільше.</string>
-    <string name="sol_tip_3">Pro-агенти не платять комісію з прибутку. Free — 5% лише з прибутку.</string>
+    <string name="sol_tip_3" formatted="false">Pro-агенти не платять комісію з прибутку. Free — 5% лише з прибутку.</string>
     <string name="sol_tip_4">Твій учорашній привид біжить поруч. Обжени його.</string>
     <string name="sol_tip_5">Збиток ніколи не платить комісію. Лише реалізований прибуток.</string>
 
@@ -161,7 +150,7 @@
     <string name="settings_wallet_none">Не підключено. Працює через Mobile Wallet Adapter (Seed Vault на Seeker, Phantom чи Solflare деінде).</string>
     <string name="settings_balance">Баланс</string>
     <string name="settings_disconnect">Забути</string>
-    <string name="settings_airdrop">Airdrop %1$s devnet SOL</string>
+    <string name="settings_airdrop">Отримати %1$s devnet SOL</string>
     <string name="settings_airdrop_busy">Прошу airdrop…</string>
     <string name="settings_airdrop_ok">Airdrop відправлено. Баланс оновиться за кілька секунд.</string>
     <string name="settings_airdrop_fail">Devnet-кран відмовив (часто ліміт). Спробуй пізніше або faucet.solana.com.</string>
@@ -183,8 +172,6 @@
     <string name="err_declined">Гаманець не підписав. Нічого не відправлено.</string>
     <string name="err_network">Проблема з мережею. Перевір звʼязок і спробуй ще.</string>
     <string name="err_failed">Помилка гаманця: %1$s</string>
-
-    <string name="fee_activate">Увімкнути вікно без комісії</string>
     <string name="note_channel">Соларчик</string>
     <string name="note_streak_title">Стрік</string>
     <string name="note_streak_body">Підпиши день, інакше стрік згасне приблизно за 3 години.</string>
@@ -201,7 +188,7 @@
     <string name="desk_tab">Пульт</string>
     <string name="strategies_tab">Стратегії</string>
     <string name="desk_title">Пульт агентів</string>
-    <string name="desk_sub">Стратегії прогнозують на живих даних ринку і тримають позицію одне вікно. Позиції симульовані; на Devnet комісія Free 5% сплачується в devnet SOL.</string>
+    <string name="desk_sub" formatted="false">Стратегії прогнозують на живих даних ринку і тримають позицію одне вікно. Позиції симульовані; на Devnet комісія Free 5% сплачується в devnet SOL.</string>
     <string name="track_paper">Папір</string>
     <string name="track_devnet">Devnet</string>
     <string name="track_paper_hint">Папір: віртуальний гаманець 1 SOL. Будь-яка стратегія, без мінту. Комісії лише записуються.</string>
@@ -218,7 +205,7 @@
     <string name="desk_status_stopped">Зупинено</string>
     <string name="desk_status_holding">У позиції</string>
     <string name="desk_open_line">%1$s · %2$s SOL · закриття через %3$s</string>
-    <string name="desk_stats">%1$d позицій · %2$d+ / %3$d− · %4$s SOL</string>
+    <string name="desk_stats">Позицій: %1$d · %2$d+ / %3$d− · %4$s SOL</string>
     <string name="desk_devnet_empty">Створи NFT стратегії в devnet (вкладка «Стратегії»), щоб запустити її тут. Папір працює без мінту.</string>
     <string name="desk_devnet_connect">Підключи гаманець devnet, щоб запускати свої NFT.</string>
     <string name="desk_trial">Пробна</string>
@@ -238,7 +225,7 @@
     <string name="ev_close">%1$s закрив: %2$s · %3$s · %4$s SOL</string>
     <string name="ev_nodata">%1$s: дані ринку не завантажились. Чекаю.</string>
     <string name="block_paused">Пульт на паузі</string>
-    <string name="block_losses">%1$d збитки поспіль (ліміт)</string>
+    <string name="block_losses">Збитків поспіль: %1$d (ліміт)</string>
     <string name="block_trade">Ліміт позиції %1$s SOL</string>
     <string name="block_day_cap">Денний ліміт %1$s SOL</string>
     <string name="block_day_loss">Денний стоп %1$s SOL</string>
@@ -251,8 +238,8 @@
     <string name="risk_pause">Пауза для всіх стратегій</string>
     <string name="risk_hard">макс. %1$s</string>
     <string name="fees_title">Комісії</string>
-    <string name="fees_owed">До сплати %1$s SOL з %2$d прибуткових позицій Free.</string>
-    <string name="fees_none">Нічого сплачувати. Pro — 0%; збитки, папір і вікна без комісії не платять.</string>
+    <string name="fees_owed">До сплати %1$s SOL · прибуткових позицій Free: %2$d.</string>
+    <string name="fees_none" formatted="false">Нічого сплачувати. Pro — 0%; збитки, папір і вікна без комісії не платять.</string>
     <string name="fees_pay">Сплатити %1$s SOL у devnet</string>
     <string name="fees_paid">Комісію сплачено в devnet</string>
     <string name="fees_devnet_only">Комісії сплачуються лише в devnet. Увімкни «Примусово devnet» у налаштуваннях.</string>
@@ -267,7 +254,6 @@
     <string name="report_none">Сьогодні закритих позицій немає.</string>
     <string name="report_positions">Закрито позицій: %1$d, у плюсі: %2$d. P&amp;L %3$s SOL.</string>
     <string name="report_fees">Комісії сплачено %1$s, до сплати %2$s, прощено %3$s SOL.</string>
-    <string name="report_streak">Серія: %1$d дн.</string>
     <string name="report_signed">Сьогодні підписано.</string>
     <string name="report_unsigned">Сьогодні ще не підписано.</string>
     <string name="report_run">Пробіжка дахом сьогодні: %1$d м.</string>
@@ -290,7 +276,6 @@
     <string name="chat_mic_denied">Доступ до мікрофона вимкнено. Писати можна.</string>
     <string name="chat_tts_missing">На телефоні немає голосу для цієї мови. Відповіді лишаються текстом.</string>
     <string name="chat_fallback">резервна відповідь</string>
-    <string name="chat_offline">офлайн</string>
     <string name="chat_clear">Очистити</string>
     <string name="yard_crew_desk">Пульт: працює %1$d · у позиції %2$d</string>
     <string name="rule_window">Кожні %1$d підписаних днів поспіль дають вікно без комісії на %2$d год, а кожні %3$d днів — на %4$d днів. Воно стартує лише коли ти натиснеш «Активувати». Позиція, відкрита в активованому вікні, не платить комісію, навіть якщо закриється пізніше.</string>
@@ -298,4 +283,16 @@
     <string name="rule_fee">Free-стратегії платять %1$d%% лише з реалізованого прибутку; збитки нічого не платять. Pro коштує %2$s SOL один раз і платить 0%%. В обох роялті %3$d%% при перепродажі.</string>
     <string name="rule_risk">Жорсткі ліміти: %1$s SOL на позицію, %2$s SOL на день, стоп після %3$d збитків поспіль або %4$s SOL мінусу за день. На пульті їх можна лише зменшити.</string>
     <string name="chat_rules">Sol · правила гри</string>
+    <string name="chat_mic">Сказати Sol голосом</string>
+    <string name="share_text">CLOCK IN %1$d м · серія %2$d</string>
+    <string name="fees_pending">Попередня оплата комісії ще підтверджується. Спробуй за кілька хвилин.</string>
+    <string name="agents_cluster">METAPLEX CORE · %1$s</string>
+    <string name="risk_less">Зменшити: %1$s</string>
+    <string name="risk_more">Збільшити: %1$s</string>
+    <plurals name="report_streak_days">
+        <item quantity="one">Серія: %1$d день.</item>
+        <item quantity="few">Серія: %1$d дні.</item>
+        <item quantity="many">Серія: %1$d днів.</item>
+        <item quantity="other">Серія: %1$d дня.</item>
+    </plurals>
 </resources>

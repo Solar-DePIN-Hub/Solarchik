@@ -8,6 +8,9 @@ import android.telephony.PhoneNumberUtils
 object ContactsGate {
     data class Hit(val known: Boolean, val name: String, val number: String)
 
+    fun canRead(ctx: Context): Boolean =
+        ctx.checkSelfPermission(android.Manifest.permission.READ_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
     fun lookup(ctx: Context, rawNumber: String?): Hit {
         val number = rawNumber.orEmpty().trim()
         if (number.isBlank()) return Hit(false, "", "")

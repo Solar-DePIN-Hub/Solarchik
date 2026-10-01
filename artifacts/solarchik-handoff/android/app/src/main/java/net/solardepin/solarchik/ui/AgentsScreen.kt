@@ -30,7 +30,24 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
     private var tier = AgentTier.FREE
     private var busySku: String? = null
     private var balance: Double? = null
+    private var balanceKey = ""
     private var refreshed = false
+
+    /** Balance belongs to one wallet on one cluster; drop it when either changes. */
+    private fun walletKey() = host.wallet.let { if (it.connected) it.address + "@" + it.clusterName else "" }
+
+    private fun syncWalletKey() {
+        val k = walletKey()
+        if (k != balanceKey) {
+            balanceKey = k
+            balance = null
+            refreshed = false
+        }
+    }
+
+    private fun setBalance(key: String, v: Double) {
+        if (key == walletKey()) balance = v
+    }
     /** 0 = desk, 1 = strategies (catalog + mint). */
     private var section = 0
     private var track = Track.PAPER
@@ -53,7 +70,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         val head = Ui.row(ctx)
         clusterLabel = Ui.label(ctx, "", Ui.CYAN)
         head.addView(Ui.weight(clusterLabel))
-        walletPill = Ui.pill(ctx, "", Ui.GOLD, icon = R.drawable.ic_wallet).apply { setOnClickListener { onWalletPill() } }
+        walletPill = Ui.tappable(Ui.pill(ctx, "", Ui.GOLD, icon = R.drawable.ic_wallet)).apply { setOnClickListener { onWalletPill() } }
         head.addView(walletPill)
         addView(head)
         addView(Ui.display(ctx, ctx.getString(R.string.agents_title), 24f))
@@ -106,16 +123,24 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
             val w = host.wallet
             if (w.connected && host.store.freeClaimed(w.address, w.clusterName)) tier = AgentTier.PRO
         }
+        syncWalletKey()
         render()
         if (!refreshed && host.wallet.connected) {
             refreshed = true
             refreshChain()
         }
+        if (host.desk.state().pendingPay != null) {
+            host.scope.launch {
+                runCatching { host.desk.reconcile() }
+                render()
+            }
+        }
     }
 
     private fun refreshChain() {
+        val key = walletKey()
         host.scope.launch {
-            host.wallet.balanceSol().onSuccess { balance = it }
+            host.wallet.balanceSol().onSuccess { setBalance(key, it) }
             runCatching { host.minter.refresh() }
             render()
         }
@@ -124,7 +149,8 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
     override fun render() {
         if (!this::ledgerBox.isInitialized) return
         val w = host.wallet
-        clusterLabel.text = "METAPLEX CORE · " + w.clusterName.uppercase()
+        syncWalletKey()
+        clusterLabel.text = ctx.getString(R.string.agents_cluster, w.clusterName.uppercase())
         walletPill.text = if (w.connected) {
             Fmt.short(w.address) + (balance?.let { " · " + Fmt.sol(it, 3) } ?: "")
         } else ctx.getString(R.string.wallet_connect)
@@ -306,16 +332,19 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         col.addView(Ui.muted(ctx, ctx.getString(R.string.risk_hard, hardTxt), 11f))
         r.addView(Ui.weight(col))
         val idx = steps.indexOfFirst { it >= value - 1e-9 }.let { if (it < 0) steps.lastIndex else it }
-        fun mini(txt: String, enabled: Boolean, go: () -> Unit) = Ui.text(ctx, txt, 18f, Ui.TEXT, 900).apply {
+        val name = ctx.getString(label)
+        fun mini(txt: String, desc: Int, enabled: Boolean, go: () -> Unit) = Ui.text(ctx, txt, 18f, Ui.TEXT, 900).apply {
             gravity = Gravity.CENTER
+            contentDescription = ctx.getString(desc, name)
+            isEnabled = enabled
             background = Ui.rounded(Ui.SURFACE2, dp(12).toFloat(), Ui.STROKE, dp(1))
             isClickable = enabled
             alpha = if (enabled) 1f else 0.35f
             setOnClickListener { if (enabled) go() }
         }
-        r.addView(mini("−", idx > 0) { onSet(steps[idx - 1]) }, LinearLayout.LayoutParams(dp(40), dp(36)))
-        r.addView(Ui.text(ctx, if (whole) value.toInt().toString() else Fmt.sol(value), 15f, Ui.GOLD, 900).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(64), dp(36)))
-        r.addView(mini("+", idx < steps.lastIndex) { onSet(steps[idx + 1]) }, LinearLayout.LayoutParams(dp(40), dp(36)))
+        r.addView(mini("−", R.string.risk_less, idx > 0) { onSet(steps[idx - 1]) }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        r.addView(Ui.text(ctx, if (whole) value.toInt().toString() else Fmt.sol(value), 15f, Ui.GOLD, 900).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(64), dp(48)))
+        r.addView(mini("+", R.string.risk_more, idx < steps.lastIndex) { onSet(steps[idx + 1]) }, LinearLayout.LayoutParams(dp(48), dp(48)))
         return r
     }
 
@@ -356,6 +385,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
                         when ((it as? DeskError)?.kind) {
                             DeskError.Kind.DEVNET_ONLY -> ctx.getString(R.string.fees_devnet_only)
                             DeskError.Kind.NOTHING_OWED -> ctx.getString(R.string.fees_nothing)
+                            DeskError.Kind.PAYMENT_PENDING -> ctx.getString(R.string.fees_pending)
                             else -> host.errorText(it)
                         },
                     )
@@ -427,7 +457,8 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
                 render()
                 val checked = host.minter.verify(rec)
                 if (checked.status == OwnedAgent.STATUS_VERIFIED) host.toast(ctx.getString(R.string.mint_verified, rec.name))
-                host.wallet.balanceSol().onSuccess { balance = it }
+                val key = walletKey()
+                host.wallet.balanceSol().onSuccess { setBalance(key, it) }
             }.onFailure { host.toast(host.errorText(it)) }
             host.renderAll()
         }

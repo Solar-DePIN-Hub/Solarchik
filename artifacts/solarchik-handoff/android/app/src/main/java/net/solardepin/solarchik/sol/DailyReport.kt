@@ -43,7 +43,7 @@ object DailyReport {
             val waived = rows.filter { it.reason == FeeReason.WINDOW }.sumOf { it.fee }
             lines += ctx.getString(R.string.report_fees, sol(s.feesCharged), sol(s.feesOwed), sol(waived))
         }
-        lines += ctx.getString(R.string.report_streak, streak) + " " +
+        lines += ctx.resources.getQuantityString(R.plurals.report_streak_days, streak, streak) + " " +
             ctx.getString(if (signedToday) R.string.report_signed else R.string.report_unsigned)
         if (runMeters > 0) lines += ctx.getString(R.string.report_run, runMeters)
         lines += when (progress) {

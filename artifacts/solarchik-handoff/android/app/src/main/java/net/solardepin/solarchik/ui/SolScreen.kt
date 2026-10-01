@@ -72,7 +72,10 @@ class SolScreen(host: MainActivity) : Screen(host) {
             head.addView(Ui.iconBadge(ctx, R.drawable.ic_nav_sol, Ui.GOLD, 36))
             head.addView(Ui.weight(Ui.h2(ctx, ctx.getString(R.string.chat_title))))
             head.addView(Ui.text(ctx, ctx.getString(R.string.chat_clear), 12f, Ui.MUTED, 700).apply {
-                setPadding(dp(8), dp(6), dp(8), dp(6))
+                setPadding(dp(12), dp(6), dp(12), dp(6))
+                gravity = Gravity.CENTER
+                minHeight = dp(48)
+                minWidth = dp(48)
                 setOnClickListener { store.clear(); render() }
             })
             addView(head)
@@ -97,7 +100,7 @@ class SolScreen(host: MainActivity) : Screen(host) {
                 }
             }
             row.addView(input, LinearLayout.LayoutParams(0, dp(48), 1f))
-            micBtn = round(Ui.CYAN) { toggleMic() }.apply { contentDescription = "mic" }
+            micBtn = round(Ui.CYAN) { toggleMic() }.apply { contentDescription = ctx.getString(R.string.chat_mic) }
             micBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_mic, 0, 0, 0)
             micBtn.setPadding(dp(12), 0, 0, 0)
             row.addView(micBtn, LinearLayout.LayoutParams(dp(48), dp(48)))
@@ -132,6 +135,13 @@ class SolScreen(host: MainActivity) : Screen(host) {
         ears?.stop()
         listening = false
         voice?.stop()
+    }
+
+    override fun onDestroy() {
+        ears?.stop()
+        ears = null
+        voice?.shutdown()
+        voice = null
     }
 
     private fun currentReport(): Report {
@@ -202,13 +212,16 @@ class SolScreen(host: MainActivity) : Screen(host) {
         status.visibility = View.VISIBLE
         render()
         host.scope.launch {
-            val today = host.save.today()
-            val r = chat.ask(msg, host.lang, store.playerId(), store.conversationId(today), history, "yard", currentReport().script)
-            store.add(ChatTurn("assistant", r.text, System.currentTimeMillis(), fallback = r.fallback))
-            sending = false
-            status.visibility = View.GONE
-            render()
-            if (!r.fallback) speak(r.text, auto = true)
+            try {
+                val today = host.save.today()
+                val r = chat.ask(msg, host.lang, store.playerId(), store.conversationId(today), history, "yard", currentReport().script)
+                store.add(ChatTurn("assistant", r.text, System.currentTimeMillis(), fallback = r.fallback))
+                if (!r.fallback) speak(r.text, auto = true)
+            } finally {
+                sending = false
+                status.visibility = View.GONE
+                render()
+            }
         }
     }
 
@@ -219,8 +232,11 @@ class SolScreen(host: MainActivity) : Screen(host) {
         retelling = true
         val rep = currentReport()
         host.scope.launch {
-            val r = chat.ask(rep.script, host.lang, store.playerId(), store.conversationId(today), emptyList(), "yard", rep.script)
-            retelling = false
+            val r = try {
+                chat.ask(rep.script, host.lang, store.playerId(), store.conversationId(today), emptyList(), "yard", rep.script)
+            } finally {
+                retelling = false
+            }
             plainWhy = when {
                 r.offline || r.fallback -> R.string.report_plain_offline
                 !SolChat.onlyKnownNumbers(r.text, rep.script) -> R.string.report_plain

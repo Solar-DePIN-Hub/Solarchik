@@ -64,7 +64,7 @@ class HttpMarketFeed : MarketFeed {
             ?.jsonObject?.get("current")?.jsonObject?.get("temperature_2m"))
 
     private fun topEvent(): Quote? {
-        val arr = get("https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=60&order=volume24hr&ascending=false") as? JsonArray
+        val arr = get("https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=100&order=volume24hr&ascending=false") as? JsonArray
             ?: return null
         return GammaPick.pick(arr.mapNotNull { GammaPick.parse(it as? JsonObject ?: return@mapNotNull null) }, System.currentTimeMillis())
             ?.let { Quote(Source.EVENTS, it.id, it.question, it.yes) }
@@ -76,13 +76,47 @@ class HttpMarketFeed : MarketFeed {
     }
 }
 
-/** Gamma market parsing and the events pick (web pickEvent: not Bitcoin, favorite 62–94%, loudest first). */
+/**
+ * Gamma market parsing and the events pick. Base rule as web pickEvent (not Bitcoin, not sports,
+ * favourite between the entry floor and 94%). A position lasts 30 minutes, so the pick prefers
+ * markets that resolve within days and trade actively: long-dated favourites barely move in half
+ * an hour and would settle flat every time.
+ */
 object GammaPick {
-    data class Market(val id: String, val question: String, val yes: Double, val volume: Double, val endMs: Long?, val open: Boolean)
+    data class Market(
+        val id: String,
+        val question: String,
+        val yes: Double,
+        val volume: Double,
+        val endMs: Long?,
+        val open: Boolean,
+        /** 24 h traded volume (USD). */
+        val volume24h: Double = 0.0,
+        /** Gamma oneDayPriceChange / oneHourPriceChange of the YES price (absolute values). */
+        val dayMove: Double = 0.0,
+        val hourMove: Double = 0.0,
+    )
+
+    /** Resolves within this many days: tier 1. */
+    const val SOON_DAYS = 7L
+    /** Fallback horizon before any end date is accepted. */
+    const val LATER_DAYS = 30L
+    /** Enough trading for the price to move inside one window. */
+    const val MIN_VOLUME_24H = 20_000.0
+    /** "Moving": at least one point in a day or half a point in an hour. */
+    const val MIN_DAY_MOVE = 0.01
+    const val MIN_HOUR_MOVE = 0.005
+    /** Must outlast the 30-minute window with room to settle. */
+    const val MIN_LEFT_MS = 2 * 3600_000L
 
     private val json = Json { ignoreUnknownKeys = true }
     private val btc = Regex("\\b(bitcoin|btc)\\b", RegexOption.IGNORE_CASE)
-    private val sports = Regex("\\b(vs\\.?|nfl|nba|nhl|mlb|fc|uefa|premier league|match|game \\d)\\b", RegexOption.IGNORE_CASE)
+    private val sports = Regex(
+        "\\b(vs\\.?|nfl|nba|nhl|mlb|fc|uefa|premier league|match|game \\d|map handicap|spread:|o/u|bo3|bo5|counter-strike|valorant|lol:|dota|win on \\d{4}-\\d{2}-\\d{2}|end in a draw)(?![a-z0-9])",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private fun dbl(o: JsonObject, key: String): Double? = o[key]?.let { runCatching { it.jsonPrimitive.contentOrNull?.toDoubleOrNull() }.getOrNull() }
 
     fun parse(o: JsonObject): Market? {
         val id = o["id"]?.jsonPrimitive?.contentOrNull ?: return null
@@ -90,17 +124,42 @@ object GammaPick {
         val prices = o["outcomePrices"]?.jsonPrimitive?.contentOrNull?.let {
             runCatching { json.parseToJsonElement(it).jsonArray.map { p -> p.jsonPrimitive.contentOrNull?.toDoubleOrNull() ?: Double.NaN } }.getOrNull()
         } ?: return null
-        val yes = prices.firstOrNull()?.takeIf { it.isFinite() } ?: return null
-        val vol = o["volume"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.0
+        val yes = prices.firstOrNull()?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: return null
+        val vol = dbl(o, "volume") ?: 0.0
         val end = o["endDate"]?.jsonPrimitive?.contentOrNull?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
         val open = o["active"]?.jsonPrimitive?.booleanOrNull != false && o["closed"]?.jsonPrimitive?.booleanOrNull != true
-        return Market(id, q, yes, vol, end, open)
+        return Market(
+            id, q, yes, vol, end, open,
+            volume24h = dbl(o, "volume24hr") ?: 0.0,
+            dayMove = kotlin.math.abs(dbl(o, "oneDayPriceChange") ?: 0.0),
+            hourMove = kotlin.math.abs(dbl(o, "oneHourPriceChange") ?: 0.0),
+        )
     }
 
-    fun pick(markets: List<Market>, now: Long): Market? = markets
-        .filter { it.open && !btc.containsMatchIn(it.question) && !sports.containsMatchIn(it.question) }
-        .filter { it.endMs == null || it.endMs > now + 2 * 3600_000L }
-        .filter { val fav = maxOf(it.yes, 1 - it.yes); fav >= 0.62 && fav <= Strategies.FAVORITE_MAX }
-        .sortedWith(compareByDescending<Market> { maxOf(it.yes, 1 - it.yes) }.thenByDescending { it.volume })
-        .firstOrNull()
+    private fun fav(m: Market) = maxOf(m.yes, 1 - m.yes)
+
+    fun moving(m: Market) = m.dayMove >= MIN_DAY_MOVE || m.hourMove >= MIN_HOUR_MOVE
+
+    /**
+     * Tiers, first non-empty wins:
+     * 1. resolves within 7 days, 24 h volume >= 20k and moving; 2. same without the move;
+     * 3. within 30 days with that volume; 4. the plain base rule.
+     * Inside a tier: most 24 h volume first, then the stronger favourite.
+     */
+    fun pick(markets: List<Market>, now: Long): Market? {
+        val base = markets
+            .filter { it.open && !btc.containsMatchIn(it.question) && !sports.containsMatchIn(it.question) }
+            .filter { it.endMs == null || it.endMs > now + MIN_LEFT_MS }
+            .filter { val f = fav(it); f + 1e-9 >= Strategies.MIN_CONFIDENCE && f <= Strategies.FAVORITE_MAX }
+        fun within(m: Market, days: Long) = m.endMs != null && m.endMs <= now + days * 86_400_000L
+        val liquid = base.filter { it.volume24h >= MIN_VOLUME_24H }
+        val tiers = listOf(
+            liquid.filter { within(it, SOON_DAYS) && moving(it) },
+            liquid.filter { within(it, SOON_DAYS) },
+            liquid.filter { within(it, LATER_DAYS) },
+        )
+        val byActivity = compareByDescending<Market> { it.volume24h }.thenByDescending { fav(it) }
+        tiers.firstOrNull { it.isNotEmpty() }?.let { return it.sortedWith(byActivity).first() }
+        return base.sortedWith(compareByDescending<Market> { fav(it) }.thenByDescending { it.volume }).firstOrNull()
+    }
 }

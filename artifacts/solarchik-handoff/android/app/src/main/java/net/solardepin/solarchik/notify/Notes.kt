@@ -27,6 +27,8 @@ import java.util.concurrent.TimeUnit
 object Notes {
     const val CHANNEL = "solarchik"
     private const val SENT = "notes.sent"
+    private const val SENT_LIST = "notes.sent.v2"
+    private const val SENT_KEEP = 120
     private const val WORK = "solarchik-notes"
 
     fun allowed(ctx: Context): Boolean =
@@ -36,7 +38,6 @@ object Notes {
     fun needsRuntimePermission(): Boolean = Build.VERSION.SDK_INT >= 33
 
     fun createChannel(ctx: Context) {
-        if (Build.VERSION.SDK_INT < 26) return
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
         nm.createNotificationChannel(NotificationChannel(CHANNEL, ctx.getString(R.string.note_channel), NotificationManager.IMPORTANCE_DEFAULT))
     }
@@ -53,18 +54,34 @@ object Notes {
         return DeskStore(ctx).read().log.any { StreakRules.dayKey(it.at) == today }
     }
 
+    /**
+     * Sent keys in the order they were sent. (The 0.20.1 string set had no order, so trimming it
+     * could drop today's key and repeat a note an hour later.)
+     */
+    fun sentKeys(ctx: Context): List<String> {
+        val prefs = ctx.getSharedPreferences("solarchik-notes", Context.MODE_PRIVATE)
+        val list = prefs.getString(SENT_LIST, null)?.let { raw ->
+            runCatching { org.json.JSONArray(raw).let { a -> (0 until a.length()).map { a.getString(it) } } }.getOrNull()
+        }
+        return list ?: prefs.getStringSet(SENT, emptySet()).orEmpty().sorted()
+    }
+
     /** Posts every due note once. Returns what was posted (for tests and logs). */
     fun check(ctx: Context, save: GameSave = GameSave(ctx)): List<DueNote> {
         val prefs = ctx.getSharedPreferences("solarchik-notes", Context.MODE_PRIVATE)
-        val sent = prefs.getStringSet(SENT, emptySet()).orEmpty()
-        val due = NotePlanner.due(save.streakState(), save.now(), sent, { save.noteOn(it.toggle) }, activityToday(ctx, save))
+        val sent = sentKeys(ctx)
+        val due = NotePlanner.due(save.streakState(), save.now(), sent.toSet(), { save.noteOn(it.toggle) }, activityToday(ctx, save))
         if (due.isEmpty() || !allowed(ctx)) return emptyList()
-        due.forEach { post(ctx, it.kind) }
-        prefs.edit().putStringSet(SENT, (sent + due.map { it.key }).toList().takeLast(60).toSet()).apply()
-        return due
+        val posted = due.filter { post(ctx, it.kind) }
+        val keep = (sent + posted.map { it.key }).distinct().takeLast(SENT_KEEP)
+        prefs.edit().putString(SENT_LIST, org.json.JSONArray(keep).toString()).remove(SENT).apply()
+        return posted
     }
 
-    private fun post(ctx: Context, kind: NoteKind) {
+    // Permission is checked right here (allowed()), and a revoke race is caught below.
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun post(ctx: Context, kind: NoteKind): Boolean {
+        if (!allowed(ctx)) return false
         val (title, body, tab) = when (kind) {
             NoteKind.STREAK -> Triple(R.string.note_streak_title, R.string.note_streak_body, MainActivity.Tab.RUN)
             NoteKind.REWARD -> Triple(R.string.note_reward_title, R.string.note_reward_body, MainActivity.Tab.YARD)
@@ -85,7 +102,12 @@ object Notes {
             .setAutoCancel(true)
             .setColor(0xFFF5C542.toInt())
             .build()
-        runCatching { NotificationManagerCompat.from(ctx).notify(100 + kind.ordinal, n) }
+        return try {
+            NotificationManagerCompat.from(ctx).notify(100 + kind.ordinal, n)
+            true
+        } catch (_: SecurityException) {
+            false
+        }
     }
 }
 

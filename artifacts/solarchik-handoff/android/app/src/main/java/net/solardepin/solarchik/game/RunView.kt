@@ -1,5 +1,6 @@
 package net.solardepin.solarchik.game
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -89,12 +90,25 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
         thread = null
     }
 
+    // Jump fires on ACTION_DOWN for latency; performClick is the accessibility
+    // path (TalkBack double-tap / switch access) and jumps too.
+    @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.action == MotionEvent.ACTION_DOWN && onFloor && !finished) {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) jump()
+        return true
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        jump()
+        return true
+    }
+
+    private fun jump() {
+        if (onFloor && !finished) {
             vy = if (mod == "wind") -20.5f else -22f
             onFloor = false
         }
-        return true
     }
 
     override fun run() {

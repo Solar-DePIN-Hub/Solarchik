@@ -28,13 +28,67 @@ data class ClockProof(
 
 data class SentTx(val address: String, val signature: String, val cluster: String)
 
-/** Typed wallet failure so the UI can show a localized line. */
-class WalletError(val kind: Kind, detail: String = "") : Exception(detail.ifBlank { kind.name }) {
+/**
+ * Typed wallet failure so the UI can show a localized line. [signOnlyMayHelp]: the wallet refused
+ * sign-and-send itself (not the player, not a timeout), so the sign-only fallback is worth a try.
+ */
+class WalletError(val kind: Kind, detail: String = "", val signOnlyMayHelp: Boolean = false, val authRejected: Boolean = false) :
+    Exception(detail.ifBlank { kind.name }) {
     enum class Kind { NO_WALLET, DECLINED, NETWORK, FAILED }
+
+    companion object {
+        /**
+         * Maps an MWA failure to a kind. The clientlib's own message ("User did not authorize
+         * signing") and the wallet's JSON-RPC error code both count, so a decline is never retried.
+         */
+        fun classify(message: String?, cause: Throwable?): WalletError {
+            val code = (cause as? com.solana.mobilewalletadapter.clientlib.protocol.JsonRpc20Client.JsonRpc20RemoteException)?.code
+            val text = listOfNotNull(message?.takeIf { it.isNotBlank() }, cause?.message?.takeIf { it.isNotBlank() && it != message }).joinToString(" | ")
+            val m = text.lowercase()
+            return when {
+                code == ERR_AUTH -> WalletError(Kind.DECLINED, text, authRejected = true)
+                code == ERR_NOT_SIGNED -> WalletError(Kind.DECLINED, text)
+                m.contains("no wallet") || m.contains("no compatible wallet") -> WalletError(Kind.NO_WALLET, text)
+                m.contains("declin") || m.contains("reject") || m.contains("cancel") || m.contains("denied") ||
+                    m.contains("did not authorize") || m.contains("not signed") -> WalletError(Kind.DECLINED, text)
+                m.contains("auth token invalid") -> WalletError(Kind.DECLINED, text, authRejected = true)
+                m.contains("timed out") || m.contains("interrupted") || m.contains("io error") || cause is java.io.IOException ->
+                    WalletError(Kind.FAILED, text)
+                code == ERR_NOT_SUBMITTED || m.contains("not all transactions were submitted") ||
+                    code != null || m.contains("remote exception") || m.contains("json-rpc") -> WalletError(Kind.FAILED, text, signOnlyMayHelp = true)
+                else -> WalletError(Kind.FAILED, text)
+            }
+        }
+
+        private const val ERR_AUTH = -1
+        private const val ERR_NOT_SIGNED = -3
+        private const val ERR_NOT_SUBMITTED = -4
+    }
+}
+
+/** One blockhash per user action: the sign-only retry signs the very same message, so if the first try did land the second is rejected as a duplicate instead of paying twice. */
+class StickyBlockhash(private val fetch: suspend () -> ByteArray) {
+    private var hash: ByteArray? = null
+    suspend fun get(): ByteArray = hash ?: fetch().also { hash = it }
 }
 
 class SolanaWallet(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("seeker-wallet", Context.MODE_PRIVATE)
+
+    init {
+        migrateFrom01951(context.applicationContext)
+    }
+
+    /**
+     * 0.19.51 kept only the MWA auth token. Its signed CLOCK IN remembered the account in the game
+     * save, so an upgraded phone shows the same wallet instead of looking disconnected.
+     */
+    private fun migrateFrom01951(app: Context) {
+        if (prefs.getString("address", "").orEmpty().isNotBlank()) return
+        if (prefs.getString("auth", "").orEmpty().isBlank()) return
+        val addr = app.getSharedPreferences("solarchik-game", Context.MODE_PRIVATE).getString("clockAddress", "").orEmpty()
+        if (runCatching { Base58.decode(addr).size == 32 }.getOrDefault(false)) prefs.edit().putString("address", addr).apply()
+    }
     val isSeeker: Boolean = SeekerDevice.isSeeker()
 
     /** Seeker defaults to mainnet; the player may force devnet. Everything else is devnet only. */
@@ -95,7 +149,7 @@ class SolanaWallet(context: Context) {
                 Result.success(WalletSession(addr, auth.authToken ?: ""))
             }
             is TransactionResult.NoWalletFound -> Result.failure(WalletError(WalletError.Kind.NO_WALLET))
-            is TransactionResult.Failure -> Result.failure(classify(result.e.message ?: result.message))
+            is TransactionResult.Failure -> Result.failure(fail(result))
         }
     }
 
@@ -108,35 +162,46 @@ class SolanaWallet(context: Context) {
         sender: ActivityResultSender,
         build: suspend (payer: PublicKey, blockhash: ByteArray) -> LegacyTx,
     ): Result<SentTx> {
-        val first = signAndSendOnce(sender, build)
+        val client = rpc
+        val hash = StickyBlockhash { client.latestBlockhash() }
+        val first = signAndSendOnce(sender, client, hash, build)
         val err = first.exceptionOrNull() ?: return first
         if (!shouldTrySignOnly(err)) return first
         // Some wallets (or Seed Vault builds) refuse signAndSend for a tx that already carries
-        // another signer. Fall back to sign-only and broadcast through our own RPC.
-        val second = signOnlyThenSend(sender, build)
+        // another signer. Fall back to sign-only and broadcast through our own RPC, with the
+        // same blockhash so a first attempt that did land cannot be paid twice.
+        val second = signOnlyThenSend(sender, client, hash, build)
         return if (second.isSuccess) second else first
     }
 
-    /** Declines, missing wallets and our own build errors are final; anything else may work sign-only. */
-    internal fun shouldTrySignOnly(err: Throwable): Boolean {
-        if (err is WalletError) return err.kind == WalletError.Kind.FAILED
-        return false
+    /** Only a wallet-side refusal of sign-and-send is retried; declines, timeouts and our own build errors are final. */
+    internal fun shouldTrySignOnly(err: Throwable): Boolean =
+        err is WalletError && err.kind == WalletError.Kind.FAILED && err.signOnlyMayHelp
+
+    /** Classifies a failure; a rejected authorization drops the saved token so the next tap asks afresh. */
+    private fun fail(result: TransactionResult.Failure<*>): WalletError {
+        val e = WalletError.classify(result.message, result.e)
+        if (e.authRejected) {
+            adapter.authToken = null
+            prefs.edit().remove("auth").apply()
+        }
+        return e
     }
 
     private suspend fun signAndSendOnce(
         sender: ActivityResultSender,
+        client: Rpc,
+        hash: StickyBlockhash,
         build: suspend (payer: PublicKey, blockhash: ByteArray) -> LegacyTx,
     ): Result<SentTx> {
         adapter.rpcCluster = rpcCluster()
         val cluster = clusterName
-        val client = rpc
         var buildError: Throwable? = null
         val result = try {
             adapter.transact(sender) { auth ->
                 val payer = PublicKey(accountKey(auth) ?: error("No account"))
                 val tx = try {
-                    val hash = client.latestBlockhash()
-                    build(payer, hash)
+                    build(payer, hash.get())
                 } catch (t: Throwable) {
                     buildError = t
                     throw t
@@ -144,7 +209,8 @@ class SolanaWallet(context: Context) {
                 signAndSendTransactions(arrayOf(tx.serialize()))
             }
         } catch (t: Throwable) {
-            return Result.failure(buildError?.let(::buildFailure) ?: classify(t.message))
+            if (t is kotlinx.coroutines.CancellationException && buildError == null) throw t
+            return Result.failure(buildError?.let(::buildFailure) ?: WalletError.classify(t.message, t))
         }
         return when (result) {
             is TransactionResult.Success -> {
@@ -156,23 +222,24 @@ class SolanaWallet(context: Context) {
             }
             is TransactionResult.NoWalletFound -> Result.failure(WalletError(WalletError.Kind.NO_WALLET))
             is TransactionResult.Failure ->
-                Result.failure(buildError?.let(::buildFailure) ?: classify(result.e.message ?: result.message))
+                Result.failure(buildError?.let(::buildFailure) ?: fail(result))
         }
     }
 
     private suspend fun signOnlyThenSend(
         sender: ActivityResultSender,
+        client: Rpc,
+        hash: StickyBlockhash,
         build: suspend (payer: PublicKey, blockhash: ByteArray) -> LegacyTx,
     ): Result<SentTx> {
         adapter.rpcCluster = rpcCluster()
         val cluster = clusterName
-        val client = rpc
         var buildError: Throwable? = null
         val result = try {
             adapter.transact(sender) { auth ->
                 val payer = PublicKey(accountKey(auth) ?: error("No account"))
                 val tx = try {
-                    build(payer, client.latestBlockhash())
+                    build(payer, hash.get())
                 } catch (t: Throwable) {
                     buildError = t
                     throw t
@@ -181,7 +248,8 @@ class SolanaWallet(context: Context) {
                 signTransactions(arrayOf(tx.serialize()))
             }
         } catch (t: Throwable) {
-            return Result.failure(buildError?.let(::buildFailure) ?: classify(t.message))
+            if (t is kotlinx.coroutines.CancellationException && buildError == null) throw t
+            return Result.failure(buildError?.let(::buildFailure) ?: WalletError.classify(t.message, t))
         }
         return when (result) {
             is TransactionResult.Success -> {
@@ -194,7 +262,7 @@ class SolanaWallet(context: Context) {
                     .recoverCatching { throw buildFailure(it) }
             }
             is TransactionResult.NoWalletFound -> Result.failure(WalletError(WalletError.Kind.NO_WALLET))
-            is TransactionResult.Failure -> Result.failure(classify(result.e.message ?: result.message))
+            is TransactionResult.Failure -> Result.failure(fail(result))
         }
     }
 
@@ -217,9 +285,9 @@ class SolanaWallet(context: Context) {
         meters: Int,
         score: Int,
         streak: Int,
+        day: String = LocalDate.now(ZoneOffset.UTC).toString(),
     ): Result<ClockProof> {
-        val day = LocalDate.now(ZoneOffset.UTC)
-        val memo = "solarchik clock $day ${meters}m s$streak ${GameSave.dayModOf(day.toString())}"
+        val memo = "solarchik clock $day ${meters}m s$streak ${GameSave.dayModOf(day)}"
         val sent = sendMemo(sender, memo)
         if (sent.isSuccess) return sent
         val err = sent.exceptionOrNull()
@@ -248,7 +316,7 @@ class SolanaWallet(context: Context) {
                 else Result.success(ClockProof(payer, sig, cluster, "tx", result.authResult.authToken ?: ""))
             }
             is TransactionResult.NoWalletFound -> Result.failure(WalletError(WalletError.Kind.NO_WALLET))
-            is TransactionResult.Failure -> Result.failure(classify(result.e.message ?: result.message))
+            is TransactionResult.Failure -> Result.failure(fail(result))
         }
     }
 
@@ -277,22 +345,12 @@ class SolanaWallet(context: Context) {
                 else Result.success(ClockProof(payer, sig, cluster, "message", result.authResult.authToken ?: ""))
             }
             is TransactionResult.NoWalletFound -> Result.failure(WalletError(WalletError.Kind.NO_WALLET))
-            is TransactionResult.Failure -> Result.failure(classify(result.e.message ?: result.message))
+            is TransactionResult.Failure -> Result.failure(fail(result))
         }
     }
 
     private fun buildFailure(t: Throwable): Throwable =
         if (t is java.io.IOException || t is net.solardepin.solarchik.solana.RpcException) WalletError(WalletError.Kind.NETWORK, t.message ?: "") else t
-
-    private fun classify(message: String?): WalletError {
-        val m = (message ?: "").lowercase()
-        return when {
-            m.contains("no wallet") -> WalletError(WalletError.Kind.NO_WALLET, message.orEmpty())
-            m.contains("declin") || m.contains("reject") || m.contains("cancel") || m.contains("denied") ->
-                WalletError(WalletError.Kind.DECLINED, message.orEmpty())
-            else -> WalletError(WalletError.Kind.FAILED, message.orEmpty())
-        }
-    }
 
     private fun stopAfter(error: Throwable?): Boolean {
         if (error is WalletError) return error.kind == WalletError.Kind.NO_WALLET || error.kind == WalletError.Kind.DECLINED

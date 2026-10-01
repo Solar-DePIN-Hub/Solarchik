@@ -141,7 +141,7 @@ class YardScreen(host: MainActivity) : Screen(host) {
             Ui.setIcon(this, R.drawable.ic_open, Ui.CYAN)
         }
         proofRow.addView(Ui.weight(proof))
-        proofRow.addView(Ui.pill(ctx, ctx.getString(R.string.share), Ui.GOLD, icon = R.drawable.ic_share).apply {
+        proofRow.addView(Ui.tappable(Ui.pill(ctx, ctx.getString(R.string.share), Ui.GOLD, icon = R.drawable.ic_share)).apply {
             setOnClickListener { shareDay() }
         })
         addView(Ui.top(proofRow, 12))
@@ -205,6 +205,7 @@ class YardScreen(host: MainActivity) : Screen(host) {
     override fun render() {
         if (!this::status.isInitialized) return
         val goal = GameSave.GOAL_M
+        renderedDay = save.today()
         val state = save.liveStreak()
         streakNum.text = state.streak.toString()
         netPill.text = ctx.getString(if (host.wallet.mainnet) R.string.network_mainnet else R.string.network_devnet)
@@ -334,8 +335,12 @@ class YardScreen(host: MainActivity) : Screen(host) {
         crewLine.text = if (running + holding > 0) base + "\n" + ctx.getString(R.string.yard_crew_desk, running, holding) else base
     }
 
+    private var renderedDay = ""
+
     private fun renderClocks() {
         if (!this::resetIn.isInitialized) return
+        // A new UTC day while the yard is open: streak, run and CLOCK IN state all change.
+        if (renderedDay.isNotEmpty() && renderedDay != save.today()) { render(); return }
         val now = save.now()
         val end = LocalDate.parse(StreakRules.dayKey(now)).plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
         resetIn.text = ctx.getString(R.string.yard_reset_in, Fmt.countdown(end - now).let { if (it.length > 5) it.substring(0, 5) else it })
@@ -361,11 +366,14 @@ class YardScreen(host: MainActivity) : Screen(host) {
         if (!save.clockedToday() || save.signedToday() || signing) return
         signing = true
         render()
+        // Captured before the wallet opens: the proof belongs to the day that was run.
+        val day = save.today()
+        val meters = save.todayDistance()
         host.scope.launch {
-            val proof = host.wallet.clockInOnChain(host.sender, save.todayDistance(), save.todayScore(), save.nextStreak())
+            val proof = host.wallet.clockInOnChain(host.sender, meters, save.todayScore(), save.nextStreak(), day)
             signing = false
             proof.onSuccess {
-                val granted = save.stampClock(it.address, it.signature, it.cluster, it.kind)
+                val granted = save.stampClock(it.address, it.signature, it.cluster, it.kind, day, meters)
                 granted.firstOrNull()?.let { w ->
                     host.toast(ctx.getString(R.string.yard_granted, ctx.getString(if (w.kind == FeeWindow.KIND_LONG) R.string.window_7d else R.string.window_48h)))
                 }
@@ -378,7 +386,7 @@ class YardScreen(host: MainActivity) : Screen(host) {
 
     private fun shareDay() {
         if (!save.signedToday() || save.clockSig.isBlank()) return
-        val text = "CLOCK IN ${save.todayDistance()}m · streak ${save.streak}\n${Fmt.short(save.clockSig)} · ${save.clockCluster}"
+        val text = ctx.getString(R.string.share_text, save.todayDistance(), save.streak) + "\n${Fmt.short(save.clockSig)} · ${save.clockCluster}"
         val body = if (save.clockKind == "tx") "$text\n${host.explorerTx(save.clockSig, save.clockCluster)}" else text
         ShareCompat.IntentBuilder(host)
             .setType("text/plain")

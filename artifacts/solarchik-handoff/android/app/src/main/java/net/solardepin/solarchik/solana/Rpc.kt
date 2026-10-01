@@ -26,11 +26,14 @@ import java.util.concurrent.TimeUnit
 
 class RpcException(message: String, val code: Int = 0) : Exception(message)
 
-/** Minimal JSON-RPC client for the few calls the app needs. */
-class Rpc(val url: String) {
+/** One row of getSignaturesForAddress: [memo] is the RPC's "[len] text" memo summary. */
+data class SigInfo(val signature: String, val ok: Boolean, val memo: String)
+
+/** Minimal JSON-RPC client for the few calls the app needs. Open so tests can script answers. */
+open class Rpc(val url: String) {
     private val json = Json { ignoreUnknownKeys = true }
 
-    suspend fun call(method: String, params: JsonArray): JsonElement = withContext(Dispatchers.IO) {
+    open suspend fun call(method: String, params: JsonArray): JsonElement = withContext(Dispatchers.IO) {
         val body = buildJsonObject {
             put("jsonrpc", "2.0")
             put("id", 1)
@@ -44,7 +47,8 @@ class Rpc(val url: String) {
             val text = res.body?.string().orEmpty()
             if (res.code == 429) throw RpcException("rate limited", 429)
             if (!res.isSuccessful) throw RpcException("HTTP ${res.code}", res.code)
-            val obj = json.parseToJsonElement(text).jsonObject
+            val obj = runCatching { json.parseToJsonElement(text) as JsonObject }
+                .getOrElse { throw RpcException("bad RPC response") }
             obj["error"]?.takeIf { it !is JsonNull }?.let {
                 val e = it.jsonObject
                 throw RpcException(e["message"]?.jsonPrimitive?.contentOrNull ?: "rpc error", e["code"]?.jsonPrimitive?.longOrNull?.toInt() ?: 0)
@@ -55,12 +59,18 @@ class Rpc(val url: String) {
 
     suspend fun latestBlockhash(): ByteArray {
         val r = call("getLatestBlockhash", buildJsonArray { add(buildJsonObject { put("commitment", "confirmed") }) })
-        return Base58.decode(r.jsonObject["value"]!!.jsonObject["blockhash"]!!.jsonPrimitive.content)
+        return parseBlockhash(r)
     }
 
     suspend fun balanceLamports(address: String): Long {
         val r = call("getBalance", buildJsonArray { add(JsonPrimitive(address)); add(buildJsonObject { put("commitment", "confirmed") }) })
-        return r.jsonObject["value"]!!.jsonPrimitive.longOrNull ?: 0L
+        return parseBalance(r)
+    }
+
+    /** Recent signatures of [address] with their memo text (newest first). */
+    open suspend fun memoSignatures(address: String, limit: Int): List<SigInfo> {
+        val r = call("getSignaturesForAddress", buildJsonArray { add(JsonPrimitive(address)); add(buildJsonObject { put("limit", limit); put("commitment", "confirmed") }) })
+        return parseSignatures(r)
     }
 
     suspend fun requestAirdrop(address: String, lamports: Long): String {
@@ -130,6 +140,23 @@ class Rpc(val url: String) {
     }
 
     companion object {
+        /** Throws [RpcException] (never NPE) when the node answers without a usable blockhash. */
+        fun parseBlockhash(r: JsonElement): ByteArray {
+            val hash = ((r as? JsonObject)?.get("value") as? JsonObject)?.get("blockhash")?.let { it as? JsonPrimitive }?.contentOrNull
+                ?: throw RpcException("no blockhash in response")
+            return runCatching { Base58.decode(hash) }.getOrNull()?.takeIf { it.size == 32 } ?: throw RpcException("bad blockhash")
+        }
+
+        fun parseBalance(r: JsonElement): Long =
+            ((r as? JsonObject)?.get("value") as? JsonPrimitive)?.longOrNull ?: throw RpcException("no balance in response")
+
+        fun parseSignatures(r: JsonElement): List<SigInfo> = (r as? JsonArray).orEmpty().mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val sig = (o["signature"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+            val err = o["err"]
+            SigInfo(sig, err == null || err is JsonNull, (o["memo"] as? JsonPrimitive)?.contentOrNull.orEmpty())
+        }
+
         val client: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)

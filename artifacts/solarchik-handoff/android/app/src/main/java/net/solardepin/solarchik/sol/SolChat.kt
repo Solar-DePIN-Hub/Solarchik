@@ -59,7 +59,13 @@ class SolChat(
                 }
             })
         }.toString()
-        val text = runCatching { post(url, body) }.getOrNull() ?: return SolReply(offlineLine(language), fallback = true, offline = true)
+        val text = try {
+            post(url, body)
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c // the screen went away: no reply to store
+        } catch (_: Throwable) {
+            null
+        } ?: return SolReply(offlineLine(language), fallback = true, offline = true)
         return runCatching {
             val o = json.parseToJsonElement(text).jsonObject
             val reply = o["reply"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
@@ -113,11 +119,14 @@ class SolChatStore(context: Context) {
 
     fun playerId(): String = PlayerIds.get(app)
 
+    /** One conversation per UTC day; older day ids are dropped so prefs do not grow forever. */
     fun conversationId(day: String): String {
         val key = "conv.$day"
         prefs.getString(key, null)?.let { return it }
         val id = "sol-" + UUID.randomUUID().toString().take(12)
-        prefs.edit().putString(key, id).apply()
+        val edit = prefs.edit()
+        prefs.all.keys.filter { it.startsWith("conv.") && it != key }.forEach { edit.remove(it) }
+        edit.putString(key, id).apply()
         return id
     }
 

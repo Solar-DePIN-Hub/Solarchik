@@ -161,16 +161,20 @@ class GameSave(context: Context, private val clock: () -> Long = { System.curren
         return if (s.signedDay == StreakRules.prevDay(today())) s.streak + 1 else 1
     }
 
-    /** Returns the windows granted by this stamp (empty when none). */
-    fun stampClock(address: String, signature: String, cluster: String, kind: String): List<FeeWindow> {
-        val before = liveStreak()
-        val after = StreakRules.stamp(before, today(), now())
+    /**
+     * Returns the windows granted by this stamp (empty when none). [day] is the UTC day the run and
+     * the signature belong to: a wallet prompt opened before midnight and signed after it still
+     * stamps the day that was run, not the new one.
+     */
+    fun stampClock(address: String, signature: String, cluster: String, kind: String, day: String = today(), meters: Int = lastDistance): List<FeeWindow> {
+        val before = StreakRules.normalize(streakState(), day)
+        val after = StreakRules.stamp(before, day, now())
         writeStreak(after)
         clockAddress = address
         clockSig = signature
         clockCluster = cluster
         clockKind = kind
-        addLog(ClockEntry(today(), signature.take(100), kind, cluster, lastDistance, now()))
+        addLog(ClockEntry(day, signature.take(100), kind, cluster, meters, now()))
         return after.feeWindows.filter { w -> before.feeWindows.none { it.id == w.id } }
     }
 

@@ -10,7 +10,9 @@ import net.solardepin.solarchik.solana.CoreIx
 import net.solardepin.solarchik.solana.Ix
 import net.solardepin.solarchik.solana.LegacyTx
 import net.solardepin.solarchik.solana.SystemIx
+import net.solardepin.solarchik.wallet.SentTx
 import net.solardepin.solarchik.wallet.SolanaWallet
+import net.solardepin.solarchik.wallet.WalletError
 import org.sol4k.Keypair
 import org.sol4k.PublicKey
 
@@ -19,7 +21,14 @@ class MintError(val kind: Kind, detail: String = "") : Exception(detail.ifBlank 
 }
 
 /** Builds and sends Metaplex Core strategy NFT mints through MWA. */
-class Minter(private val wallet: SolanaWallet, private val store: AgentStore) {
+class Minter(
+    private val wallet: SolanaWallet,
+    private val store: AgentStore,
+    private val send: suspend (ActivityResultSender, suspend (PublicKey, ByteArray) -> LegacyTx) -> Result<SentTx> =
+        { sender, build -> wallet.signAndSend(sender, build) },
+    private val cluster: () -> String = { wallet.clusterName },
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
 
     fun canMint(sku: AgentSku, tier: String): MintError.Kind? {
         if (tier == AgentTier.PRO && wallet.mainnet && !SolarchikConfig.MAINNET_PAID_MINT) return MintError.Kind.PRO_MAINNET_OFF
@@ -33,25 +42,46 @@ class Minter(private val wallet: SolanaWallet, private val store: AgentStore) {
             wallet.connect(sender).onFailure { return Result.failure(it) }
             canMint(sku, tier)?.let { return Result.failure(MintError(it)) }
         }
-        val asset = Keypair.generate()
-        val sent = wallet.signAndSend(sender) { payer, blockhash ->
-            if (tier == AgentTier.FREE && store.freeClaimed(payer.toBase58(), wallet.clusterName)) throw MintError(MintError.Kind.FREE_USED)
-            buildMintTx(payer, blockhash, sku, tier, asset)
-        }
-        return sent.map { tx ->
-            val rec = OwnedAgent(
-                asset = asset.publicKey.toBase58(),
-                skuId = sku.skuId(tier),
-                tier = tier,
-                name = sku.nameFor(tier),
-                owner = tx.address,
-                cluster = tx.cluster,
-                sig = tx.signature,
-                mintedAt = System.currentTimeMillis(),
-            )
+        return mintWith(sender, sku, tier, Keypair.generate())
+    }
+
+    /**
+     * The record is saved as pending before the wallet sees the tx: if the app is killed while the
+     * wallet sends, the asset is still known, checked on chain later, and still counts as this
+     * wallet's free mint. It is dropped only when nothing can have been sent.
+     */
+    internal suspend fun mintWith(sender: ActivityResultSender, sku: AgentSku, tier: String, asset: Keypair): Result<OwnedAgent> {
+        val assetId = asset.publicKey.toBase58()
+        var pending: OwnedAgent? = null
+        val sent = send(sender) { payer, blockhash ->
+            if (tier == AgentTier.FREE && store.freeClaimed(payer.toBase58(), cluster()) && store.agents().none { it.asset == assetId }) {
+                throw MintError(MintError.Kind.FREE_USED)
+            }
+            val tx = buildMintTx(payer, blockhash, sku, tier, asset)
+            val rec = OwnedAgent(assetId, sku.skuId(tier), tier, sku.nameFor(tier), payer.toBase58(), cluster(), mintedAt = clock())
             store.upsert(rec)
-            rec
+            pending = rec
+            tx
         }
+        return sent.fold(
+            onSuccess = { tx ->
+                val rec = (pending ?: OwnedAgent(assetId, sku.skuId(tier), tier, sku.nameFor(tier), tx.address, tx.cluster, mintedAt = clock()))
+                    .copy(owner = tx.address.ifBlank { pending?.owner.orEmpty() }, cluster = tx.cluster, sig = tx.signature)
+                store.upsert(rec)
+                Result.success(rec)
+            },
+            onFailure = { e ->
+                if (pending != null && nothingSent(e)) store.remove(assetId)
+                Result.failure(e)
+            },
+        )
+    }
+
+    /** Declines, a missing wallet and our own build errors never reach the chain. Timeouts might have. */
+    private fun nothingSent(e: Throwable): Boolean = when (e) {
+        is MintError -> true
+        is WalletError -> e.kind == WalletError.Kind.DECLINED || e.kind == WalletError.Kind.NO_WALLET
+        else -> false
     }
 
     /** Polls the chain until the asset account exists and belongs to the owner. */

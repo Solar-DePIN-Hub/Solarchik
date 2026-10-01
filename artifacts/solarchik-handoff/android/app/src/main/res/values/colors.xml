@@ -1,15 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="sc_bg">#07131C</color>
-    <color name="sc_surface">#0E2232</color>
-    <color name="sc_surface2">#14304A</color>
-    <color name="sc_stroke">#1E3D57</color>
     <color name="sc_gold">#F5C542</color>
-    <color name="sc_amber">#F39A2B</color>
-    <color name="sc_cyan">#7AD1FF</color>
     <color name="sc_text">#EEF4F9</color>
-    <color name="sc_muted">#8DA4B7</color>
-    <color name="sc_green">#5BD69A</color>
-    <color name="sc_red">#FF7A7A</color>
-    <color name="sc_purple">#A78BFA</color>
 </resources>

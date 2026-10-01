@@ -43,7 +43,12 @@ class AgentStore(context: Context) {
 
     fun upsert(agent: OwnedAgent) {
         val all = agents().filter { it.asset != agent.asset } + agent
-        prefs.edit().putString(KEY_AGENTS, json.encodeToString(ListSerializer(OwnedAgent.serializer()), all.takeLast(200))).apply()
+        prefs.edit().putString(KEY_AGENTS, json.encodeToString(ListSerializer(OwnedAgent.serializer()), all.takeLast(200))).commit()
+    }
+
+    fun remove(asset: String) {
+        val all = agents().filter { it.asset != asset }
+        prefs.edit().putString(KEY_AGENTS, json.encodeToString(ListSerializer(OwnedAgent.serializer()), all)).commit()
     }
 
     /** One FREE per wallet: any FREE record for this wallet that the chain has not ruled out. */
