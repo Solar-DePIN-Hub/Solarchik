@@ -207,7 +207,7 @@ All numbers live in `core/SolarchikConfig.kt`.
 - `./gradlew testDebugUnitTest -Plive=… -Pchat=…`: **113 tests, 111 pass, 0 fail, 2 skipped** (opt-in `DevnetMintIT`).
 - New:
   - `AuditFixesTest` (22): Events tiers, floor and ceiling, sports/BTC filter, Gamma parsing, RPC parsers, MWA classification, fallback rules, sticky blockhash, 0.19.51 wallet migration, mint pending record (saved before send / dropped on decline / kept on timeout / sign-only rebuild), CLOCK IN across midnight, notes order and migration, Sol cancellation and conversation cleanup, tab restore, call-screening rule, EN/UK plurals and strings
-  - `DeskTest` +10: 5-minute balance refresh, balance read failure, unknown source, reconcile via memo ref, failed tx not counted, offline reconcile, payRef stable and locale-proof, memo ref in the tx, unreadable blob kept
+  - `DeskTest` +9: 5-minute balance refresh, balance read failure, unknown source, reconcile via memo ref, failed tx not counted, offline reconcile, payRef stable and locale-proof, memo ref in the tx, unreadable blob kept
   - `FakeRpc` test helper (no network in unit tests)
 - `-Pdevnet=1`: the simulation of all 10 Core mints passes. The live mint was retried at 12:35 Kyiv; the faucet still returns **429**, so it was skipped.
 
