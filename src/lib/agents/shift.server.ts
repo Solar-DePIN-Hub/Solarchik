@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import type { ArbQuote, PolyMarketQuote, Quote, WhirlQuote } from "./engine";
 import { arbNets } from "./engine";
 import { bookTop, loadSpots, USDC_MINT, type SpotMarket } from "./arb-markets.server";
-import { deskHeaders, DESK_ORIGIN, grokChat } from "./grok-fetch";
+import { deskFetch, grokChat } from "./grok-fetch";
 import { GROK_MODEL } from "./grok-model";
 import { geminiTalk } from "./gemini-live.server";
 import type { ShiftInput, ShiftOk, ShiftResult } from "./shift-types";
@@ -313,15 +313,9 @@ function readOutAmount(body: {
 
 async function titanOut(inputMint: string, outputMint: string, amount: string, key: string): Promise<number | null> {
   try {
-    const desk = await fetch(`${DESK_ORIGIN}/api/titan`, {
-      method: "POST",
-      headers: {
-        ...deskHeaders(),
-        "user-agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-      },
-      body: JSON.stringify({ inputMint, outputMint, amount }),
-      signal: AbortSignal.timeout(8000),
+    const desk = await deskFetch("titan", JSON.stringify({ inputMint, outputMint, amount }), 8000, {
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
     });
     if (desk.ok) {
       const n = readOutAmount((await desk.json()) as { outAmount?: string | number });

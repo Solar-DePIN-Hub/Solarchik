@@ -7,6 +7,7 @@ function stubStart(): Plugin {
   const stub = "\0native-stub";
   const cryptoShim = "\0node-crypto-shim";
   const fsShim = "\0node-fs-shim";
+  const dbStub = "\0native-db-stub";
   return {
     name: "stub-server-fns",
     enforce: "pre",
@@ -14,6 +15,8 @@ function stubStart(): Plugin {
       const bare = id.split("?")[0] ?? id;
       if (bare === "node:crypto") return cryptoShim;
       if (bare === "node:fs" || bare === "node:fs/promises") return fsShim;
+      // Phone bundle has no database; server guards fail closed.
+      if (bare === "@/lib/db" || /\/src\/lib\/db(\.ts)?$/.test(bare)) return dbStub;
       if (bare.includes("quicknode.mjs")) return resolve(__dirname, "src/lib/agents/public-rpc.ts");
       if (
         bare.includes("askBuddy.functions") ||
@@ -34,7 +37,20 @@ function stubStart(): Plugin {
           "export const createHash = unsupported;",
           "export const randomBytes = unsupported;",
           "export const generateKeyPairSync = unsupported;",
-          "export default { createHmac, createHash, randomBytes, generateKeyPairSync };",
+          "export const createPrivateKey = unsupported;",
+          "export const createPublicKey = unsupported;",
+          "export const sign = unsupported;",
+          "export const verify = unsupported;",
+          "export const timingSafeEqual = unsupported;",
+          "export default { createHmac, createHash, randomBytes, generateKeyPairSync, createPrivateKey, createPublicKey, sign, verify, timingSafeEqual };",
+        ].join("\n");
+      }
+      if (id === dbStub) {
+        return [
+          "export const dbSource = 'pglite';",
+          "export async function getSql(){ throw new Error('offline'); }",
+          "export async function ensureDbReady(){}",
+          "export default {};",
         ].join("\n");
       }
       if (id === fsShim) {
@@ -81,6 +97,9 @@ const emptyEnv = [
   "WEEX_API_PASSPHRASE",
   "TITAN_API_KEY",
   "TITAN_JWT",
+  "DESK_TOKEN",
+  "DATABASE_URL",
+  "ARB_MAINNET_ENABLED",
 ];
 
 export default defineConfig({
