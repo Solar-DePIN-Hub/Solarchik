@@ -24,6 +24,8 @@ const LANE_LABEL: Record<PredLane, string> = {
 export function StrategyDesk({ nft }: { nft: AgentNft }) {
   const saveStrategy = useAgents((s) => s.saveStrategy);
   const fundArbDesk = useAgents((s) => s.fundArbDesk);
+  const claimArbDeposit = useAgents((s) => s.claimArbDeposit);
+  const [depositSig, setDepositSig] = useState("");
   const chainBusy = useAgents((s) => s.chainBusy);
   const credit = useAgents((s) => s.arbCredit[nft.asset] ?? 0);
   const mintCollection = useAgents((s) => s.mintCollection);
@@ -278,7 +280,7 @@ export function StrategyDesk({ nft }: { nft: AgentNft }) {
               type="button"
               className="h-11 rounded-md border border-border px-3 font-mono text-xs text-fg text-left break-all"
               data-testid="arb-treasury"
-              onClick={() => void navigator.clipboard.writeText(ARB_TREASURY)}
+              onClick={() => void navigator.clipboard?.writeText(ARB_TREASURY).catch(() => undefined)}
             >
               {ARB_TREASURY}
             </button>
@@ -299,6 +301,31 @@ export function StrategyDesk({ nft }: { nft: AgentNft }) {
                 onClick={() => void fundArbDesk(nft.asset, Number(arbTopup.replace(",", ".")))}
               >
                 На касу арбу
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <input
+                className={field}
+                data-testid="arb-claim-sig"
+                value={depositSig}
+                onChange={(e) => setDepositSig(e.target.value)}
+                placeholder="Підпис старого поповнення"
+                aria-label="Підпис старого поповнення"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                data-testid="arb-claim"
+                disabled={chainBusy || depositSig.trim().length < 64}
+                onClick={() =>
+                  void claimArbDeposit(nft.asset, depositSig).then((ok) => {
+                    if (ok) setDepositSig("");
+                  })
+                }
+              >
+                Зарахувати переказ
               </Button>
             </div>
           </div>

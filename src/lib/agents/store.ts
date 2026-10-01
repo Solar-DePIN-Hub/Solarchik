@@ -172,6 +172,8 @@ type AgentsState = {
   sweepMainnetSol: () => Promise<void>;
   withdrawMainnet: (to: string, amount: number) => Promise<void>;
   fundArbDesk: (asset: string, sol: number) => Promise<void>;
+  /** Claims an earlier mainnet deposit (signature) as arb credit. The server reads and records it once. */
+  claimArbDeposit: (asset: string, sig: string) => Promise<boolean>;
   arbCredit: Record<string, number>;
   /** Server collection address (null: no server mint authority, or unknown). */
   mintCollection: string | null;
@@ -3334,6 +3336,27 @@ export const useAgents = create<AgentsState>((set, get) => ({
     } catch (e) {
       set({ chainBusy: false, notice: errText(e) });
     }
+  },
+
+  async claimArbDeposit(asset, rawSig) {
+    const room = get().wallet?.pubkey;
+    const sig = String(rawSig || "").trim();
+    const nft = get().nfts.find((n) => n.asset === asset && n.classId === 2 && n.owner === room);
+    if (!nft || !room) {
+      set({ notice: "Немає NFT арбітражу на цьому ключі." });
+      return false;
+    }
+    if (!/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(sig)) {
+      set({ notice: "Це не схоже на підпис транзакції Solana." });
+      return false;
+    }
+    set({ notice: "Сервер читає переказ на mainnet…" });
+    const claim = await claimCredit({ sig, asset, wallet: room });
+    set((s) => ({
+      ...(claim.creditSol != null ? { arbCredit: { ...s.arbCredit, [asset]: claim.creditSol } } : {}),
+      notice: claim.ok ? `Кредит зараховано. Зараз ${claim.creditSol.toFixed(4)} SOL.` : `Кредит не зараховано: ${claim.reason}`,
+    }));
+    return claim.ok;
   },
 
   async fundArbDesk(asset, sol) {
