@@ -1,5 +1,6 @@
-import { FREE_FEE_RATE } from "./fees.config";
+import { FREE_FEE_RATE } from "./fees.config.ts";
 import type { NftTier } from "./types";
+import { windowsCover, type FeeWindow } from "../game/fee-windows.ts";
 
 export type FeeReason = "pro" | "window" | "loss" | "paper" | "charged" | "unsent";
 
@@ -20,6 +21,11 @@ export function feeCut(pnl: number): number {
   const lamports = Math.round(pnl * FREE_FEE_RATE * 1e9);
   if (lamports < 1) return 0;
   return lamports / 1e9;
+}
+
+/** Coverage for a trade: any activated fee window (active or spent) that contains openedAt. */
+export function feeCovered(windows: readonly FeeWindow[], openedAt: number): boolean {
+  return windowsCover(windows, openedAt);
 }
 
 /** Paper never sends. Pro and losses are zero. A window stores the waived amount. */

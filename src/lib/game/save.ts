@@ -1,3 +1,4 @@
+import { activateWindow, expireWindows, grantStreakRewards, readWindows, windowsCover, type FeeWindow } from "./fee-windows";
 import type { DayMod } from "./sim";
 import { SKINS, isPlatSkin, type PlatSkin } from "./skins";
 import {
@@ -51,15 +52,7 @@ export type MissionId = "clock" | "suns" | "combo";
 
 export type PayPending = { ref: string; usd: PayUsd; at: number };
 
-export type FeeWindow = {
-  id: string;
-  kind: "h48" | "d7";
-  milestone: number;
-  status: "available" | "active" | "spent";
-  grantedAt: number;
-  startedAt: number;
-  endsAt: number;
-};
+export type { FeeWindow } from "./fee-windows";
 
 export type SaveData = {
   version: number;
@@ -635,17 +628,10 @@ export function stampClock(
   if (save.signedDay === today) return save;
   const now = Date.now();
   const continued = save.signedDay === yesterdayKey();
-  let seven = continued ? save.seven + 1 : 1;
-  let thirty = continued ? save.thirty + 1 : 1;
-  let feeWindows = expireWindows(save.feeWindows, now);
-  if (seven >= 7) {
-    const n = feeWindows.filter((w) => w.kind === "h48").length + 1;
-    feeWindows = grantWindow(feeWindows, { id: `h48-${n}`, kind: "h48", milestone: n * 7, now });
-    seven = 0;
-  }
-  if (thirty > 0 && thirty % 30 === 0) {
-    feeWindows = grantWindow(feeWindows, { id: `d7-${thirty}`, kind: "d7", milestone: thirty, now });
-  }
+  const thirty = continued ? save.thirty + 1 : 1;
+  const granted = grantStreakRewards(save.feeWindows, { seven: continued ? save.seven + 1 : 1, thirty }, now);
+  const seven = granted.seven;
+  const feeWindows = granted.rows;
   const address = proof.address.replace(/\s/g, "").slice(0, 48);
   const clockDays = (continued ? save.clockDays : []).filter((d) => d !== today);
   clockDays.push(today);
@@ -664,44 +650,13 @@ export function stampClock(
   };
 }
 
-const H48_MS = 48 * 60 * 60 * 1000;
-const D7_MS = 7 * 24 * 60 * 60 * 1000;
-
-function grantWindow(rows: FeeWindow[], input: { id: string; kind: FeeWindow["kind"]; milestone: number; now: number }): FeeWindow[] {
-  if (rows.some((w) => w.id === input.id)) return rows;
-  return [
-    ...rows,
-    {
-      id: input.id,
-      kind: input.kind,
-      milestone: input.milestone,
-      status: "available",
-      grantedAt: input.now,
-      startedAt: 0,
-      endsAt: 0,
-    },
-  ];
-}
-
-function expireWindows(rows: FeeWindow[], now: number): FeeWindow[] {
-  return rows.map((w) => (w.status === "active" && w.endsAt > 0 && w.endsAt <= now ? { ...w, status: "spent" } : w));
-}
-
+/** Fee-free if openedAt is inside any window the player activated, active or spent. */
 export function feeWindowCovers(save: SaveData, openedAt: number): boolean {
-  if (!(openedAt > 0)) return false;
-  return save.feeWindows.some((w) => w.status === "active" && openedAt >= w.startedAt && openedAt < w.endsAt);
+  return windowsCover(save.feeWindows, openedAt);
 }
 
 export function activateFeeWindow(save: SaveData, now = Date.now()): SaveData {
-  const rows = expireWindows(save.feeWindows, now);
-  if (rows.some((w) => w.status === "active" && w.endsAt > now)) return { ...save, feeWindows: rows };
-  const next = rows.find((w) => w.status === "available");
-  if (!next) return { ...save, feeWindows: rows };
-  const dur = next.kind === "h48" ? H48_MS : D7_MS;
-  return {
-    ...save,
-    feeWindows: rows.map((w) => (w.id === next.id ? { ...w, status: "active", startedAt: now, endsAt: now + dur } : w)),
-  };
+  return { ...save, feeWindows: activateWindow(save.feeWindows, now) };
 }
 
 export function feeProgress(save: SaveData, now = Date.now()):
@@ -739,32 +694,6 @@ function readClockDays(raw: unknown, signedDay: string, streak: number): string[
     cursor = todayKey(new Date(prev));
   }
   return seeded;
-}
-
-function readWindows(raw: unknown): FeeWindow[] {
-  if (!Array.isArray(raw)) return [];
-  const out: FeeWindow[] = [];
-  for (const row of raw) {
-    if (!row || typeof row !== "object") continue;
-    const o = row as Record<string, unknown>;
-    const id = String(o.id || "").slice(0, 24);
-    if (!id) continue;
-    const kind = o.kind === "d7" ? "d7" : o.kind === "h48" ? "h48" : null;
-    if (!kind) continue;
-    const status = o.status === "active" || o.status === "spent" || o.status === "available" ? o.status : "available";
-    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
-    out.push({
-      id,
-      kind,
-      milestone: Math.max(0, Math.floor(num(o.milestone))),
-      status,
-      grantedAt: num(o.grantedAt),
-      startedAt: num(o.startedAt),
-      endsAt: num(o.endsAt),
-    });
-    if (out.length >= 24) break;
-  }
-  return out;
 }
 
 function readPending(raw: unknown): PayPending[] {
