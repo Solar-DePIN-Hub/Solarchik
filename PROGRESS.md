@@ -16,12 +16,18 @@
 - STEP 12. Native bundle: arb fire, arb house and mint go over HTTPS to the deployed server (`server-calls.ts` → `/api/native/arb-fire|arb-house|mint-status|mint-prepare`, `server/middleware/native-api.ts`, CORS `*`, every state change still needs the wallet proof). Server code is not in `build-native`. `/api/desk/*` answers CORS preflight for origins in `DESK_PROXY_ORIGINS`.
 - STEP 13. Fee windows (`src/lib/game/fee-windows.ts`, mirrored by the native app): a trade is fee-free if its openedAt is inside ANY activated window (startedAt <= openedAt < endsAt), active or already spent. Reward ids carry the UTC grant day: `h48-<N>-<YYYY-MM-DD>`, `d7-<thirty>-<YYYY-MM-DD>`; same id the same day is granted once; old ids (`d7-30`, `h48-2`) stay and never block new ones. At most 24 rows: available/active first, then the newest spent; loading reads all rows and then trims, so a new reward is never dropped at the cap. `h48` numbers continue from the highest milestone.
 - STEP 14. `npm test` is green: tests that need files absent from this checkout skip with the missing path (release keystore/APK/Android SDK, `.grok/skills/og`, `.grok/app-env.json`); grok-pwa tests run in an empty workspace so the app's own `src/lib/og/site.json` does not leak into template assertions.
+- STEP 15. Payments are verified on the server (`payment-rules.ts`, `payments.server.ts`, `migrations/0004_payments.sql`). Arb credit: the deposit is a mainnet transfer from the room wallet to `ARB_TREASURY` with the NFT asset as memo, 0.005–0.02 SOL, at most 30 days old. The server reads it on mainnet, records the signature once in `chain_payments`, and credit = verified deposits − mainnet arb fires that did not fail (an asset re-issued into the server collection inherits its old asset's credit through `asset_links`). A mainnet fire needs credit ≥ the fire size; the fire result returns the server credit. The browser keeps only a display cache (`solarchik.arb-credit.v2`) and a list of pending claims retried on load. Old local v1 credit no longer counts: earlier deposits are claimed by signature («Зарахувати переказ»). Free fees: the room key pays exactly the row's lamports to `PAY_WALLET` with memo `solarchik-fee:<row id>`. The server reads the devnet tx (sender = room wallet, amount, recipient, memo) and records it once per signature and once per (wallet, row). The desk marks rows «звірено сервером» / «чекає звірки» / «не звірено: …». No DB → closed, nothing recorded.
+- STEP 16. Arb requires an agent from the server collection when `MINT_AUTHORITY_SECRET` is set. Pre-co-sign NFTs get «Перенести в колекцію сервера» (`prepareReissueOnServer`, wallet proof `reissue`): the server mints a copy with the same name and attributes into its collection (tier Free, or Pro with a Pro payment signature), the room key pays and then burns the old asset (thawing first if frozen). Pro payments made before 2026-10-02 UTC (`COSIGN_LAUNCH_SEC`) count without a memo or age limit, but an unbound one (paid from Phantom/MWA) only counts for an old NFT minted within 30 min after it.
+- STEP 17. Free-mint race closed without a DB: co-signed asset keypairs are derived from the server key and `free:<wallet>` / `pro:<paySig>`, so Core refuses a second account at the same address (one Free per wallet, one mint per Pro payment), with an `accountExists` pre-check for a clear message. With the key both tiers co-sign regardless of the DB. Without the key on a deploy: Pro closed; Free closed if there is no DB (client mint plus DB slot lock otherwise).
+- STEP 18. Web audit: promise chains in the Work desk catch (hydrate, wallet, mainnet slot, Jupiter quote, Phantom connect including a declined popup, buy, coach chat, chart chunk). Devnet balance shows «немає цифри» instead of «читаю…» forever when RPC is down. Figure polling no longer rejects every 8 s. A failed WorkDesk chunk shows retry. The notice is a polite live region. Placeholder-only inputs got aria-labels. i18n: `yard.sigWord`, `work.loadFailed`, `work.retry`. The Work desk English swap (used for en/es/pt/de/ja) covers every UI and notice phrase, checked by `work-translate.test.ts`. ESLint ignores `build-native/` and reports 0 errors.
+- STEP 19. Sol friend worker (`worker/solarchik-ai-friend.js`): game facts in the system prompt, reply in the language of the player's message, max tokens 600/800 (was 120), reply cap 900 chars, a cut reply keeps whole sentences only. Not deployed: see `worker/DEPLOY.md` (`npx wrangler@latest deploy -c wrangler.friend.toml` from `worker/`).
 - STEP 10. Desk token: no literal in source. Server code uses `DESK_TOKEN` env. Browser/native code calls `/api/desk/grok|titan` (`server/middleware/desk-proxy.ts`), which adds the token, POST only, 64 KB, same origin or `DESK_PROXY_ORIGINS`, 30/min per IP per instance. `/api/poly` is server-only. Without `DESK_TOKEN` the proxy answers 503.
 
 ## Env vars (see `.env.example`)
 
-- `DATABASE_URL` — Neon/Postgres. Needed for arb, Pro payment checks and mint slots. Migrations run in `npm run build`.
-- `MINT_AUTHORITY_SECRET` — devnet mint authority (base58). Needed for Pro on deploys. Needs no SOL.
+- `DATABASE_URL` — Neon/Postgres. Needed for arb, arb credit, fee verification, Pro payment checks and mint slots. Migrations run in `npm run build` (new: `0004_payments.sql`).
+- `MINT_AUTHORITY_SECRET` — devnet mint authority (base58). Needed for Pro, for Free without a DB, and for re-issue on deploys. When set, arb only accepts server-collection agents. Needs no SOL.
+- No new env vars in round 4.
 - `ARB_HOUSE_KEY`, `BACKPACK_API_KEY`, `BACKPACK_SECRET`, `TITAN_SECRET` — mainnet arb house secrets.
 - `ARB_MAINNET_ENABLED` — `true` to allow real mainnet arb. Leave unset for simulation.
 - `DESK_TOKEN` — same value as the desk worker secret. Rotate it: the old literal is in git history.
@@ -36,17 +42,19 @@
 ## Next
 
 - Rotate the desk worker token (`wrangler secret put DESK_TOKEN` on solarchik-desk) and set the same value as `DESK_TOKEN` in Vercel. The old token is in git history.
-- Arb credit is still a client-side ledger. Mainnet should also verify the credit memo on-chain before arming.
-- Tier truth is the URI in the server collection. Assets minted before co-signing sit in per-room collections where the owner is the update authority, so their `tr` is not trustworthy; the client treats them as before. Server checks that depend on class/tier (arb) do not yet require the server collection.
-- Without `DATABASE_URL`, a co-signed Free mint has no slot lock (two tabs could race the on-chain check).
-- Fee transfers are still sent by the client; the server does not verify them.
+- The server verifies that a reported fee was paid, not which profits owe a fee: the fee rows still come from the client ledger.
+- Re-issue: a stolen old Pro payment signature could be claimed first by someone who owns a legacy NFT minted within 30 min of that payment (devnet only). Arb credit deposits older than 30 days cannot be claimed.
+- Re-issue was not run end-to-end on devnet (faucet 429). LiteSVM 0.8 crashes (`std::bad_alloc`) when the reissue/burn script signs after executing Core txs; covered by unit tests and the round-3 LiteSVM create path.
+- `work-app.tsx` is compiled JSX under `@ts-nocheck`; typing it is still to do.
+- npm audit: 22 transitive advisories (6 high) through `solana-agent-kit`, `@solana/spl-token` (bigint-buffer) and `@solana/web3.js` (jayson/uuid). `npm audit fix` without `--force` changes nothing; the forced fix downgrades solana-agent-kit to 2.0.1 (breaking). Left as is.
+- Work desk text stays Ukrainian for `uk` and English for every other locale (no es/pt copy for the desk).
 
 - Assemble release APK `0.19.53` on a machine with the keystore. The file in `public/` and the yard link stay on `0.19.51` until that APK exists.
 - Pro payment is devnet-only. A mainnet Seeker still cannot buy Pro.
 
 ## Tested
 
-- `npm run typecheck`, `npx vite build`, native bundle build, `npm test` (scripts 187 pass / 9 skipped, TS 90 pass), eslint on changed files (0 errors).
+- Round 4: `npm run typecheck`, `npx eslint .` (0 errors), `npx vite build` + SSR smoke on `vite preview`, native bundle build (no server code), `npm test` (scripts 190 pass / 9 skipped, TS 108 pass).
 - No live devnet mint: the public faucet rate-limits (429). Mint verified in LiteSVM 0.8 with the Core program.
 - Android source was not compiled here. No new APK.
 
