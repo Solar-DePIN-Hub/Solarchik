@@ -6,9 +6,9 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   appNameFromHost,
-  createHeadInjector,
+  createHeadInjector as createHeadInjectorIn,
   grokXCreatorHeadTags,
-  injectGrokPwaHead,
+  injectGrokPwaHead as injectGrokPwaHeadIn,
   isDocumentPath,
   isInstallQuery,
   publicAppHost,
@@ -20,6 +20,12 @@ import {
 import { renderInstallPage } from "./grok-pwa-plugin.mjs";
 
 const TEMPLATE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// These tests pin the template defaults. Without an explicit cwd the injector reads
+// the app's own src/lib/og/site.json (Solarchik), so default to an empty workspace.
+const EMPTY_WORKSPACE = mkdtempSync(join(tmpdir(), "grok-pwa-template-"));
+const injectGrokPwaHead = (html, ctx = {}) => injectGrokPwaHeadIn(html, { cwd: EMPTY_WORKSPACE, ...ctx });
+const createHeadInjector = (ctx = {}) => createHeadInjectorIn({ cwd: EMPTY_WORKSPACE, ...ctx });
 
 test("injects before </head>", () => {
   const out = injectGrokPwaHead("<html><head><title>x</title></head><body></body></html>");

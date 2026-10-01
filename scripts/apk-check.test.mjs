@@ -44,10 +44,9 @@ const gradle = readFileSync(GRADLE, "utf8");
 const applicationId = grab(gradle, /applicationId = "([^"]+)"/);
 const versionCode = grab(gradle, /versionCode = (\d+)/);
 const versionName = grab(gradle, /versionName = "([^"]+)"/);
-const storePassword = grab(
-  readFileSync(join(ROOT, "artifacts/solarchik-handoff/android/app/keystore.properties"), "utf8"),
-  /storePassword=(.+)/,
-);
+const KEYSTORE_PROPS = join(ROOT, "artifacts/solarchik-handoff/android/app/keystore.properties");
+// keystore.properties holds the signing password and is never committed; only the signing machine has it.
+const storePassword = existsSync(KEYSTORE_PROPS) ? grab(readFileSync(KEYSTORE_PROPS, "utf8"), /storePassword=(.+)/) : null;
 const apkPath = join(ROOT, `public/Solarchik-CLOCK-IN-${versionName}.apk`);
 const handoffApk = join(ROOT, `artifacts/solarchik-handoff/apk/Solarchik-CLOCK-IN-${versionName}.apk`);
 const label = grab(readFileSync(STRINGS, "utf8"), /name="app_name">([^<]+)</);
@@ -55,12 +54,22 @@ const declaredPerms = [...readFileSync(MANIFEST, "utf8").matchAll(/uses-permissi
   (match) => match[1],
 );
 
-test("release apk matches the android project", () => {
+// Release check for the signing machine. Elsewhere it skips and says what is missing.
+const releaseMissing = [
+  storePassword ? null : "artifacts/solarchik-handoff/android/app/keystore.properties",
+  existsSync(apkPath) ? null : `public/Solarchik-CLOCK-IN-${versionName}.apk`,
+  findSdkTool("aapt") ? null : "Android build-tools aapt (ANDROID_HOME)",
+  findSdkTool("apksigner") ? null : "Android build-tools apksigner (ANDROID_HOME)",
+].filter(Boolean);
+const releaseSkip = releaseMissing.length ? `release signing env not here; missing: ${releaseMissing.join(", ")}` : false;
+
+test("release apk matches the android project", { skip: releaseSkip }, () => {
   assert.ok(existsSync(apkPath), `missing ${apkPath}`);
   const aapt = findSdkTool("aapt");
   const apksigner = findSdkTool("apksigner");
   assert.ok(aapt, "aapt not found");
   assert.ok(apksigner, "apksigner not found");
+  assert.ok(storePassword, "keystore.properties missing");
 
   const zip = run("unzip", ["-t", apkPath]);
   assert.match(zip, /No errors detected/);
