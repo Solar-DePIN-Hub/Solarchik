@@ -59,9 +59,88 @@ All numbers live in `core/SolarchikConfig.kt`.
 - Notification toggles are saved under the export's keys (`noteStreak`, …). The scheduling worker (DayAlerts) was missing from the export snapshot and lands in B.
 - The call-screening service from the old build is kept untouched.
 
-## Next: milestone B
-1. Agents trading engine (sim/paper first, then devnet): per-agent loop in WorkManager, user risk caps (user-limits.ts: 0.02/trade, 0.3/day, 2 losses, 0.3 day loss; caps can only go down), positions → `FeeLedger.planFee` with `covered = feeWindowCovers(openedAt)`, owed fees sent to the treasury via MWA (devnet).
-2. Notifications (WorkManager + POST_NOTIFICATIONS): streak at risk, reward ready, window ending, daily Sol report, using the export's copy.
-3. Sol chat + voice: `POST https://friend.solardepin.net/v1/chat` (`message, language, playerId, conversationId, history[≤4], scene`), SpeechRecognizer in, TextToSpeech out.
-4. Daily Sol report from real ledger/streak numbers.
-5. Polish (animations, haptics, empty states), MWA fallback path, release APK.
+## Milestone B: done (0.20.1, versionCode 61)
+
+**Agent desk** (`agents/engine/`, `ui/AgentsScreen.kt`)
+- `AgentEngine` is pure and unit-tested. Each strategy watches its own sources on live public data:
+  - Coinbase BTC spot (Kraken fallback)
+  - Backpack SOL_USDC (Coinbase fallback)
+  - Open-Meteo Kyiv temperature
+  - Polymarket Gamma (favourite 0.62–0.94, not BTC, not sports, more than 2 h left)
+- It anchors a price for each window. It enters only when confidence ≥ 65% (move vs edge, or the market favourite). It holds the position for one window, then settles it against the real price.
+- Positions are simulated on real prices. No order is ever sent to an exchange.
+- Two tracks:
+  - **Paper**: a virtual 1 SOL, any SKU, no mint. Fees are only recorded (reason `paper`).
+  - **Devnet**: needs an owned, verified devnet NFT. Owed Free 5% fees are paid in devnet SOL with one MWA tx (a transfer to the treasury plus a memo), and the rows are then marked `charged`.
+- Risk caps (`RiskCaps.kt`, web `user-limits.ts`):
+  - hard limits: 0.02 SOL per trade, 0.3 per day, 2 losses in a row, 0.3 day loss
+  - the user can only lower them (steppers) or pause everything
+  - sizing uses the web "balanced" rule
+  - the loss streak is global for the UTC day, as on web
+- Every close goes through `FeeLedger.planFee(covered = feeWindowCovers(openedAt))`.
+- Ticks run every 30 s while the app is open, and from WorkManager every ~15 min (`solarchik-desk`) while any run is active.
+- Run ids, the log (80 entries) and day books persist in prefs `solarchik-desk`.
+
+**Fee-free windows**: `core/FeeWindows.kt` is an exact port of web `src/lib/game/fee-windows.ts` (branch web-fees, 7b5b73e).
+- Coverage = any activated window (active or spent).
+- Ids are `h48-<N>-<YYYY-MM-DD>` / `d7-<thirty>-<YYYY-MM-DD>`. The same id is granted once per day, and old ids stay valid.
+- h48 numbering continues from the highest id seen.
+- The list is capped at 24: active and available windows are kept first, then the newest spent ones.
+- Its 11 web unit tests are ported in `FeeWindowsTest`.
+- This resolves two milestone A notes: web coverage of spent windows, and the reuse of `d7-30` after a reset.
+- It also fixes old code that dropped new rewards once 24 windows existed.
+
+**Notifications** (`notify/`)
+- The hourly `NoteWorker` runs the pure `NotePlanner`:
+  - streak at risk: within 3 h of UTC midnight and not signed
+  - reward ready to activate
+  - fee-free window ends within 3 h
+  - Sol's daily report: there was activity today and it is after 20:00 local
+- Each note is sent once (dedupe key).
+- Asks for POST_NOTIFICATIONS on Android 13+. Settings shows the status and an "Allow notifications" button.
+- Tapping a note opens the matching tab.
+
+**Sol** (`sol/`, `ui/SolScreen.kt`)
+- Chat with the friend worker (`FRIEND_CHAT_URL`, `{message, language, playerId, conversationId, history≤4, scene}`).
+- Offline and fallback replies are marked. Truncated replies are cut back to whole sentences.
+- Questions about game rules (window, streak, fee, risk) are answered locally from `SolarchikConfig`, EN and UK, because the worker has no game knowledge.
+- Voice: SpeechRecognizer in (mic button, RECORD_AUDIO asked on first use) and TextToSpeech out (uk-UA / en-US, optional "Speak Sol's replies").
+- Daily report (`DailyReport.kt`) is built from real numbers for today (UTC):
+  - ledger rows closed today
+  - fees
+  - streak and whether today is signed
+  - run metres
+  - window progress
+  - running strategies
+- Sol may retell the report. The retelling is used only if it contains no numbers that are not in the report; otherwise the plain note is shown.
+
+**Wallet**
+- `signAndSend` falls back to `signTransactions` + RPC `sendTransaction` when the wallet fails on sign-and-send. This covers wallets that drop the asset's partial signature.
+- The mint keeps the same asset keypair across retries.
+
+**Polish**
+- Haptic taps on buttons, tabs and segments; short fade on tab change.
+- The Yard crew card shows the desk state.
+- Copy avoids gambling words: strategies "forecast" and "enter when confidence ≥ 65%"; lanes are labelled Market / Ринок.
+
+## Tests (milestone B)
+
+`./gradlew :app:testDebugUnitTest`: TESTCOUNT
+- New:
+  - `AgentEngineTest` (12), `DeskTest` (5), `FeeWindowsTest` (11, ported from web), `NotePlannerTest` (3), `NotesTest` (2), `SolChatTest` (3), `SolRulesTest` (1)
+  - `StreakRulesTest` grew to 14
+  - `ScreensBTest` (2, needs `-Plive=<session.json>` and optionally `-Pchat=<dir>`)
+- `LiveSession` (test sources) runs the production engine in real time on live data and writes the JSON that `ScreensBTest` renders:
+  - all 5 SKUs, paper
+  - each SKU has its own day book in the recording, so one loss brake doesn't end the sample
+
+## Known issues / check on a real phone (milestone B)
+- MWA sign-and-send with the partially signed Core mint on Seed Vault, and that the sign-only fallback lands.
+- Devnet fee payment tx through the wallet (transfer + memo). Only built and unit-tested here.
+- Live devnet mint still unverified: the devnet faucet returns 429 for the box IP. `simulateTransaction` passes.
+- Notification permission dialog, and delivery timing. WorkManager has a 15-min floor and Doze can delay the hourly check.
+- SpeechRecognizer and TTS for uk-UA on Seeker. The app shows a message if the language is missing.
+- Background desk ticks (~15 min) with the app closed.
+- The friend worker gives generic answers and cuts Ukrainian replies short. Server-side fix: add game facts to its system prompt and raise `max_tokens`. The app answers rule questions locally.
+- Positions are simulated on real market data. On devnet only fees move.
+- Global loss brake: 2 losses in a row stop the whole desk for the UTC day (web rule).
