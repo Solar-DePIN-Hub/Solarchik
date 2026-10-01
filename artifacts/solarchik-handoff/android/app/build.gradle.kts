@@ -34,6 +34,7 @@ android {
         unitTests.isIncludeAndroidResources = true
         unitTests.all {
             it.maxHeapSize = "1536m"
+            it.systemProperty("solarchik.devnet", (project.findProperty("devnet") as String?) ?: "0")
             it.systemProperty("solarchik.shots", (project.findProperty("shots") as String?) ?: layout.buildDirectory.dir("screens").get().asFile.path)
         }
     }

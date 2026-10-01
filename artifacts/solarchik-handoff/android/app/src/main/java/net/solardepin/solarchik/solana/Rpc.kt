@@ -68,6 +68,18 @@ class Rpc(val url: String) {
         return r.jsonPrimitive.content
     }
 
+    /** Sends an already fully signed transaction (tests and devnet tools only; the app sends through MWA). */
+    suspend fun sendTransaction(signed: ByteArray): String {
+        val r = call(
+            "sendTransaction",
+            buildJsonArray {
+                add(JsonPrimitive(Base64.getEncoder().encodeToString(signed)))
+                add(buildJsonObject { put("encoding", "base64"); put("preflightCommitment", "confirmed") })
+            },
+        )
+        return r.jsonPrimitive.content
+    }
+
     data class AccountInfo(val owner: String, val lamports: Long, val data: ByteArray)
 
     suspend fun accountInfo(address: String): AccountInfo? {
