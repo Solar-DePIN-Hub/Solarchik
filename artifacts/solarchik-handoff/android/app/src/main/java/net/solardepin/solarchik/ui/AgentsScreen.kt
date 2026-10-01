@@ -490,7 +490,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         }
         val s = FeeLedger.summarize(rows)
         ledgerBox.addView(Ui.card(ctx, accent = Ui.GREEN, pad = 14).apply {
-            addView(Ui.text(ctx, ctx.getString(R.string.ledger_summary, s.positions, Fmt.signedSol(s.pnl)), 15f, Ui.TEXT, 800))
+            addView(Ui.text(ctx, ctx.getString(R.string.ledger_summary, s.positions, Fmt.signedSol(s.pnl, 6)), 15f, Ui.TEXT, 800))
             addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.ledger_fees, Fmt.sol(s.feesCharged), Fmt.sol(s.feesOwed), Fmt.sol(s.feesWaived)), 12f), 4))
         })
         rows.take(30).forEach { ledgerBox.addView(ledgerRow(it)) }
@@ -499,7 +499,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
     private fun ledgerRow(r: FeeRow): View = Ui.card(ctx, pad = 14).apply {
         val top = Ui.row(ctx)
         top.addView(Ui.weight(Ui.text(ctx, r.agent, 14f, Ui.TEXT, 800)))
-        top.addView(Ui.text(ctx, Fmt.signedSol(r.pnl) + " SOL", 14f, if (r.pnl > 0) Ui.GREEN else if (r.pnl < 0) Ui.RED else Ui.MUTED, 800))
+        top.addView(Ui.text(ctx, Fmt.signedSol(r.pnl, 6) + " SOL", 14f, if (r.pnl > 0) Ui.GREEN else if (r.pnl < 0) Ui.RED else Ui.MUTED, 800))
         addView(top)
         val bottom = Ui.row(ctx, gap = 8)
         val (label, color) = reason(r.reason)

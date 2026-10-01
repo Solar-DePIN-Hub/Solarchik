@@ -103,7 +103,7 @@ class ScreensBTest {
         if (!full || scroll == null) return
         val inner = scroll.getChildAt(0)
         inner.measure(View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
-        val fullBmp = Bitmap.createBitmap(1080, inner.measuredHeight.coerceAtMost(12000), Bitmap.Config.ARGB_8888)
+        val fullBmp = Bitmap.createBitmap(1080, inner.measuredHeight.coerceAtMost(16000), Bitmap.Config.ARGB_8888)
         val c = Canvas(fullBmp)
         c.drawColor(0xFF07131C.toInt())
         inner.layout(0, 0, 1080, inner.measuredHeight)
