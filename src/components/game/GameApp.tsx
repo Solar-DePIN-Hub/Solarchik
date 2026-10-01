@@ -51,6 +51,13 @@ export function GameApp() {
   const [save, setSave] = useState<SaveData | null>(null);
   const [screen, setScreen] = useState<Screen>("yard");
   const [workDesk, setWorkDesk] = useState<typeof WorkDesk | null>(null);
+  const [workDeskFailed, setWorkDeskFailed] = useState(false);
+  const loadWorkDesk = () => {
+    setWorkDeskFailed(false);
+    return import("./WorkDesk")
+      .then((m) => setWorkDesk(() => m.WorkDesk))
+      .catch(() => setWorkDeskFailed(true));
+  };
   const [daily, setDaily] = useState(true);
   const [runKey, setRunKey] = useState(0);
   const [signBusy, setSignBusy] = useState(false);
@@ -75,9 +82,13 @@ export function GameApp() {
   useEffect(() => {
     let cancel = false;
     const id = window.setTimeout(() => {
-      void import("./WorkDesk").then((m) => {
-        if (!cancel) setWorkDesk(() => m.WorkDesk);
-      });
+      void import("./WorkDesk")
+        .then((m) => {
+          if (!cancel) setWorkDesk(() => m.WorkDesk);
+        })
+        .catch(() => {
+          /* preload only: the Work button retries */
+        });
     }, 400);
     return () => {
       cancel = true;
@@ -308,7 +319,7 @@ export function GameApp() {
             stopMusic();
             setScreen("work");
             if (!workDesk) {
-              void import("./WorkDesk").then((m) => setWorkDesk(() => m.WorkDesk));
+              void loadWorkDesk();
             }
           }}
         />
@@ -316,7 +327,23 @@ export function GameApp() {
         WorkDeskView ? (
           <WorkDeskView locale={view.locale} onBack={() => setScreen("pet")} />
         ) : (
-          <div className="grid h-dvh place-items-center bg-bg text-sm text-muted">…</div>
+          <div className="grid h-dvh place-items-center bg-bg text-sm text-muted" role="status" aria-live="polite">
+            {workDeskFailed ? (
+              <div className="grid justify-items-center gap-3 px-6 text-center">
+                <p>{t("work.loadFailed")}</p>
+                <div className="flex gap-2">
+                  <button type="button" className="min-h-11 rounded-md bg-surface px-4 text-fg" onClick={() => void loadWorkDesk()}>
+                    {t("work.retry")}
+                  </button>
+                  <button type="button" className="min-h-11 rounded-md px-4 text-fg" onClick={() => setScreen("pet")}>
+                    {t("lang.close")}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              "…"
+            )}
+          </div>
         )
       ) : (
         <div className="h-dvh w-full overflow-y-auto bg-bg">

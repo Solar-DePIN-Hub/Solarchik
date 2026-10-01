@@ -568,12 +568,19 @@ function noteSettledFees(patches: FillPatch[], track: Track) {
 }
 
 async function sendDueFees(due: FeeRow[]) {
-  const kp = await loadKeypair();
+  let kp: Awaited<ReturnType<typeof loadKeypair>>;
+  let chain: Awaited<ReturnType<typeof loadChain>>;
+  try {
+    kp = await loadKeypair();
+    chain = await loadChain();
+  } catch {
+    useAgents.setState({ notice: "Комісію не відправлено. Ключ або модуль мережі не відкрився." });
+    return;
+  }
   if (!kp) {
     useAgents.setState({ notice: "Комісію не відправлено. Немає ключа." });
     return;
   }
-  const chain = await loadChain();
   const wallet = kp.publicKey.toBase58();
   for (const row of due) {
     try {
@@ -1013,9 +1020,12 @@ async function pullFigures() {
   try {
     const kp = await loadKeypair();
     if (kp) {
-      const sol = await readSol(kp.publicKey);
+      const sol = await readSol(kp.publicKey).catch(() => null);
       if (typeof sol === "number") {
         useAgents.setState({ sol, solKnown: true, solMiss: false, paperSol: 0 });
+      } else if (!useAgents.getState().solKnown) {
+        // RPC down: say "no figure" instead of "reading…" forever.
+        useAgents.setState({ solMiss: true });
       }
       const owner = kp.publicKey.toBase58();
       const [main, usdc] = await Promise.all([
@@ -1069,6 +1079,8 @@ async function pullFigures() {
         }
       }
     }
+  } catch {
+    /* RPC or bridge quiet: keep the last figures, next poll retries */
   } finally {
     figuresFlight = false;
   }
@@ -2957,7 +2969,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
           );
         }
         set({ nfts: [...byAsset.values()] });
-        void syncServerLedgers(wallet.pubkey);
+        void syncServerLedgers(wallet.pubkey).catch(() => undefined);
         const live = get();
         const real = [...byAsset.values()].find((n) => n.classId === 2 && n.asset !== "local-dex-arb" && n.owner === wallet.pubkey);
         if (real && live.agents.dex.sourceAsset === "local-dex-arb") {
@@ -2970,7 +2982,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
         }
       } catch {
         /* RPC quiet — keep what was already saved for this room */
-        void syncServerLedgers(wallet.pubkey);
+        void syncServerLedgers(wallet.pubkey).catch(() => undefined);
       }
     })();
     const resume = () => {
@@ -3090,7 +3102,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
 
   setTab(tab) {
     set({ tab });
-    if (!get().wallet) void get().ensureWallet();
+    if (!get().wallet) void get().ensureWallet().catch(() => set({ notice: "Гаманець кімнати не відкрився. Онови сторінку." }));
   },
 
   setTrack() {
@@ -3556,7 +3568,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
     }
     const room = get().wallet?.pubkey;
     const old = get().nfts.find((n) => n.asset === asset && n.owner === room);
-    const kp = await loadKeypair();
+    const kp = await loadKeypair().catch(() => null);
     if (!old || !room || !kp || kp.publicKey.toBase58() !== room) {
       set({ notice: "Немає цього NFT або ключа кімнати." });
       return false;
@@ -4312,7 +4324,12 @@ export const useAgents = create<AgentsState>((set, get) => ({
   runAsset(asset) {
     const wallet = get().wallet;
     if (!wallet) {
-      void get().ensureWallet().then(() => get().runAsset(asset));
+      void get()
+        .ensureWallet()
+        .then((w) => {
+          if (w) get().runAsset(asset);
+        })
+        .catch(() => set({ notice: "Гаманець кімнати не відкрився. Онови сторінку." }));
       return;
     }
     const nft = get().nfts.find((n) => n.asset === asset && n.owner === wallet.pubkey);

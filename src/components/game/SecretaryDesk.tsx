@@ -462,6 +462,7 @@ export function SecretaryDesk({
                 onChange={(e) => setOwn(e.target.value)}
                 inputMode="decimal"
                 placeholder={t("pet.sec.pay.own")}
+                aria-label={t("pet.sec.pay.own")}
                 className="h-11 min-w-0 flex-1 rounded-full border border-border bg-bg px-4 text-sm text-fg outline-none placeholder:text-subtle"
               />
               <button
@@ -662,6 +663,7 @@ export function SecretaryDesk({
                   onChange={(e) => setNameDraft(e.target.value)}
                   maxLength={40}
                   placeholder={t("pet.sec.book.ph")}
+                  aria-label={t("pet.sec.book.ph")}
                   className="h-11 min-w-0 flex-1 rounded-full border border-border bg-elevated px-4 text-sm text-fg outline-none placeholder:text-subtle"
                 />
                 <button
@@ -801,6 +803,7 @@ export function SecretaryDesk({
               onChange={(e) => setDraft(e.target.value)}
               maxLength={400}
               placeholder={t("pet.sec.ph")}
+              aria-label={t("pet.sec.ph")}
               disabled={busy}
               className="h-12 min-w-0 flex-1 rounded-full border border-border bg-elevated px-4 text-sm text-fg outline-none placeholder:text-subtle"
             />

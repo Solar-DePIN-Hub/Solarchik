@@ -183,7 +183,7 @@ export async function screenCall(
       return { ok: false, needTopup: true, usd: Number(j.usd) || 0 };
     }
     if (!res.ok) return { ok: false, needTopup: false, error: res.status >= 500 ? "bad" : "empty" };
-    let reply = cleanSecretaryReply(str(j.reply));
+    const reply = cleanSecretaryReply(str(j.reply));
     if (!reply) return { ok: false, needTopup: false, error: "empty" };
     let summary = readSummary(j.summary);
     const known = matchKnown(`${summary.caller_name} ${summary.company} ${call}`, names);

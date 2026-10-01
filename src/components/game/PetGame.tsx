@@ -611,6 +611,7 @@ export function PetGame({ save, t, now: nowProp, onBack, onSetup, onChat, onSecr
             onChange={(e) => setDraft(e.target.value)}
             maxLength={240}
             placeholder={t("pet.chat.ph")}
+            aria-label={t("pet.chat.ph")}
             className="h-12 min-w-0 flex-1 rounded-full border border-border bg-elevated px-4 text-sm text-fg outline-none placeholder:text-subtle"
           />
           <button

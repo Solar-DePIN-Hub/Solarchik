@@ -236,7 +236,7 @@ export async function prepareBridgeOnServer(polygon: string, room: string): Prom
     return empty("Немає SOL на комісію. Депозиту немає.", listed.sol);
   }
   const capSol = CAP_USD / usdPerSol;
-  let amount = Math.floor(Math.min(capSol, spendable) * 1e6) / 1e6;
+  const amount = Math.floor(Math.min(capSol, spendable) * 1e6) / 1e6;
   if (!(amount > 0)) return empty("Сума менша за мінімум. Депозиту немає.", listed.sol);
   const lamports = Math.floor(amount * 1e9);
   const est = await quoteUsd(NATIVE_SOL, String(lamports), polygon);

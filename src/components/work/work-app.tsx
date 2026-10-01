@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment, no-var -- compiled JSX kept as is; see PROGRESS.md (typing it is a leftover) */
 // @ts-nocheck
 import { useEffect, useState } from "react";
 import { jsx, jsxs } from "react/jsx-runtime";
@@ -10,6 +11,7 @@ import { useAgents } from "@/lib/agents/store";
 import { healDevnet } from "@/lib/agents/rpc-heal";
 import { readMainnetBalance, readMainnetSlot } from "@/lib/agents/mainnet";
 import { revealRoomSecret } from "@/lib/agents/wallet";
+import { declined, reasonOf } from "@/lib/agents/wallet-errors";
 import { cn, formatSol, shortKey } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { AgentBay } from "./agent-bay";
@@ -18,6 +20,14 @@ import { FeeNote } from "./fee-note";
 import { RiskPanel } from "./risk-panel";
 import { IconCopy, IconPlay, IconStop, IconWallet } from "./icons";
 import { useWorkLoop } from "./use-work-loop";
+
+/** Turns a rejected promise into a desk notice instead of an unhandled rejection. */
+function failNotice(prefix) {
+	return (e) => {
+		const why = reasonOf(e);
+		useAgents.setState({ notice: `${prefix}${why ? `: ${why}` : "."}` });
+	};
+}
 
 var CLASS_IDS = [
 	1,
@@ -94,8 +104,8 @@ function WorkApp() {
 		void healDevnet().finally(() => {
 			hydrate().then(() => {
 				const t = useAgents.getState().tab;
-				if (t === "work" || t === "store" || t === "room") useAgents.getState().ensureWallet();
-			});
+				if (t === "work" || t === "store" || t === "room") return useAgents.getState().ensureWallet();
+			}).catch(failNotice("Стіл не завантажився. Онови сторінку"));
 		});
 	}, [hydrate]);
 	useWorkLoop();
@@ -166,7 +176,9 @@ function TopBar() {
 			await navigator.clipboard.writeText(wallet.pubkey);
 			setCopied(true);
 			window.setTimeout(() => setCopied(false), 1600);
-		} catch {}
+		} catch {
+			window.prompt("Скопіюйте адресу", wallet.pubkey);
+		}
 	}
 	return /* @__PURE__ */ jsxs("header", {
 		className: "border-b border-border bg-bg/80 px-4 py-3 sm:px-6 pt-[max(0.75rem,env(safe-area-inset-top))]",
@@ -213,10 +225,12 @@ function TopBar() {
 					})]
 				})]
 			}),
-			notice ? /* @__PURE__ */ jsx("p", {
-				className: "mx-auto mt-1 max-w-5xl text-xs text-accent",
-				children: notice
-			}) : null
+			/* @__PURE__ */ jsx("p", {
+				role: "status",
+				"aria-live": "polite",
+				className: notice ? "mx-auto mt-1 max-w-5xl text-xs text-accent break-words" : "sr-only",
+				children: notice || ""
+			})
 		]
 	});
 }
@@ -309,6 +323,8 @@ function WalletDesk() {
 		let cancel = false;
 		readMainnetSlot().then((slot) => {
 			if (!cancel) setMainnetSlot(slot);
+		}).catch(() => {
+			if (!cancel) setMainnetSlot(null);
 		});
 		return () => {
 			cancel = true;
@@ -750,6 +766,8 @@ function WalletDesk() {
 								const bal = await readMainnetBalance({ data: { owner: pk } });
 								setExternalWallet(pk, bal);
 								useAgents.setState({ notice: bal != null && bal < .01 ? "Поповни торговий гаманець. Боти стоять." : "Торговий гаманець підключено. Живий режим ще вимкнений." });
+							}).catch((e) => {
+								useAgents.setState({ notice: declined(e) ? "Phantom: підключення відхилено. Нічого не змінено." : "Phantom не підключився. Нічого не змінено." });
 							});
 						},
 						children: externalWallet ? "Phantom підключено" : "Підключити Phantom"
@@ -788,6 +806,7 @@ function WalletDesk() {
 						className: "h-11 min-w-[12rem] flex-1 rounded-md border border-border bg-bg px-3 text-sm",
 						"data-testid": "withdraw-to",
 						placeholder: "Адреса отримувача",
+						"aria-label": "Адреса отримувача",
 						value: to,
 						onChange: (e) => setTo(e.target.value),
 						autoComplete: "off",
@@ -819,6 +838,7 @@ function WalletDesk() {
 						className: "h-11 min-w-[12rem] flex-1 rounded-md border border-border bg-bg px-3 text-sm",
 						"data-testid": "withdraw-pusd-to",
 						placeholder: "Адреса Polygon 0x…",
+						"aria-label": "Адреса Polygon 0x…",
 						value: polyTo,
 						onChange: (e) => setPolyTo(e.target.value),
 						autoComplete: "off",
@@ -1109,6 +1129,13 @@ function TradeGate() {
 				return;
 			}
 			setQuote(res.ok ? `Jupiter (лише читання): близько ${res.outUsdc.toFixed(2)} USDC за ${res.inSol} SOL.` : "Jupiter не відповів");
+		}).catch(() => {
+			if (cancel) return;
+			if (pending.live) {
+				setLiveMiss(true);
+				setLiveQuoteUsdc(null);
+			}
+			setQuote("Jupiter не відповів");
 		});
 		return () => {
 			cancel = true;
@@ -1562,7 +1589,7 @@ function StorePanel() {
 								if (!ok) return;
 								useAgents.getState().setTrack("live");
 								setTab("work");
-							}),
+							}).catch(failNotice("Покупка не пройшла")),
 							children: "Взяти і працювати"
 						})
 					]

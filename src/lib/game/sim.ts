@@ -371,7 +371,7 @@ function pickPiece(s: RunState, x: number): "pair" | "wire" | "mite" | "drone" |
 function spawnChunk(s: RunState, fromX: number, count: number) {
   if (s.bonus) return;
   let x = fromX;
-  let band = s.lastBand;
+  const band = s.lastBand;
 
   for (let i = 0; i < count; i++) {
     const dist = Math.max(s.x, x);

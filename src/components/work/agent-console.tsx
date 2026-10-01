@@ -262,9 +262,11 @@ export function AgentConsole({ owned }: { owned: AgentNft[] }) {
                 if (!text || aiBusy) return;
                 pushChat("you", text);
                 setGuidance("");
-                void coachAsset(selected.asset, text).then((res) => {
-                  pushChat("agent", res.ok ? res.reply : res.error);
-                });
+                void coachAsset(selected.asset, text)
+                  .then((res) => {
+                    pushChat("agent", res.ok ? res.reply : res.error);
+                  })
+                  .catch(() => pushChat("agent", "Агент не відповів. Спробуй ще раз."));
               }}
             >
               <h3 className="text-sm font-medium">Чат</h3>
@@ -401,9 +403,13 @@ function ProfitChart({ fills, range }: { fills: AgentFill[]; range: RangeId }) {
   const [charts, setCharts] = useState<typeof import("recharts") | null>(null);
   useEffect(() => {
     let live = true;
-    void import("recharts").then((mod) => {
-      if (live) setCharts(mod);
-    });
+    void import("recharts")
+      .then((mod) => {
+        if (live) setCharts(mod);
+      })
+      .catch(() => {
+        /* chart chunk offline: keep the placeholder */
+      });
     return () => {
       live = false;
     };

@@ -256,7 +256,7 @@ export function Yard({
             ) : null}
             {signed && save.clockKind === "message" && save.clockSig ? (
               <p className="truncate text-center text-xs text-muted">
-                {save.clockSig.slice(0, 4)}…{save.clockSig.slice(-4)} · {save.clockCluster} · підпис
+                {save.clockSig.slice(0, 4)}…{save.clockSig.slice(-4)} · {save.clockCluster} · {t("yard.sigWord")}
               </p>
             ) : null}
             {signed ? <DayCard save={save} t={t} shift={shift} modLabel={modLabel} /> : null}

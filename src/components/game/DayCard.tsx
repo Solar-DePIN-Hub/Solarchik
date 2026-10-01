@@ -73,7 +73,7 @@ export function DayCard({
   const proof =
     save.clockKind === "tx"
       ? `${save.clockCluster} ${short}`
-      : `підпис ${short}`;
+      : `${t("yard.sigWord")} ${short}`;
   const shareText =
     save.clockKind === "tx"
       ? `CLOCK IN ${save.lastDistance}m · streak ${save.streak}\n${short} · ${save.clockCluster}\n${explorerUrl(save.clockSig, save.clockCluster)}`

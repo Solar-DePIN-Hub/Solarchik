@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment -- untyped Buffer shim kept as plain JS */
 // @ts-nocheck
 // Browser Buffer shim. On Node the real Buffer is already present.
 

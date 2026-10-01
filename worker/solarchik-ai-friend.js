@@ -117,7 +117,7 @@ function detectLanguage(message, fallback) {
   if (/[ãõç]|\b(você|voce|não|nao|obrigad[oa]|tá|está bem)\b/i.test(s)) return "pt";
   if (/[ñ¿¡]|\b(hola|gracias|qué|cómo|por favor|estoy)\b/i.test(s)) return "es";
   if (/[äöüß]|\b(hallo|danke|bitte|ich bin)\b/i.test(s)) return "de";
-  if (/^[\x00-\x7F]+$/.test(s) && /\b(the|you|what|how|is|are|hi|hello|thanks)\b/i.test(s)) return "en";
+  if (/^[ -~\s]+$/.test(s) && /\b(the|you|what|how|is|are|hi|hello|thanks)\b/i.test(s)) return "en";
   return fallback;
 }
 

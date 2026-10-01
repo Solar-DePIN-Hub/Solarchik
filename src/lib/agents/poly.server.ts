@@ -865,7 +865,7 @@ export async function reviewPolymarketOnServer(
   const chosenId = chosen ? String(chosen.market.id ?? parseList(chosen.market.clobTokenIds)[0]) : "";
   const anchor = anchors.get(chosenId) ?? anchors.get(decided.marketId) ?? null;
   let action = decided.action;
-  let confidence = decided.confidence;
+  const confidence = decided.confidence;
   let why = decided.why;
   if (lane === "crypto" && anchor) {
     const upOk = anchor.askUp > band.lo && anchor.askUp < band.hi;
@@ -1066,7 +1066,7 @@ function fitSell(sharesHuman: number, bid: BookLevel, minShares: number): {
   if (!Number.isFinite(sharesHuman) || sharesHuman <= 0) return null;
   const priceMicro = micro(price);
   if (priceMicro <= 0n) return null;
-  let shares = micro(Math.min(sharesHuman, size));
+  const shares = micro(Math.min(sharesHuman, size));
   const minMicro = micro(minShares);
   if (minMicro > 0n && shares < minMicro) return null;
   if (shares <= 0n) return null;

@@ -92,7 +92,7 @@ export function cleanChat(raw: string): string {
 export function cleanSpeech(raw: string): string {
   return raw
     .replace(/[*_#`>~]+/g, " ")
-    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, " ")
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]|\u{FE0F}/gu, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 280);
