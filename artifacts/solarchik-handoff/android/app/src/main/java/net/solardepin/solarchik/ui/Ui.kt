@@ -168,7 +168,7 @@ object Ui {
             styleButton(this, style)
             icon?.let { setIcon(this, it, if (style == Btn.PRIMARY) INK else GOLD) }
             setAutoSizeTextTypeUniformWithConfiguration(12, 16, 1, TypedValue.COMPLEX_UNIT_SP)
-            onClick?.let { cb -> setOnClickListener { if (isEnabled) cb() } }
+            onClick?.let { cb -> setOnClickListener { if (isEnabled) { it.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY); cb() } } }
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
 
@@ -283,7 +283,7 @@ object Ui {
                 gravity = android.view.Gravity.CENTER
                 isClickable = true
                 background = if (on) gradient(intArrayOf(GOLD, AMBER), ctx.dp(14).toFloat(), GradientDrawable.Orientation.LEFT_RIGHT) else null
-                setOnClickListener { if (!on) onPick(i) }
+                setOnClickListener { if (!on) { it.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY); onPick(i) } }
             }
             seg.addView(tv, LinearLayout.LayoutParams(0, ctx.dp(40), 1f))
         }

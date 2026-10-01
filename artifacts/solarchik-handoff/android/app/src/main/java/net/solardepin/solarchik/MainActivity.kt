@@ -265,7 +265,10 @@ class MainActivity : ComponentActivity() {
             gravity = Gravity.CENTER
             isClickable = true
             background = Ui.ripple(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT), dp(20).toFloat(), 0x22F5C542)
-            setOnClickListener { select(tab) }
+            setOnClickListener {
+                it.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                select(tab, animate = true)
+            }
             contentDescription = getString(tab.label)
         }
         val icon = ImageView(this).apply {
@@ -282,13 +285,22 @@ class MainActivity : ComponentActivity() {
         return col
     }
 
-    fun select(tab: Tab) {
-        if (screens.containsKey(current) && current != tab) screens[current]?.onHide()
+    fun select(tab: Tab, animate: Boolean = false) {
+        val changed = current != tab
+        if (screens.containsKey(current) && changed) screens[current]?.onHide()
         current = tab
         val screen = screens.getOrPut(tab) { create(tab) }
         content.removeAllViews()
         content.addView(screen.view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         screen.applyInsets()
+        if (animate && changed) {
+            screen.view.alpha = 0f
+            screen.view.translationY = dp(10).toFloat()
+            screen.view.animate().alpha(1f).translationY(0f).setDuration(160).start()
+        } else {
+            screen.view.alpha = 1f
+            screen.view.translationY = 0f
+        }
         for ((t, pair) in navItems) {
             val on = t == tab
             pair.first.setColorFilter(if (on) Ui.GOLD else Ui.MUTED)
