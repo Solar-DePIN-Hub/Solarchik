@@ -72,7 +72,7 @@ object Notes {
         val sent = sentKeys(ctx)
         val due = NotePlanner.due(save.streakState(), save.now(), sent.toSet(), { save.noteOn(it.toggle) }, activityToday(ctx, save))
         if (due.isEmpty() || !allowed(ctx)) return emptyList()
-        val posted = due.filter { post(ctx, it.kind) }
+        val posted = due.filter { post(ctx, it.kind, bodyFor(ctx, it.kind, save.now())) }
         val keep = (sent + posted.map { it.key }).distinct().takeLast(SENT_KEEP)
         prefs.edit().putString(SENT_LIST, org.json.JSONArray(keep).toString()).remove(SENT).apply()
         return posted
@@ -80,13 +80,26 @@ object Notes {
 
     // Permission is checked right here (allowed()), and a revoke race is caught below.
     @android.annotation.SuppressLint("MissingPermission")
-    private fun post(ctx: Context, kind: NoteKind): Boolean {
+    /** The report says when the UTC game day ends on this phone's clock, so its timing is clear. */
+    fun bodyFor(ctx: Context, kind: NoteKind, now: Long): String = when (kind) {
+        NoteKind.STREAK -> ctx.getString(R.string.note_streak_body)
+        NoteKind.REWARD -> ctx.getString(R.string.note_reward_body)
+        NoteKind.WINDOW -> ctx.getString(R.string.note_window_body)
+        NoteKind.REPORT -> ctx.getString(
+            R.string.note_report_body,
+            java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(NotePlanner.reportDayEnd(now))),
+        )
+        NoteKind.DESK -> ""
+    }
+
+    internal fun post(ctx: Context, kind: NoteKind, text: String): Boolean {
         if (!allowed(ctx)) return false
-        val (title, body, tab) = when (kind) {
-            NoteKind.STREAK -> Triple(R.string.note_streak_title, R.string.note_streak_body, MainActivity.Tab.RUN)
-            NoteKind.REWARD -> Triple(R.string.note_reward_title, R.string.note_reward_body, MainActivity.Tab.YARD)
-            NoteKind.WINDOW -> Triple(R.string.note_window_title, R.string.note_window_body, MainActivity.Tab.YARD)
-            NoteKind.REPORT -> Triple(R.string.note_report_title, R.string.note_report_body, MainActivity.Tab.SOL)
+        val (title, tab) = when (kind) {
+            NoteKind.STREAK -> R.string.note_streak_title to MainActivity.Tab.RUN
+            NoteKind.REWARD -> R.string.note_reward_title to MainActivity.Tab.YARD
+            NoteKind.WINDOW -> R.string.note_window_title to MainActivity.Tab.YARD
+            NoteKind.REPORT -> R.string.note_report_title to MainActivity.Tab.SOL
+            NoteKind.DESK -> R.string.note_desk_title to MainActivity.Tab.AGENTS
         }
         val open = Intent(ctx, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -96,8 +109,8 @@ object Notes {
         val n = NotificationCompat.Builder(ctx, CHANNEL)
             .setSmallIcon(R.drawable.ic_flame)
             .setContentTitle(ctx.getString(title))
-            .setContentText(ctx.getString(body))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(ctx.getString(body)))
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(pi)
             .setAutoCancel(true)
             .setColor(0xFFF5C542.toInt())
@@ -114,6 +127,7 @@ object Notes {
 class NoteWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         runCatching { Notes.check(applicationContext) }
+        runCatching { DeskNotes.flush(applicationContext) }
         return Result.success()
     }
 }

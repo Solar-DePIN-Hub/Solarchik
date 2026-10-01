@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 class DeskWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         val desk = Desk(applicationContext)
-        runCatching { desk.tick() }.onSuccess { report -> DeskHooks.afterTick?.invoke(applicationContext, report) }
+        runCatching { desk.tick() }.onSuccess { report -> runCatching { DeskHooks.afterTick?.invoke(applicationContext, report) } }
         if (!desk.state().anyRunning) cancel(applicationContext)
         return Result.success()
     }

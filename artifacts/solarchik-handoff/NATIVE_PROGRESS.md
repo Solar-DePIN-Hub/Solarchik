@@ -222,9 +222,54 @@ All numbers live in `core/SolarchikConfig.kt`.
   - mint, then kill the app mid-send: the agent should show as pending, then verified or missing
 - Upgrading a 0.19.51 install needs the 0.19.51 signing key. The box key APK cannot update a store build.
 - On a Seeker the CLOCK IN memo defaults to mainnet (product design, unchanged); devnet can be forced in Settings.
-- Not changed (low risk):
-  - RunView reads touch and game state from two threads without a lock
-  - the daily report note triggers at 20:00 local time but counts activity by UTC day
-  - `DeskHooks.afterTick` is never set, so background ticks raise no close notifications (hourly notes still run)
-  - `AgentStore` drops unreadable JSON like the desk used to (agents can be re-found via DAS refresh)
+- The four low-risk items listed here were fixed in 0.20.3 (below).
 - Dependency upgrades (AGP, MWA, etc.) are deliberately not done in this release.
+
+## 0.20.3 (versionCode 63): the remaining four
+
+1. **Run game thread safety** (`RunView`)
+   - A tap now only queues a jump (`RunInput`, atomic hand-over). The game thread applies it on its next step, so no game state is written from the UI thread.
+   - Surface size goes through volatile fields, and the game thread recomputes ground/x itself.
+   - `running` and `finished` are volatile.
+   - A generation counter stops a loop that outlived the 400 ms join, so two game threads never run.
+   - A null canvas sleeps 16 ms instead of spinning a core.
+2. **Daily report on the UTC game day** (`NotePlanner`)
+   - The note is keyed `report:<UTC day>` and counts activity on that same UTC day (as the web rules and the streak do).
+   - It fires once, in the second half of the UTC day and outside local quiet hours (22:00–08:00): at local 20:00, or in the last 4 h before the UTC day ends, whichever is first.
+     - Kyiv: 20:00–22:00
+     - Los Angeles: 13:00–17:00 (local 20:00 would already be the next game day)
+     - Tokyo: 21:00–22:00 and 08:00–09:00
+   - Every tested zone gets at least an hour, and the worker runs hourly.
+   - The body says when the game day ends: "The game day (UTC) ends at 03:00 your time" (EN/UK).
+3. **Corrupt agents / fee save** (`AgentStore`)
+   - The raw blob is kept aside as `owned.v1.unreadable` / `fees.v1.unreadable`, same as the desk save.
+   - Every record that still decodes is salvaged, so the next write no longer wipes the player's agents or ledger.
+4. **Background close notifications** (`DeskNotes`, hooked in `SolarchikApp`)
+   - Only `DeskWorker` ticks raise them. The open app shows closes on screen and no longer calls the hook.
+   - One summary note per batch: "Closed while the app was in the background: N · P&L ±x SOL (simulated on real prices)". Tapping it opens Agents.
+   - New Settings toggle "Desk closes (background)". Off means nothing is posted and the queue is dropped.
+   - Rate limit: at most one note per 30 min. Closes in between are queued (max 50), and the hourly worker flushes them.
+   - No duplicates: each position id is announced once (the last 200 are remembered).
+   - Without notification permission, closes stay queued.
+
+Seeker CLOCK IN default (mainnet) left as is, as asked.
+
+**Tests:** 124 total, 122 pass, 0 fail, 2 skipped (opt-in `DevnetMintIT`). This includes the live `ScreensBTest`. New: `AuditFixes2Test` (11):
+- tap hand-over, single and under contention
+- touch leaves game state untouched
+- report window and key in 8 time zones, and the body names the local end time
+- corrupt agents/fees kept aside and salvaged
+- desk plan: toggle, rate limit, duplicates, permission
+- end to end: post, dedupe, queue, flush, toggle off
+- the hook is registered
+
+**Lint:** `./gradlew lint`: 0 issues.
+
+**APKs (box, `/workspace/apk-test/`)**
+- `solarchik-0.20.3-debug.apk`: 6,930,942 B, sha256 `afb04737245624696a71f727c36d6f5a04d8b90dbe654338a191c7107afde774`, Android debug key.
+- `solarchik-0.20.3-release-boxkey.apk`: 3,205,830 B, sha256 `84f095b9d18305f812d36c18712a712275da86f6c2084e09858501e2229603f1`, R8, box test key (CN=Solarchik BOX TEST KEY, not production).
+
+**Check on a real phone:**
+- run game feel: taps are applied on the next frame, about 16 ms later
+- a background close notification after about 15 min with the app closed (Doze may delay it)
+- the report note time in the local zone

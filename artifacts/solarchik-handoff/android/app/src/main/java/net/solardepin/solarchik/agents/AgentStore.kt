@@ -2,7 +2,9 @@ package net.solardepin.solarchik.agents
 
 import android.content.Context
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.Json
 import net.solardepin.solarchik.core.FeeLedger
 import net.solardepin.solarchik.core.FeeRow
@@ -34,9 +36,22 @@ class AgentStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("solarchik-agents", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    fun agents(): List<OwnedAgent> = prefs.getString(KEY_AGENTS, null)?.let {
-        runCatching { json.decodeFromString(ListSerializer(OwnedAgent.serializer()), it) }.getOrNull()
-    } ?: emptyList()
+    fun agents(): List<OwnedAgent> = readList(KEY_AGENTS, OwnedAgent.serializer())
+
+    /**
+     * Reads a stored list. If the blob does not decode as a whole (corrupt write, or a record shape
+     * from another build), the raw text is kept aside under `<key>.unreadable` and every record
+     * that still decodes is salvaged, so the next write does not wipe the player's agents or ledger.
+     */
+    private fun <T> readList(key: String, item: KSerializer<T>): List<T> {
+        val raw = prefs.getString(key, null) ?: return emptyList()
+        runCatching { json.decodeFromString(ListSerializer(item), raw) }.onSuccess { return it }
+        if (!prefs.contains("$key$BAD")) prefs.edit().putString("$key$BAD", raw).apply()
+        val arr = runCatching { json.parseToJsonElement(raw) as? JsonArray }.getOrNull() ?: return emptyList()
+        return arr.mapNotNull { e -> runCatching { json.decodeFromJsonElement(item, e) }.getOrNull() }
+    }
+
+    fun unreadable(key: String = KEY_AGENTS): String? = prefs.getString("$key$BAD", null)
 
     fun agentsFor(owner: String, cluster: String): List<OwnedAgent> =
         agents().filter { it.owner == owner && it.cluster == cluster }
@@ -59,9 +74,7 @@ class AgentStore(context: Context) {
     fun freeClaimed(owner: String, cluster: String): Boolean =
         agentsFor(owner, cluster).any { it.tier == "free" && it.status != OwnedAgent.STATUS_MISSING }
 
-    fun fees(): List<FeeRow> = prefs.getString(KEY_FEES, null)?.let {
-        runCatching { FeeLedger.sanitize(json.decodeFromString(ListSerializer(FeeRow.serializer()), it)) }.getOrNull()
-    } ?: emptyList()
+    fun fees(): List<FeeRow> = FeeLedger.sanitize(readList(KEY_FEES, FeeRow.serializer()))
 
     fun addFee(row: FeeRow) {
         val all = (listOf(row) + fees().filter { it.id != row.id }).take(200)
@@ -75,7 +88,8 @@ class AgentStore(context: Context) {
     }
 
     companion object {
-        private const val KEY_AGENTS = "owned.v1"
-        private const val KEY_FEES = "fees.v1"
+        const val KEY_AGENTS = "owned.v1"
+        const val KEY_FEES = "fees.v1"
+        const val BAD = ".unreadable"
     }
 }

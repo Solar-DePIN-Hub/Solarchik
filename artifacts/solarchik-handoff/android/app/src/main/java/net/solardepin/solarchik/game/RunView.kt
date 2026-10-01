@@ -37,8 +37,14 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
     private val tapLine = context.getString(net.solardepin.solarchik.R.string.run_tap)
 
     private var thread: Thread? = null
-    private var running = false
-    private var finished = false
+    // Shared with the UI thread: only these cross threads. All game state below is touched by
+    // the game thread alone; taps and surface sizes are handed over through [input] / [surfaceH].
+    @Volatile private var running = false
+    @Volatile private var finished = false
+    private val input = RunInput()
+    @Volatile private var generation = 0
+    @Volatile private var surfaceW = 0
+    @Volatile private var surfaceH = 0
 
     private val runFrames = loadSheet("sprites/hero-run", 8)
     private val jumpFrames = loadSheet("sprites/hero-jump", 4)
@@ -77,13 +83,15 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
         if (running) return
         running = true
         finished = false
-        thread = Thread(this, "solarchik-run").also { it.start() }
+        // A loop that outlived the 400 ms join of the last surfaceDestroyed sees a newer
+        // generation and exits, so two game threads never run at once.
+        val my = ++generation
+        thread = Thread({ loop(my) }, "solarchik-run").also { it.start() }
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        ground = height * 0.78f
-        px = width * 0.18f
-        if (py == 0f) py = ground
+        surfaceW = width
+        surfaceH = height
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -106,21 +114,26 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
         return true
     }
 
+    /** UI thread: only queue the tap; the game thread applies it on its next step. */
     private fun jump() {
-        if (onFloor && !finished) {
-            vy = if (mod == "wind") -20.5f else -22f
-            onFloor = false
-        }
+        if (!finished) input.request()
     }
 
-    override fun run() {
+    override fun run() = loop(generation)
+
+    private fun loop(my: Int) {
         var last = System.nanoTime()
-        while (running) {
+        while (running && my == generation) {
             val now = System.nanoTime()
             val dt = ((now - last) / 16_666_666f).coerceIn(0.5f, 2.2f)
             last = now
             if (!finished) step(dt)
-            val canvas = holder.lockCanvas() ?: continue
+            val canvas = holder.lockCanvas()
+            if (canvas == null) {
+                // surface not ready / going away: do not spin a core
+                try { Thread.sleep(16) } catch (_: InterruptedException) { break }
+                continue
+            }
             drawFrame(canvas)
             holder.unlockCanvasAndPost(canvas)
             if (finished) {
@@ -136,10 +149,20 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
     }
 
     private fun step(dt: Float) {
-        val w = width.takeIf { it > 0 } ?: return
-        val h = height.takeIf { it > 0 } ?: return
-        if (ground == 0f) ground = h * 0.78f
-        if (px == 0f) px = w * 0.18f
+        val w = surfaceW.takeIf { it > 0 } ?: width.takeIf { it > 0 } ?: return
+        val h = surfaceH.takeIf { it > 0 } ?: height.takeIf { it > 0 } ?: return
+        val g = h * 0.78f
+        if (ground != g) {
+            val wasOnFloor = py == 0f || py >= ground
+            ground = g
+            if (wasOnFloor) py = ground
+        }
+        px = w * 0.18f
+
+        if (input.take() && onFloor) {
+            vy = if (mod == "wind") -20.5f else -22f
+            onFloor = false
+        }
 
         tick++
         if (hurt > 0) hurt--
@@ -286,4 +309,14 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
     }
 
     private class Foe(var x: Float, var y: Float, val air: Boolean, var hit: Boolean = false)
+}
+
+/**
+ * Hand-over of taps from the UI thread to the game thread. A tap is remembered until the next
+ * step consumes it (at most one jump per step), so no game state is written from the UI thread.
+ */
+class RunInput {
+    private val pending = java.util.concurrent.atomic.AtomicBoolean(false)
+    fun request() { pending.set(true) }
+    fun take(): Boolean = pending.getAndSet(false)
 }

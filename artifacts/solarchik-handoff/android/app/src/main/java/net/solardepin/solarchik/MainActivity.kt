@@ -177,7 +177,6 @@ class MainActivity : ComponentActivity() {
                 if (desk.state().anyRunning) {
                     val report = runCatching { desk.tick() }.getOrNull()
                     if (report != null) {
-                        onDeskReport(report)
                         if (current == Tab.AGENTS || current == Tab.YARD) screens[current]?.render()
                     }
                 } else if (current == Tab.AGENTS) {
@@ -194,13 +193,10 @@ class MainActivity : ComponentActivity() {
         DeskWorker.sync(this, desk.state().anyRunning)
         if (desk.state().anyRunning) requestNotifications(fromUser = false)
         scope.launch {
-            runCatching { desk.tick() }.getOrNull()?.let { onDeskReport(it) }
+            // Foreground ticks show closes on screen; only DeskWorker ticks raise notifications.
+            runCatching { desk.tick() }
             screens[current]?.render()
         }
-    }
-
-    private fun onDeskReport(report: net.solardepin.solarchik.agents.engine.TickReport) {
-        net.solardepin.solarchik.agents.engine.DeskHooks.afterTick?.invoke(this, report)
     }
 
     override fun onDestroy() {

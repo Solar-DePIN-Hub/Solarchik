@@ -192,7 +192,7 @@
     <string name="note_window_title">Fee-free window</string>
     <string name="note_window_body">The fee-free window ends in about 3 hours.</string>
     <string name="note_report_title">Sol</string>
-    <string name="note_report_body">Today\'s note from Sol is ready. Only your real numbers.</string>
+    <string name="note_report_body">Today\'s note from Sol is ready. Only your real numbers. The game day (UTC) ends at %1$s your time.</string>
     <string name="note_streak_toggle">Streak reminder</string>
     <string name="note_reward_toggle">Reward reminder</string>
     <string name="note_window_toggle">Window ending</string>
@@ -258,7 +258,7 @@
     <string name="fees_nothing">Nothing owed</string>
     <string name="desk_log">Activity</string>
     <string name="desk_log_empty">Start a strategy to see each decision here.</string>
-    <string name="notes_how">Local reminders, checked about once an hour: streak at risk (3 h before the UTC day ends), reward ready, window ending, and the evening note.</string>
+    <string name="notes_how">Local reminders, checked about once an hour: streak at risk (3 h before the UTC day ends), reward ready, window ending, the daily note (before the UTC game day ends), and desk closes while the app is closed (at most one note per 30 min).</string>
     <string name="notes_allowed">Notifications allowed</string>
     <string name="notes_blocked">Notifications are off for Solarchik.</string>
     <string name="notes_allow">Allow notifications</string>
@@ -307,4 +307,7 @@
     </plurals>
     <string name="join_lines" translatable="false">%1$s\n%2$s</string>
     <string name="join_dot" translatable="false">%1$s · %2$s</string>
+    <string name="note_desk_title">Desk</string>
+    <string name="note_desk_body">Closed while the app was in the background: %1$d · P&amp;L %2$s SOL (simulated on real prices).</string>
+    <string name="note_desk_toggle">Desk closes (background)</string>
 </resources>

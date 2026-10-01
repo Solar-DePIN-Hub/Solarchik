@@ -72,6 +72,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
                 "noteReward" to R.string.note_reward_toggle,
                 "noteWindow" to R.string.note_window_toggle,
                 "noteReport" to R.string.note_report_toggle,
+                "noteDesk" to R.string.note_desk_toggle,
             ).forEach { (key, label) ->
                 addView(Ui.top(switchRow(ctx.getString(label), host.save.noteOn(key)) { _, on ->
                     host.save.setNote(key, on)
