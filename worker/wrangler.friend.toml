@@ -1,5 +1,8 @@
-# Sol friend Worker. Secrets (FEATHERLESS_API_KEY, GEMINI_API_KEY) stay in Cloudflare; deploy does not touch them.
+# Sol friend Worker (friend.solardepin.net). Mirrors deployed version 65501e10: fetch handler only,
+# compatibility date 2025-09-15, no vars or bindings, secrets FEATHERLESS_API_KEY and GEMINI_API_KEY
+# (kept by `wrangler deploy`; never put them here). workers.dev stays on as it is today.
 name = "solarchik-ai-friend"
 main = "solarchik-ai-friend.js"
-compatibility_date = "2026-09-01"
+compatibility_date = "2025-09-15"
+workers_dev = true
 routes = [{ pattern = "friend.solardepin.net", custom_domain = true }]

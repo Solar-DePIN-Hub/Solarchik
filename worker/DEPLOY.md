@@ -1,32 +1,43 @@
-# Deploy Solarchik AI friend Worker
+# Sol friend Worker (`solarchik-ai-friend`, https://friend.solardepin.net)
 
-Not deployed automatically. Vadym deploys by hand.
+`solarchik-ai-friend.js` is built on the version that was live before round 4 (65501e10, "Fast chat and voice routes for
+Solarchik Super App"). Routes, origin allowlist, CORS headers, secret names and response shapes are unchanged:
+`GET /healthz`, `POST /v1/chat`, `POST /v1/transcribe`. Origins: `https://solarchik-super-app.vercel.app`,
+`https://appassets.androidplatform.net` (the Android client sends this), `https://friend.solardepin.net`, `null`, or no Origin.
 
-## Option A: wrangler (from the repo root)
+## Deploy
 
 ```sh
+unset NPM_CONFIG_PREFIX; source ~/.nvm/nvm.sh && nvm use 22
 cd worker
-npx wrangler@latest deploy -c wrangler.friend.toml
+npx wrangler@latest deploy -c wrangler.friend.toml --message "<what changed>"
 ```
 
-- Needs `npx wrangler login` (or `CLOUDFLARE_API_TOKEN`) for the account that owns `solardepin.net`.
-- Secrets `FEATHERLESS_API_KEY` and `GEMINI_API_KEY` are kept as they are. To set them: `npx wrangler secret put FEATHERLESS_API_KEY -c wrangler.friend.toml`.
-- Check: `curl -s -X POST https://friend.solardepin.net/v1/chat -H 'content-type: application/json' -d '{"message":"Привіт, що таке безкоштовне вікно?","language":"uk"}'`. The reply should be in Ukrainian, finish its sentences and mention the 48 h / 7 day windows.
+- The config mirrors the live script: fetch handler only, compatibility date 2025-09-15, no vars or bindings, workers.dev on,
+  custom domain friend.solardepin.net. Secrets `FEATHERLESS_API_KEY` and `GEMINI_API_KEY` stay in Cloudflare (deploy
+  keeps them). Optional vars `FEATHERLESS_MODEL` and `GEMINI_MODEL` are not set (defaults: Qwen2.5-14B, gemini-3.6-flash).
+- Test first: `node --test scripts/ai-friend-worker.test.mjs` and `npx wrangler@latest deploy -c wrangler.friend.toml --dry-run`.
+- Live check: `curl https://friend.solardepin.net/healthz`, then POST `/v1/chat` with `{"message":"…","language":"uk"}`.
+- Logs: `npx wrangler@latest tail solarchik-ai-friend --format json` (one `{"event":"llm",…}` line per provider call, no text).
 
-## Option B: dashboard
+## Roll back
 
-Cloudflare dashboard → Workers → `solarchik-ai-friend` → Edit code.
+```sh
+npx wrangler@latest versions list --name solarchik-ai-friend
+npx wrangler@latest rollback <version-id> --name solarchik-ai-friend
+```
 
-1. Paste all of `solarchik-ai-friend.js`.
-2. Keep secrets: `FEATHERLESS_API_KEY`, `GEMINI_API_KEY`.
-3. Save and Deploy.
+Pre-round-4 version: `65501e10-4945-4c7b-8cae-562076b64a14`.
 
-## What changed (round 4)
+## Round 4 changes (live since 2026-10-01)
 
-- The system prompt now holds the game facts: streak, fee-free windows (7 days → 48 h, 30 days → 7 days), 5% Free fee on profits, Pro 0.1 SOL once, risk limits (0.02 SOL/trade, 0.3 SOL/day, 0.3 SOL day loss, stop after 2 losses), devnet default, strategies are forecasts, not bets.
-- Replies follow the language of the player's message (Cyrillic → Ukrainian, plus Spanish/Portuguese hints), with the app language as fallback.
-- Max tokens went from 120 to 600 (retry 800), the reply cap from 420 to 900 chars, and a cut reply keeps whole sentences only.
-
-The chain is 14B → retry → 32B → Gemini 3.5-flash-lite → canned.
+- The system prompt holds the game facts: streak, fee-free windows (7 days → 48 h, 30 days → 7 days), 5% Free fee on
+  profits, Pro 0.1 SOL once, risk limits, devnet default, strategies are forecasts, not bets.
+- Replies follow the language of the player's message, falling back to the app language.
+- Max tokens: Featherless 600 (was 80), Gemini 800 (was 80). The reply is capped at 900 chars and a reply cut by the cap
+  keeps whole sentences only.
+- A degenerate reply (one char repeated, like the live "Пр!!!!…" seen before deploy) counts as no reply and goes to Gemini.
+- History accepts `text` or `content`. The Android client sends `content`, which the old worker dropped.
+- Timeouts: Featherless 7 s, then Gemini 6 s, so the total fits the Android client's 15 s read timeout.
 
 Do not put keys in the APK.

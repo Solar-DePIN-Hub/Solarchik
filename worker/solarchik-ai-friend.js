@@ -1,109 +1,104 @@
 /**
- * Cloudflare Worker: solarchik-ai-friend
- * Paste this as the entire Worker script, keep secrets:
- *   FEATHERLESS_API_KEY
- *   GEMINI_API_KEY
+ * Cloudflare Worker: solarchik-ai-friend (https://friend.solardepin.net)
  *
- * Route: POST /v1/chat
- * Domain: https://friend.solardepin.net
+ * Based on the deployed version 65501e10 ("Fast chat and voice routes for Solarchik Super App").
+ * Routes, origin allowlist, CORS headers, secret names and response shapes are unchanged:
+ *   GET  /healthz        -> {ok:true, service:"solarchik-ai-worker"}
+ *   POST /v1/chat        {message, language?, history?, name?, scene?, context?}
+ *                        -> {ok:true, reply, provider:"featherless"|"gemini"|"fallback", fallback}
+ *                        400 {error:"invalid_message"}
+ *   POST /v1/transcribe  {audio (base64 or data URL), mime?} -> {ok:true, text}
+ *                        400 {ok:false, error:"invalid_audio"}, 503 {ok:false, error:"transcription_unavailable"}
+ *   Origin not allowed   403 {error:"origin_not_allowed"} (no Origin header passes: native apps, curl)
+ *
+ * Secrets: FEATHERLESS_API_KEY, GEMINI_API_KEY. Optional vars: FEATHERLESS_MODEL, GEMINI_MODEL.
+ *
+ * Round 4 changes: game facts in the system prompt, reply in the player's language, history accepts
+ * `text` or `content` (the Android client sends `content`), max tokens 600 (800 on the Gemini retry),
+ * replies cut by the token cap keep whole sentences, reply cap 900 chars, provider timeouts fit the
+ * Android client's 15 s read timeout, and a degenerate reply ("Пр!!!!…") falls through to Gemini.
  */
 const FEATHERLESS_URL = "https://api.featherless.ai/v1/chat/completions";
 const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-const PRIMARY = "Qwen/Qwen2.5-14B-Instruct";
-const SECONDARY = "Qwen/Qwen2.5-32B-Instruct";
-const GEMINI_MODEL = "gemini-3.5-flash-lite";
-const ALLOW = new Set([
+const ORIGINS = new Set([
+  "https://solarchik-super-app.vercel.app",
   "https://appassets.androidplatform.net",
   "https://friend.solardepin.net",
+  "null",
 ]);
 
-const locks = new Map();
-/** Cyrillic needs ~2-3x the tokens of English; 120 cut Ukrainian replies mid-sentence. */
 const MAX_TOKENS = 600;
 const RETRY_TOKENS = 800;
 const REPLY_CHARS = 900;
+const FEATHERLESS_TIMEOUT_MS = 7000;
+const GEMINI_TIMEOUT_MS = 6000;
+const TRANSCRIBE_TIMEOUT_MS = 7000;
 
-function cors(origin) {
-  const allow = ALLOW.has(origin) ? origin : "https://appassets.androidplatform.net";
-  return {
-    "access-control-allow-origin": allow,
-    "access-control-allow-methods": "POST, OPTIONS",
-    "access-control-allow-headers": "Content-Type",
+const LANG_NAMES = { en: "English", uk: "Ukrainian", es: "Spanish", pt: "Portuguese", de: "German", ja: "Japanese", ru: "Russian" };
+
+/** Facts the friend may state. Keep in sync with fees.config.ts, user-limits.ts and fee-windows.ts in the web app. */
+const GAME_FACTS = [
+  "Game facts (state only these, never invent numbers):",
+  "The player clocks in once per day with a wallet signature to grow the streak; a missed UTC day resets it.",
+  "Every 7 clock-in days earn a 48-hour fee-free window; every 30 days earn a 7-day fee-free window. A fee-free window lasts exactly 48 hours or 7 days, nothing else. The player activates a window when they choose; trades opened inside it pay no profit fee.",
+  "Free agents pay a 5% fee on profitable closed trades only (no fee on losses or inside a fee-free window).",
+  "A Pro agent costs 0.1 SOL once and pays no profit fee.",
+  "Risk limits: at most 0.02 SOL per trade, 0.3 SOL spend per day, 0.3 SOL loss per day, and auto-stop after 2 losses in a row. The player can only lower these limits.",
+  "Practice runs on Solana devnet by default; real mainnet trading is off unless the player turns it on.",
+  "Strategies and agent picks are forecasts, not promises or bets: never promise profit, never tell the player to bet or add more money, and remind them they can lose.",
+  "If you do not know something about the game, say you are not sure.",
+].join(" ");
+
+function corsHeaders(origin) {
+  const h = new Headers({
+    "content-type": "application/json",
     "cache-control": "no-store",
+    "access-control-allow-methods": "POST,OPTIONS",
+    "access-control-allow-headers": "content-type",
     vary: "Origin",
-  };
+  });
+  if (origin && ORIGINS.has(origin)) h.set("access-control-allow-origin", origin);
+  return h;
 }
 
-function json(data, origin, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8", ...cors(origin) },
-  });
+function json(body, status, headers) {
+  return new Response(JSON.stringify(body), { status, headers });
 }
 
 function clip(s, n) {
-  return String(s || "")
+  return String(s ?? "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, n);
 }
 
-/** Drops a dangling half sentence (model hit the token cap). Keeps the text when no sentence end exists. */
+/** Gemini candidate text (also used by /v1/transcribe, unchanged). */
+function geminiText(body) {
+  return String(body?.candidates?.[0]?.content?.parts?.map((p) => p?.text || "").join("") || "").trim();
+}
+
+/** Drops a dangling half sentence. Keeps the text when it has no sentence end. */
 function wholeSentences(text) {
   const t = String(text || "").trim();
-  const m = t.match(/^[\s\S]*[.!?…。！？](?=\s|$)/);
+  const m = t.match(/^[\s\S]*[.!?…。！？](?=["»”')\]]*(\s|$))["»”')\]]*/);
   return m && m[0].length >= 12 ? m[0].trim() : t;
 }
 
-function extractText(body) {
-  const c = body?.choices?.[0];
-  const msg = c?.message;
-  let raw = "";
-  if (typeof msg?.content === "string") raw = msg.content;
-  else if (Array.isArray(msg?.content)) raw = msg.content.map((p) => p?.text || p?.content || "").join("");
-  else if (typeof c?.text === "string") raw = c.text;
-  else if (typeof body?.output_text === "string") raw = body.output_text;
-  return clip(raw, REPLY_CHARS);
+/** Final reply: collapse whitespace, cap at REPLY_CHARS, keep whole sentences when cut. */
+function finishReply(raw, cutByModel) {
+  const flat = String(raw || "").replace(/\s+/g, " ").trim();
+  const capped = flat.slice(0, REPLY_CHARS);
+  return cutByModel || flat.length > REPLY_CHARS ? wholeSentences(capped) : capped;
 }
 
-function classify(body, http) {
-  if (http !== 200) return `http_${http}`;
-  const c = body?.choices?.[0];
-  if (!c) return "no_choice";
-  const reason = c.finish_reason || "";
-  const text = extractText(body);
-  if (text) return "ok";
-  if (reason === "length") return "length";
-  if (reason === "content_filter") return "filtered";
-  return "empty_content";
+/** Degenerate model output ("Пр!!!!!!…", one char repeated, almost no letters): treat as no reply. */
+function looksBroken(text) {
+  const t = String(text || "").replace(/\s+/g, "");
+  if (t.length < 2) return true;
+  if (/(.)\1{5,}/u.test(t)) return true;
+  const letters = (t.match(/\p{L}/gu) || []).length;
+  return letters / t.length < 0.5;
 }
-
-function shapeLog(body, http, ms, model, attempt) {
-  const c = body?.choices?.[0];
-  const content = c?.message?.content;
-  return {
-    event: "llm_shape",
-    model,
-    attempt,
-    http,
-    ms,
-    keys: body && typeof body === "object" ? Object.keys(body).sort() : [],
-    choices: Array.isArray(body?.choices) ? body.choices.length : -1,
-    finish: c?.finish_reason ?? null,
-    contentType: content == null ? "null" : Array.isArray(content) ? "array" : typeof content,
-    contentChars: typeof content === "string" ? content.length : 0,
-    hasText: Boolean(extractText(body)),
-    usage: body?.usage
-      ? {
-          prompt: body.usage.prompt_tokens ?? body.usage.input_tokens ?? null,
-          completion: body.usage.completion_tokens ?? body.usage.output_tokens ?? null,
-        }
-      : null,
-    id: body?.id ?? null,
-  };
-}
-
-const LANG_NAMES = { en: "English", uk: "Ukrainian", es: "Spanish", pt: "Portuguese", de: "German", ja: "Japanese", ru: "Russian" };
 
 /** Best guess of the language of the player's own message. Falls back to the app language. */
 function detectLanguage(message, fallback) {
@@ -117,217 +112,143 @@ function detectLanguage(message, fallback) {
   if (/[ãõç]|\b(você|voce|não|nao|obrigad[oa]|tá|está bem)\b/i.test(s)) return "pt";
   if (/[ñ¿¡]|\b(hola|gracias|qué|cómo|por favor|estoy)\b/i.test(s)) return "es";
   if (/[äöüß]|\b(hallo|danke|bitte|ich bin)\b/i.test(s)) return "de";
-  if (/^[ -~\s]+$/.test(s) && /\b(the|you|what|how|is|are|hi|hello|thanks)\b/i.test(s)) return "en";
+  if (/^[ -~\s]+$/.test(s) && /\b(the|you|what|how|is|are|hi|hello|thanks|why|can)\b/i.test(s)) return "en";
   return fallback;
 }
 
-/** Facts the friend may state. Keep in sync with fees.config.ts, user-limits.ts and fee-windows.ts. */
-const GAME_FACTS = [
-  "Game facts (state only these, never invent numbers):",
-  "Clock in once per day to grow the streak; a missed day resets it.",
-  "Every 7 clock-in days earn a 48-hour fee-free window; every 30 days earn a 7-day fee-free window. The player activates a window when they choose; trades opened inside it pay no fee.",
-  "Free agents pay a 5% fee on profitable closed trades only (no fee on losses or inside a fee-free window).",
-  "Pro agent costs 0.1 SOL once and pays no profit fee.",
-  "Risk limits: at most 0.02 SOL per trade, 0.3 SOL spend per day, 0.3 SOL loss per day, and auto-stop after 2 losses in a row. The player can only lower these limits.",
-  "Practice runs on Solana devnet by default; real mainnet trading is off unless the player turns it on.",
-  "Strategies and agent picks are forecasts, not promises or bets: never promise profit, never tell the player to bet or to put in more money, and remind them they can lose.",
-  "If asked something you do not know about the game, say you are not sure.",
-].join(" ");
-
 function systemPrompt(input) {
-  const name = clip(input.name, 16) || "Solarchik";
-  const scene = clip(input.scene, 12);
-  const lang = clip(input.language, 8) || "en";
-  const replyLang = clip(input.replyLanguage, 8) || lang;
+  const name = clip(input?.name, 16) || "Solarchik";
+  const appLang = clip(input?.language, 8).toLowerCase().slice(0, 2) || "en";
+  const replyLang = detectLanguage(input?.message, appLang);
   const langName = LANG_NAMES[replyLang] || replyLang;
+  const scene = clip(input?.scene, 12);
+  const context = clip(input?.context, 160);
   return [
-    `You are ${name}, a small navy-and-gold solar robot with a gold visor and cyan eyes.`,
-    `You are the player's pocket friend in Solarchik CLOCK IN. Never a battery, egg, Tamagotchi, AI, Gemini, Grok, or chatbot.`,
-    `Always answer in the language the player wrote their last message in (looks like ${langName}; app language ${lang}). Never switch to English unless the player wrote English.`,
-    `1-3 short complete spoken sentences, always finish the last sentence. No markdown, no lists.`,
+    `You are ${name}, a warm AI companion in the Solarchik game (a small navy-and-gold solar robot). Never claim to be human.`,
+    `Always answer in the language of the player's last message (it looks like ${langName}; app language ${appLang}). Do not switch to English unless the player wrote in English.`,
+    "Answer the actual question naturally in 1-3 short complete sentences and always finish the last sentence. No markdown, no lists.",
     GAME_FACTS,
-    scene === "run" ? `You are IN a roof run (${clip(input.context, 80) || "running"}). One clear spoken sentence.` : "",
+    scene ? `Scene: ${scene}.` : "",
+    context ? `Context: ${context}` : "",
   ]
     .filter(Boolean)
     .join(" ");
 }
 
-function canned(lang) {
-  if (lang === "uk") return "Тримаю сонце в кишені. Ще раз — я тут.";
-  if (lang === "es") return "Sigo aquí, con el sol en el bolsillo.";
-  if (lang === "pt") return "Tô aqui, com o sol no bolso.";
-  if (lang === "de") return "Ich bin da, Sonne in der Tasche.";
-  if (lang === "ja") return "ここにいるよ。ポケットに太陽。";
-  return "Still here. Sun in my pocket.";
+/** One line per provider call: status, time, finish reason, size. No message text, no keys. */
+function logShape(provider, status, t0, finish, reply, tokens) {
+  console.log(
+    JSON.stringify({ event: "llm", provider, status, ms: Date.now() - t0, finish: finish ?? null, chars: reply.length, broken: reply ? looksBroken(reply) : null, tokens: tokens ?? null }),
+  );
 }
 
-function slimMessages(messages) {
-  const sys = messages.filter((m) => m.role === "system").slice(0, 1);
-  const rest = messages.filter((m) => m.role !== "system").slice(-2);
-  return [...sys, ...rest];
-}
-
-async function withLock(id, fn) {
-  const prev = locks.get(id) || Promise.resolve();
-  let release = () => {};
-  const gate = new Promise((ok) => {
-    release = ok;
-  });
-  const next = prev.then(() => gate);
-  locks.set(id, next);
-  await prev;
-  try {
-    return await fn();
-  } finally {
-    release();
-    if (locks.get(id) === next) locks.delete(id);
-  }
+function fallbackReply(language) {
+  const l = String(language || "");
+  if (l.startsWith("uk")) return "Я тут 🙂 Спробуй ще раз за мить.";
+  if (l.startsWith("es")) return "Estoy aquí 🙂 Inténtalo de nuevo en un momento.";
+  if (l.startsWith("pt")) return "Estou aqui 🙂 Tente de novo em um instante.";
+  return "I’m here 🙂 Try again in a moment.";
 }
 
 export default {
-  async fetch(req, env) {
-    const origin = req.headers.get("Origin") || "";
-    if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(origin) });
-    const url = new URL(req.url);
-    if (req.method !== "POST" || url.pathname !== "/v1/chat") {
-      return json({ error: "not_found" }, origin, 404);
-    }
-
-    let input;
-    try {
-      input = await req.json();
-    } catch {
-      return json({ error: "bad_json" }, origin, 400);
-    }
-
-    const message = clip(input.message, 2000);
-    if (message.length < 1) return json({ error: "message_must_be_1_to_2000_characters" }, origin, 400);
-
-    const appLanguage = clip(input.language, 8) || "en";
-    const language = detectLanguage(message, appLanguage);
-    const playerId = clip(input.playerId, 80) || crypto.randomUUID();
-    const conversationId = clip(input.conversationId, 80) || crypto.randomUUID();
-    const historyIn = Array.isArray(input.history) ? input.history.slice(-4) : [];
-    const history = [];
-    for (const row of historyIn) {
-      const role = row?.role === "assistant" || row?.role === "buddy" ? "assistant" : "user";
-      const content = clip(row?.content || row?.text, 400);
-      if (content) history.push({ role, content });
-    }
-
-    const messages = [{ role: "system", content: systemPrompt({ ...input, language: appLanguage, replyLanguage: language }) }, ...history, { role: "user", content: message }];
-
-    return withLock(playerId, async () => {
-      const out = await chat(env, messages, language);
-      return json(
-        {
-          reply: out.text,
-          playerId,
-          conversationId,
-          provider: out.provider,
-          fallback: out.fallback,
-        },
-        origin,
-      );
-    });
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const origin = request.headers.get("origin");
+    const headers = corsHeaders(origin);
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
+    if (url.pathname === "/healthz") return json({ ok: true, service: "solarchik-ai-worker" }, 200, headers);
+    if (origin && !ORIGINS.has(origin)) return json({ error: "origin_not_allowed" }, 403, headers);
+    if (request.method !== "POST") return json({ error: "not_found" }, 404, headers);
+    if (url.pathname === "/v1/chat") return chat(request, env, headers);
+    if (url.pathname === "/v1/transcribe") return transcribe(request, env, headers);
+    return json({ error: "not_found" }, 404, headers);
   },
 };
 
-async function chat(env, messages, language) {
-  let r = await callFeatherless(env, messages, PRIMARY, MAX_TOKENS, 0);
-  if (r.kind === "ok") return { text: r.text, provider: "featherless", fallback: false };
+async function chat(request, env, headers) {
+  const body = await request.json().catch(() => null);
+  const message = String(body?.message || "").trim();
+  if (!message || message.length > 2000) return json({ error: "invalid_message" }, 400, headers);
 
-  const retryable = new Set(["no_choice", "empty_content", "length", "http_500", "http_502", "http_503", "http_429", "http_0"]);
-  if (retryable.has(r.kind) || r.kind.startsWith("http_5") || r.kind.startsWith("http_429")) {
-    await sleep(300);
-    r = await callFeatherless(env, slimMessages(messages), PRIMARY, RETRY_TOKENS, 1);
-    if (r.kind === "ok") return { text: r.text, provider: "featherless", fallback: false };
-    r = await callFeatherless(env, slimMessages(messages), SECONDARY, RETRY_TOKENS, 2);
-    if (r.kind === "ok") return { text: r.text, provider: "featherless", fallback: false };
-  }
+  const turns = (Array.isArray(body.history) ? body.history : []).slice(-4).flatMap((x) => {
+    const text = typeof x?.text === "string" ? x.text : typeof x?.content === "string" ? x.content : null;
+    if (text == null || !["user", "assistant", "model"].includes(x.role)) return [];
+    return [{ role: x.role === "model" ? "assistant" : x.role, content: text.slice(0, 400) }];
+  });
+  turns.push({ role: "user", content: message });
+  const system = systemPrompt(body);
 
-  const g = await callGemini(env, messages, language);
-  if (g) return { text: g, provider: "gemini", fallback: false };
-  return { text: canned(language), provider: "local", fallback: true };
-}
-
-async function callFeatherless(env, messages, model, maxTokens, attempt) {
-  const key = env.FEATHERLESS_API_KEY;
-  if (!key) return { kind: "http_0", text: "" };
-  const t0 = Date.now();
+  let t0 = Date.now();
   try {
     const res = await fetch(FEATHERLESS_URL, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${key}`,
-      },
+      headers: { "content-type": "application/json", authorization: "Bearer " + env.FEATHERLESS_API_KEY },
       body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: maxTokens,
+        model: env.FEATHERLESS_MODEL || "Qwen/Qwen2.5-14B-Instruct",
+        messages: [{ role: "system", content: system }, ...turns],
+        max_tokens: MAX_TOKENS,
         temperature: 0.7,
-        top_p: 0.9,
-        stream: false,
       }),
+      signal: AbortSignal.timeout(FEATHERLESS_TIMEOUT_MS),
     });
-    const body = await res.json().catch(() => null);
-    const ms = Date.now() - t0;
-    const kind = classify(body, res.status);
-    console.log(JSON.stringify(shapeLog(body, res.status, ms, model, attempt)));
-    const raw = extractText(body);
-    const cut = body?.choices?.[0]?.finish_reason === "length" || raw.length >= REPLY_CHARS;
-    return { kind, text: cut ? wholeSentences(raw) : raw };
+    const data = await res.json().catch(() => ({}));
+    const choice = data?.choices?.[0];
+    const reply = finishReply(choice?.message?.content, choice?.finish_reason === "length");
+    logShape("featherless", res.status, t0, choice?.finish_reason, reply, data?.usage?.completion_tokens);
+    if (res.ok && reply && !looksBroken(reply)) return json({ ok: true, reply, provider: "featherless", fallback: false }, 200, headers);
   } catch (err) {
-    console.log(JSON.stringify({ event: "llm_shape", model, attempt, http: 0, ms: Date.now() - t0, hasText: false, error: "network" }));
-    return { kind: "http_0", text: "" };
+    logShape("featherless", 0, t0, err?.name || "error", "", null);
   }
-}
 
-async function callGemini(env, messages, language) {
-  const key = env.GEMINI_API_KEY;
-  if (!key) return "";
-  const sys = messages.find((m) => m.role === "system")?.content || "";
-  const contents = messages
-    .filter((m) => m.role !== "system")
-    .map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
-  const t0 = Date.now();
+  t0 = Date.now();
   try {
-    const res = await fetch(`${GEMINI_URL}/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(key)}`, {
+    const model = env.GEMINI_MODEL || "gemini-3.6-flash";
+    const res = await fetch(`${GEMINI_URL}/${model}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-goog-api-key": key },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: sys }] },
-        contents,
-        generationConfig: { maxOutputTokens: RETRY_TOKENS, temperature: 0.7 },
+        systemInstruction: { parts: [{ text: system }] },
+        contents: turns.map((t) => ({ role: t.role === "assistant" ? "model" : "user", parts: [{ text: t.content }] })),
+        generationConfig: { maxOutputTokens: RETRY_TOKENS },
       }),
+      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     });
-    const body = await res.json().catch(() => null);
-    const parts = body?.candidates?.[0]?.content?.parts || [];
-    const joined = clip(parts.map((p) => p?.text || "").join(" "), REPLY_CHARS);
-    const cut = body?.candidates?.[0]?.finishReason === "MAX_TOKENS" || joined.length >= REPLY_CHARS;
-    const text = cut ? wholeSentences(joined) : joined;
-    console.log(
-      JSON.stringify({
-        event: "llm_shape",
-        model: GEMINI_MODEL,
-        attempt: 9,
-        http: res.status,
-        ms: Date.now() - t0,
-        hasText: Boolean(text),
-        keys: body && typeof body === "object" ? Object.keys(body).sort() : [],
-      }),
-    );
-    return text;
-  } catch {
-    console.log(JSON.stringify({ event: "llm_shape", model: GEMINI_MODEL, attempt: 9, http: 0, ms: Date.now() - t0, hasText: false }));
-    return "";
+    const data = await res.json().catch(() => ({}));
+    const reply = finishReply(geminiText(data), data?.candidates?.[0]?.finishReason === "MAX_TOKENS");
+    logShape("gemini", res.status, t0, data?.candidates?.[0]?.finishReason, reply, data?.usageMetadata?.candidatesTokenCount);
+    if (res.ok && reply && !looksBroken(reply)) return json({ ok: true, reply, provider: "gemini", fallback: false }, 200, headers);
+  } catch (err) {
+    logShape("gemini", 0, t0, err?.name || "error", "", null);
   }
+
+  return json({ ok: true, reply: fallbackReply(body?.language), provider: "fallback", fallback: true }, 200, headers);
 }
 
-function sleep(ms) {
-  return new Promise((ok) => setTimeout(ok, ms));
+/** Unchanged from the deployed version. */
+async function transcribe(request, env, headers) {
+  const body = await request.json().catch(() => null);
+  const audio = String(body?.audio || "")
+    .replace(/^data:[^,]*,/, "")
+    .replace(/\s/g, "");
+  const mime = String(body?.mime || "audio/webm").split(";")[0];
+  if (!/^audio\/(webm|mp4|m4a|ogg|opus|wav|mpeg|mp3|aac)$/.test(mime) || audio.length < 64 || audio.length > 2e6) {
+    return json({ ok: false, error: "invalid_audio" }, 400, headers);
+  }
+  try {
+    const res = await fetch(`${GEMINI_URL}/gemini-3.5-transcribe:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          { parts: [{ text: "Transcribe the speech exactly and return only spoken words." }, { inlineData: { mimeType: mime, data: audio } }] },
+        ],
+      }),
+      signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
+    });
+    const text = geminiText(await res.json().catch(() => ({})));
+    if (res.ok && text) return json({ ok: true, text }, 200, headers);
+  } catch (_) {
+    /* unavailable */
+  }
+  return json({ ok: false, error: "transcription_unavailable" }, 503, headers);
 }
