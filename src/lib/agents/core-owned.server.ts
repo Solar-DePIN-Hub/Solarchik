@@ -8,7 +8,7 @@ const PUBLIC_DEVNET = "https://api.devnet.solana.com";
 /** Key::AssetV1 = 1, base58 of a single 0x01 byte. */
 const ASSET_V1_TAG = "2";
 
-export type CoreAgent = { asset: string; owner: string; attrs: Map<string, string> };
+export type CoreAgent = { asset: string; owner: string; uri: string; attrs: Map<string, string> };
 
 function devnetUrl(): string {
   const fromEnv = (process.env.SOLANA_RPC_DEVNET || "").trim();
@@ -40,7 +40,7 @@ function parse(address: string, raw: { lamports: number; owner: string; executab
       data: Uint8Array.from(Buffer.from(raw.data[0], "base64")),
     });
     const attrs = new Map((asset.attributes?.attributeList ?? []).map((a) => [a.key, a.value] as [string, string]));
-    return { asset: address, owner: String(asset.owner), attrs };
+    return { asset: address, owner: String(asset.owner), uri: asset.uri, attrs };
   } catch {
     return null;
   }
@@ -84,6 +84,7 @@ export function isArbAgent(agent: CoreAgent): boolean {
   return cls === "2" || role === "dex" || role === "combo" || cls === "4";
 }
 
+/** Free if either the server-set URI or the attribute says so (the attribute alone is owner-editable on new mints). */
 export function isFreeTier(agent: CoreAgent): boolean {
-  return agent.attrs.get("tr") === "free";
+  return agent.uri.endsWith(":free") || agent.attrs.get("tr") === "free";
 }

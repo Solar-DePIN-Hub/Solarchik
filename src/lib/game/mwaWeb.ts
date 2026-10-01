@@ -114,7 +114,7 @@ export async function signClockInMwa(meters: number, _score: number, streak: num
 }
 
 /** Devnet SOL to the game treasury. Refuses a mainnet-only wallet instead of charging it. */
-export async function payTreasuryMwa(sol: number): Promise<{ ok: true; sig: string } | { ok: false; error: string }> {
+export async function payTreasuryMwa(sol: number, memo = ""): Promise<{ ok: true; sig: string } | { ok: false; error: string }> {
   if (!androidPhone()) return { ok: false, error: "no-wallet" };
   if (!(sol > 0)) return { ok: false, error: "amount" };
   try {
@@ -144,6 +144,7 @@ export async function payTreasuryMwa(sol: number): Promise<{ ok: true; sig: stri
         lamports: Math.round(sol * 1_000_000_000),
       }),
     );
+    if (memo) tx.add(new TransactionInstruction({ programId: MEMO, keys: [], data: Buffer.from(memo, "utf8") }));
     const raw = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
     const out = await wallet.features["solana:signAndSendTransaction"].signAndSendTransaction({
       account,

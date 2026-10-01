@@ -124,14 +124,38 @@ export async function settleArb(
   }
 }
 
-/** Short lock so two tabs cannot both pass the on-chain "no free NFT yet" check. */
-export async function claimFreeLock(sql: GuardSql, wallet: string, now: number, lockMs: number): Promise<boolean> {
-  const rows = await sql.query<{ ok: number }>(
-    `insert into free_mint_claims as c (wallet, claimed_ms) values ($1, $2)
-     on conflict (wallet) do update set claimed_ms = excluded.claimed_ms
-       where c.claimed_ms <= excluded.claimed_ms - $3
-     returning 1 as ok`,
-    [wallet, now, lockMs],
+/**
+ * One entitlement slot: free per wallet, or one Pro payment signature.
+ * First use inserts. A later use by the same wallet is allowed only when the
+ * earlier prepared asset never landed on-chain and the hold time passed.
+ * Another wallet can never take a slot.
+ */
+export async function claimMintSlot(
+  sql: GuardSql,
+  input: { kind: "free" | "pro"; key: string; wallet: string; asset: string; now: number; holdMs: number },
+  assetLanded: (asset: string) => Promise<boolean>,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const { kind, key, wallet, asset, now, holdMs } = input;
+  const inserted = await sql.query(
+    `insert into mint_claims (kind, key, wallet, asset, prepared_ms) values ($1, $2, $3, $4, $5)
+     on conflict do nothing returning 1 as ok`,
+    [kind, key, wallet, asset, now],
   );
-  return rows.length > 0;
+  if (inserted.length) return { ok: true };
+  const rows = await sql.query<{ wallet: string; asset: string; prepared_ms: number }>(
+    "select wallet, asset, prepared_ms::float8 as prepared_ms from mint_claims where kind = $1 and key = $2",
+    [kind, key],
+  );
+  const row = rows[0];
+  if (!row) return { ok: false, reason: "Спробуй ще раз." };
+  const used = kind === "pro" ? "Цю оплату вже використано." : "Безкоштовний агент уже є.";
+  if (row.wallet !== wallet) return { ok: false, reason: used };
+  if (row.asset && (await assetLanded(row.asset))) return { ok: false, reason: used };
+  if (now - row.prepared_ms < holdMs) return { ok: false, reason: "Попередній мінт ще йде. Зачекай 2–10 хв." };
+  const updated = await sql.query(
+    `update mint_claims set asset = $4, prepared_ms = $5
+     where kind = $1 and key = $2 and wallet = $3 and prepared_ms = $6 returning 1 as ok`,
+    [kind, key, wallet, asset, now, row.prepared_ms],
+  );
+  return updated.length ? { ok: true } : { ok: false, reason: "Спробуй ще раз." };
 }

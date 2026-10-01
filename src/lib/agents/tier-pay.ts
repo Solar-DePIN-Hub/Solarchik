@@ -2,6 +2,7 @@ import {
   LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
+  TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
@@ -18,11 +19,17 @@ function sigOf(sent: { signature?: string } | string): string {
   return sent.signature ?? "";
 }
 
-/** Devnet transfer from the player's wallet to the game treasury. Room key is not the payer. */
+const MEMO_PROGRAM = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+
+/**
+ * Devnet transfer from the player's wallet to the game treasury. Room key is not the payer.
+ * The memo binds the payment to the room wallet; the server mints only to that wallet.
+ */
 export async function paySkuFromPlayer(
   sol: number,
   from: string | null,
   phantom: PhantomSend | null,
+  memo = "",
 ): Promise<{ ok: true; sig: string } | { ok: false; reason: string }> {
   if (!(sol > 0)) return { ok: false, reason: "Ціна не задана." };
   if (phantom && from && from.length >= 32) {
@@ -38,7 +45,9 @@ export async function paySkuFromPlayer(
       const message = new TransactionMessage({
         payerKey: payer,
         recentBlockhash: blockhash,
-        instructions: [ix],
+        instructions: memo
+          ? [ix, new TransactionInstruction({ programId: MEMO_PROGRAM, keys: [], data: Buffer.from(memo, "utf8") })]
+          : [ix],
       }).compileToV0Message();
       const sig = sigOf(await phantom.signAndSendTransaction(new VersionedTransaction(message)));
       if (sig.length < 32) return { ok: false, reason: "Гаманець не повернув підпис. Мінт не почато." };
@@ -48,7 +57,7 @@ export async function paySkuFromPlayer(
       return { ok: false, reason: message.slice(0, 180) };
     }
   }
-  const phone = await payTreasuryMwa(sol);
+  const phone = await payTreasuryMwa(sol, memo);
   if (phone.ok) return phone;
   if (phone.error === "mainnet-only") {
     return { ok: false, reason: "Seeker на mainnet. Оплата Pro поки лише Devnet. Нічого не списано." };

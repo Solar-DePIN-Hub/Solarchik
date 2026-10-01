@@ -7,6 +7,7 @@ import {
   SystemProgram,
   Transaction,
   TransactionInstruction,
+  VersionedTransaction,
 } from "@solana/web3.js";
 import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import {
@@ -31,6 +32,8 @@ import {
 import { COLLECTION_NAME, type AgentNft, type NftClassId, type StrategyBundle, type Track } from "./types";
 import { WORK_GOAL_SEC, listEligible, workedSecOf } from "./classes";
 import { ROYALTY_BPS } from "./fees.config";
+import { attrList } from "./core-attrs";
+import { tierFromUri } from "./mint-rules";
 import { publicDevnet, rpcUrl } from "./rpc-heal";
 
 /** Fee receiver from the school wallet. Test SOL only. */
@@ -319,50 +322,6 @@ async function ensureCollection(payer: Keypair): Promise<string> {
   return rememberCollection(collection.publicKey.toString());
 }
 
-function attrList(nft: Pick<AgentNft, "classId" | "track" | "trainedDays" | "graduated" | "strategy" | "metrics" | "tier">) {
-  const p = nft.strategy.prediction;
-  const d = nft.strategy.dex;
-  const role = nft.classId === 3 ? "combo" : nft.classId === 2 ? "dex" : "pred";
-  const lanes = p.lanes ?? [];
-  const on = (lane: "crypto" | "events" | "weather") => (p.laneOn?.[lane] === false ? "" : lane === "crypto" ? "c" : lane === "events" ? "e" : "w");
-  const lo = lanes.map((lane) => on(lane)).join("");
-  const pf = p.focus === "events" ? "evt" : p.focus === "weather" ? "wx" : lanes.length > 1 ? "mix" : "btc";
-  const rows: Array<[string, string]> = [
-    ["class", String(nft.classId)],
-    ["tr", nft.tier === "free" ? "free" : "pro"],
-    ["role", role],
-    ["track", nft.track],
-    ["days", String(Math.round(nft.trainedDays))],
-    ["grad", workedSecOf(nft) >= WORK_GOAL_SEC ? "1" : "0"],
-    ["wh", String(Math.floor(workedSecOf(nft) / 3600))],
-    ["ws", String(workedSecOf(nft) % 3600)],
-    ["apr", nft.metrics.aprPct == null || !Number.isFinite(nft.metrics.aprPct) ? "" : String(nft.metrics.aprPct)],
-    ["xp", String(Math.round(nft.metrics.xp))],
-    ["jobs", String(Math.round(nft.metrics.jobs))],
-    ["wins", String(Math.round(nft.metrics.wins))],
-    ["losses", String(Math.round(nft.metrics.losses))],
-    ["pnl", nft.metrics.pnlSol.toFixed(5)],
-    ["pm", p.focus === "events" ? "події" : p.focus === "weather" ? "погода" : "Bitcoin"],
-    ["pv", "poly"],
-    ["pf", pf],
-    ["ln", lanes.map((lane) => (lane === "crypto" ? "c" : lane === "events" ? "e" : "w")).join("")],
-    ["lo", lo],
-    ["ed", p.eventsDays === 1 ? "1" : "2"],
-    ["wo", p.weexOn ? "1" : "0"],
-    ["pwin", String((p.windows ?? [15])[0] ?? 15)],
-    ["pw", (p.windows ?? [15]).join(".")],
-    ["ab", `${p.askLo ?? 0.15}-${p.askHi ?? 0.85}`],
-    ["pe", p.edgeBps.toFixed(1)],
-    ["ps", String(p.maxStakeSol)],
-    ["dp", d.pair],
-    ["di", String(Math.round(d.dcaIntervalSec))],
-    ["da", String(d.dcaAmountSol)],
-    ["dsl", d.slippageBps.toFixed(0)],
-    ["dd", d.side],
-  ];
-  return rows.map(([key, value]) => ({ key, value: value.slice(0, 32) }));
-}
-
 function num(map: Map<string, string>, key: string, fallback: number): number {
   const n = Number(map.get(key));
   return Number.isFinite(n) ? n : fallback;
@@ -374,6 +333,7 @@ export function nftFromAsset(
   asset: string,
   coreCollection: string,
   list: Array<{ key: string; value: string }>,
+  uri?: string,
 ): AgentNft | null {
   const map = new Map(list.map((a) => [a.key, a.value]));
   let classId = num(map, "class", 1);
@@ -441,7 +401,8 @@ export function nftFromAsset(
     track,
     trainedDays: num(map, "days", track === "live" ? 90 : 0),
     graduated: workedSec >= WORK_GOAL_SEC,
-    tier: map.get("tr") === "free" ? "free" : "pro",
+    // Server-minted assets carry the tier in the URI (only the server can change it); old ones in the attribute.
+    tier: tierFromUri(uri) ?? (map.get("tr") === "free" ? "free" : "pro"),
     strategy,
     metrics: {
       xp: num(map, "xp", 0),
@@ -468,7 +429,7 @@ export async function fetchAgent(asset: string): Promise<AgentNft | null> {
     const col = collectionAddress(fetched);
     if (!col) return null;
     const list = fetched.attributes?.attributeList ?? [];
-    return nftFromAsset(fetched.name, String(fetched.owner), asset, String(col), list);
+    return nftFromAsset(fetched.name, String(fetched.owner), asset, String(col), list, fetched.uri);
   } catch {
     return null;
   }
@@ -502,7 +463,7 @@ export async function fetchOwnedAgents(owner: string): Promise<AgentNft[]> {
           if (String(asset.owner) !== owner) continue;
           const col = collectionAddress(asset);
           if (!col) continue;
-          const nft = nftFromAsset(asset.name, owner, addr, String(col), asset.attributes?.attributeList ?? []);
+          const nft = nftFromAsset(asset.name, owner, addr, String(col), asset.attributes?.attributeList ?? [], asset.uri);
           if (nft) found.push(nft);
         } catch {
           /* collection or unrelated core account */
@@ -542,6 +503,23 @@ export async function mintCore(
     }),
   );
   return { asset: asset.publicKey.toString(), signature, coreCollection };
+}
+
+/**
+ * Sends the server-built mint transactions. The server already signed them;
+ * the room key adds the payer signature. Any change to the message breaks the server signature.
+ */
+export async function sendServerMint(payer: Keypair, txs: string[]): Promise<string> {
+  const conn = getConn();
+  let last = "";
+  for (const b64 of txs) {
+    const raw = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+    const tx = VersionedTransaction.deserialize(raw);
+    tx.sign([payer]);
+    last = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 3 });
+    await confirmSig(last);
+  }
+  return last;
 }
 
 export async function writeCore(payer: Keypair, nft: AgentNft): Promise<string> {

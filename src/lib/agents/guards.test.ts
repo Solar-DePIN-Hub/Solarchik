@@ -3,8 +3,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
-import { ARB_LIMITS, FREE_CLAIM_LOCK_MS, arbModeFor, cleanArbSymbol } from "./arb-rules.ts";
-import { claimFreeLock, reserveArb, settleArb, spendProofOnce, type GuardSql } from "./guard-ledger.server.ts";
+import { ARB_LIMITS, arbModeFor, cleanArbSymbol } from "./arb-rules.ts";
+import { claimMintSlot, reserveArb, settleArb, spendProofOnce, type GuardSql } from "./guard-ledger.server.ts";
+import { CLIENT_SLOT_MS, COSIGN_SLOT_MS, PRO_LAMPORTS, checkProPaymentTx, mintModeFor, mintUri, proMemo, tierFromUri } from "./mint-rules.ts";
+import { PAY_WALLET } from "../game/pay.ts";
+import { Keypair } from "@solana/web3.js";
+import { backpackFromFile, backpackFromText, derivedKeypair, keypairFromText } from "./secret-key.server.ts";
 import { encodeBase58 } from "./base58.ts";
 import { proofMessage, readProof } from "./wallet-proof.ts";
 import { verifyProof } from "./wallet-proof.server.ts";
@@ -14,7 +18,7 @@ function testWallet() {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const raw = publicKey.export({ format: "der", type: "spki" }).subarray(12);
   const wallet = encodeBase58(new Uint8Array(raw));
-  const proof = (action: "arb" | "free-mint", extra: string, ts: number) => ({
+  const proof = (action: "arb" | "mint", extra: string, ts: number) => ({
     wallet,
     ts,
     sig: encodeBase58(new Uint8Array(sign(null, Buffer.from(proofMessage(action, wallet, ts, extra)), privateKey))),
@@ -59,7 +63,7 @@ describe("wallet proof", () => {
   });
   it("rejects another action, other fields, or a stale time", () => {
     const p = w.proof("arb", "A:SOL:asset", now);
-    assert.equal(verifyProof(p, "free-mint", "A:SOL:asset", now).ok, false);
+    assert.equal(verifyProof(p, "mint", "A:SOL:asset", now).ok, false);
     assert.equal(verifyProof(p, "arb", "B:SOL:asset", now).ok, false);
     assert.equal(verifyProof(p, "arb", "A:SOL:asset", now + 121_000).ok, false);
     assert.equal(verifyProof({ ...p, wallet: testWallet().wallet }, "arb", "A:SOL:asset", now).ok, false);
@@ -75,6 +79,7 @@ describe("guard ledger on Postgres (PGLite)", () => {
   before(async () => {
     const pg = new PGlite();
     await pg.exec(readFileSync(new URL("../../../migrations/0002_guards.sql", import.meta.url), "utf8"));
+    await pg.exec(readFileSync(new URL("../../../migrations/0003_mints.sql", import.meta.url), "utf8"));
     sql = { query: async (text: string, params: unknown[] = []) => (await pg.query(text, params)).rows as never[] };
   });
   const base = { mode: "mainnet" as const, asset: "Asset1111111111111111111111111111", symbol: "SOL", dir: "A", sol: 0.005, limits: ARB_LIMITS.mainnet };
@@ -127,13 +132,31 @@ describe("guard ledger on Postgres (PGLite)", () => {
   it("a proof works once", async () => {
     assert.equal(await spendProofOnce(sql, "w", "arb", 1, t0), true);
     assert.equal(await spendProofOnce(sql, "w", "arb", 1, t0), false);
-    assert.equal(await spendProofOnce(sql, "w", "free-mint", 1, t0), true);
+    assert.equal(await spendProofOnce(sql, "w", "mint", 1, t0), true);
   });
 
-  it("free claim lock holds 10 minutes", async () => {
-    assert.equal(await claimFreeLock(sql, "wf", t0, FREE_CLAIM_LOCK_MS), true);
-    assert.equal(await claimFreeLock(sql, "wf", t0 + 60_000, FREE_CLAIM_LOCK_MS), false);
-    assert.equal(await claimFreeLock(sql, "wf", t0 + FREE_CLAIM_LOCK_MS, FREE_CLAIM_LOCK_MS), true);
+  it("a Pro payment mints once, never for another wallet", async () => {
+    const slot = { kind: "pro" as const, key: "paysig1", wallet: "room1", asset: "assetA", now: t0, holdMs: COSIGN_SLOT_MS };
+    const landed = new Set<string>();
+    const isLanded = async (a: string) => landed.has(a);
+    assert.deepEqual(await claimMintSlot(sql, slot, isLanded), { ok: true });
+    const other = await claimMintSlot(sql, { ...slot, wallet: "room2", asset: "assetX", now: t0 + COSIGN_SLOT_MS * 5 }, isLanded);
+    assert.equal(other.ok, false, "another wallet can never use the payment");
+    const early = await claimMintSlot(sql, { ...slot, asset: "assetB", now: t0 + 30_000 }, isLanded);
+    assert.equal(early.ok, false, "previous prepare still in flight");
+    const retry = await claimMintSlot(sql, { ...slot, asset: "assetB", now: t0 + COSIGN_SLOT_MS }, isLanded);
+    assert.equal(retry.ok, true, "first asset never landed, hold passed: retry allowed");
+    landed.add("assetB");
+    const again = await claimMintSlot(sql, { ...slot, asset: "assetC", now: t0 + COSIGN_SLOT_MS * 10 }, isLanded);
+    assert.equal(again.ok, false, "payment already minted");
+  });
+
+  it("free slot per wallet; client-mode slot holds longer", async () => {
+    const slot = { kind: "free" as const, key: "roomF", wallet: "roomF", asset: "", now: t0, holdMs: CLIENT_SLOT_MS };
+    const never = async () => false;
+    assert.equal((await claimMintSlot(sql, slot, never)).ok, true);
+    assert.equal((await claimMintSlot(sql, { ...slot, now: t0 + COSIGN_SLOT_MS }, never)).ok, false);
+    assert.equal((await claimMintSlot(sql, { ...slot, now: t0 + CLIENT_SLOT_MS }, never)).ok, true);
   });
 });
 
@@ -156,5 +179,78 @@ describe("desk proxy rules", () => {
     assert.equal(allow("ip", 1), true);
     assert.equal(allow("ip", 2), false);
     assert.equal(allow("ip", 60_001), true);
+  });
+});
+
+describe("mint rules", () => {
+  const room = "Room111111111111111111111111111111111111111";
+  const now = 1_800_000_000;
+  const transfer = (source: string, lamports = PRO_LAMPORTS, destination = PAY_WALLET) => ({
+    program: "system",
+    parsed: { type: "transfer", info: { source, destination, lamports } },
+  });
+  const tx = (ixs: unknown[], extra: Record<string, unknown> = {}) =>
+    ({ blockTime: now - 60, meta: { err: null }, transaction: { message: { instructions: ixs } }, ...extra }) as never;
+
+  it("mode: key co-signs, no key closes Pro on deploys", () => {
+    assert.equal(mintModeFor("pro", { hasKey: true, store: "shared", dev: false }).mode, "cosign");
+    assert.equal(mintModeFor("free", { hasKey: true, store: "none", dev: false }).mode, "cosign");
+    assert.equal(mintModeFor("pro", { hasKey: true, store: "none", dev: false }).mode, "closed");
+    assert.equal(mintModeFor("pro", { hasKey: false, store: "shared", dev: false }).mode, "closed");
+    assert.match(mintModeFor("pro", { hasKey: false, store: "shared", dev: false }).reason, /MINT_AUTHORITY_SECRET/);
+    assert.equal(mintModeFor("pro", { hasKey: false, store: "none", dev: true }).mode, "client");
+    assert.equal(mintModeFor("free", { hasKey: false, store: "none", dev: false }).mode, "client");
+  });
+
+  it("tier lives in the uri", () => {
+    assert.equal(tierFromUri(mintUri("pro")), "pro");
+    assert.equal(tierFromUri(mintUri("free")), "free");
+    assert.equal(tierFromUri("urn:solarchik:agent"), null);
+    assert.equal(tierFromUri(undefined), null);
+  });
+
+  it("accepts an exact Pro payment bound by memo or paid from the room wallet", () => {
+    assert.deepEqual(checkProPaymentTx(tx([transfer("Phantom1"), { program: "spl-memo", parsed: proMemo(room) }]), room, now), { ok: true });
+    assert.deepEqual(checkProPaymentTx(tx([transfer(room)]), room, now), { ok: true });
+  });
+
+  it("refuses wrong amount, wrong destination, other room, failed, old or missing tx", () => {
+    assert.equal(checkProPaymentTx(null, room, now).ok, false);
+    assert.equal(checkProPaymentTx(tx([transfer(room, PRO_LAMPORTS - 1)]), room, now).ok, false);
+    assert.equal(checkProPaymentTx(tx([transfer(room, PRO_LAMPORTS, "Other1111")]), room, now).ok, false);
+    assert.equal(checkProPaymentTx(tx([transfer("Phantom1"), { program: "spl-memo", parsed: proMemo("OtherRoom") }]), room, now).ok, false);
+    assert.equal(checkProPaymentTx(tx([transfer("Phantom1")]), room, now).ok, false);
+    assert.equal(checkProPaymentTx(tx([transfer(room)], { meta: { err: { x: 1 } } }), room, now).ok, false);
+    assert.equal(checkProPaymentTx(tx([transfer(room)], { blockTime: now - 4 * 24 * 3600 }), room, now).ok, false);
+  });
+});
+
+describe("server secrets from env", () => {
+  it("keypair from base58, seed or JSON; junk is null", () => {
+    const kp = Keypair.generate();
+    const b58 = encodeBase58(kp.secretKey);
+    assert.equal(keypairFromText(b58)?.publicKey.toBase58(), kp.publicKey.toBase58());
+    assert.equal(keypairFromText(` ${JSON.stringify([...kp.secretKey])}\n`)?.publicKey.toBase58(), kp.publicKey.toBase58());
+    assert.equal(keypairFromText(encodeBase58(kp.secretKey.subarray(0, 32)))?.publicKey.toBase58(), kp.publicKey.toBase58());
+    assert.equal(keypairFromText(""), null);
+    assert.equal(keypairFromText(undefined), null);
+    assert.equal(keypairFromText("not a key 0OIl"), null);
+    assert.equal(keypairFromText(encodeBase58(new Uint8Array(10))), null);
+  });
+  it("derived collection key is stable and differs from the parent", () => {
+    const kp = Keypair.generate();
+    const a = derivedKeypair(kp, "mint-collection").publicKey.toBase58();
+    assert.equal(a, derivedKeypair(kp, "mint-collection").publicKey.toBase58());
+    assert.notEqual(a, kp.publicKey.toBase58());
+    assert.notEqual(a, derivedKeypair(kp, "other").publicKey.toBase58());
+  });
+  it("backpack pair from env or the old two-line file", () => {
+    const seed = Buffer.alloc(32, 7).toString("base64");
+    assert.equal(backpackFromText("key1", seed)?.apiKey, "key1");
+    assert.equal(backpackFromText("key1", seed)?.seed.length, 32);
+    assert.equal(backpackFromText("key1", Buffer.alloc(16).toString("base64")), null);
+    assert.equal(backpackFromText("", seed), null);
+    assert.equal(backpackFromFile(`key2\r\n${seed}\n`)?.apiKey, "key2");
+    assert.equal(backpackFromFile("key2"), null);
   });
 });

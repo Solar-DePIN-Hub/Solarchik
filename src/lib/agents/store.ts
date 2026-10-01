@@ -28,13 +28,15 @@ import { coachAgent } from "./coach";
 import { encodeBase58 } from "./base58";
 import { confirmMainnetTx, peekMainnetSig, prepareMainnetSend, prepareMainnetSweep, readMainnetBalance, readMainnetUsdc, sendMainnetTx } from "./mainnet";
 import { addArbCredit, readArbCredit, takeArbCredit } from "./arb-credit";
-import { fireArb, readArbHouse, type ArbHouse } from "./arb-house";
+import type { ArbHouse } from "./arb-house";
+import { callArbFire, callArbHouse, callMintStatus, callPrepareMint } from "./server-calls";
+import { proMemo } from "./mint-rules";
 import { SIM_LABEL, cleanArbSymbol } from "./arb-rules";
 import { signProof } from "./wallet-sign";
-import { planFee, type FeeRow } from "./fee-ledger";
+import { feeCovered, planFee, type FeeRow } from "./fee-ledger";
 import { paySkuFromPlayer } from "./tier-pay";
 import { readCaps, userTradeBlock } from "./user-limits";
-import { feeWindowCovers, loadSave } from "@/lib/game/save";
+import { loadSave } from "@/lib/game/save";
 import { ARB_TREASURY } from "@/lib/game/pay";
 import { GROK_MODEL } from "./grok-model";
 import { decideBet } from "./decide";
@@ -540,7 +542,7 @@ function noteSettledFees(patches: FillPatch[], track: Track) {
         closedAt: Date.now(),
         pnl: patch.pnl,
         paper: track === "paper" || nft?.track === "paper",
-        covered: feeWindowCovers(save, fill?.at ?? 0),
+        covered: feeCovered(save.feeWindows, fill?.at ?? 0),
       }),
     );
   }
@@ -571,13 +573,41 @@ async function sendDueFees(due: FeeRow[]) {
   useAgents.getState().persist();
 }
 
+const PENDING_PRO_KEY = "solarchik.pending-pro";
+
+/** A Pro payment that did not end in a mint yet. Reused once instead of charging again. */
+function readPendingPro(room: string, skuId: string): string {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PENDING_PRO_KEY) || "null") as { room?: string; skuId?: string; sig?: string } | null;
+    return raw && raw.room === room && raw.skuId === skuId && typeof raw.sig === "string" ? raw.sig : "";
+  } catch {
+    return "";
+  }
+}
+
+function writePendingPro(room: string, skuId: string, sig: string) {
+  try {
+    localStorage.setItem(PENDING_PRO_KEY, JSON.stringify({ room, skuId, sig }));
+  } catch {
+    /* private mode: server still binds the payment by memo */
+  }
+}
+
+function clearPendingPro() {
+  try {
+    localStorage.removeItem(PENDING_PRO_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Sign with the room key, then let the server decide. The browser holds no arb secret. */
 async function signedArbFire(dir: "A" | "B", rawSymbol: string, asset: string) {
   const kp = await loadKeypair();
   if (!kp) return { ok: false as const, mode: "closed" as const, broken: false, reason: "Немає ключа кімнати." };
   const symbol = cleanArbSymbol(rawSymbol);
   const proof = await signProof(kp, "arb", `${dir}:${symbol}:${asset}`);
-  return fireArb({ data: { dir, symbol, asset, proof } });
+  return callArbFire({ dir, symbol, asset, proof });
 }
 
 type HeldTrade = PendingTrade & { job: ChainJob };
@@ -733,7 +763,7 @@ async function settleUncounted(): Promise<"clear" | "pending"> {
   return "clear";
 }
 
-let liveGate = false;
+const liveGate = false;
 let autoDexFlight = false;
 let autoPolyFlight = false;
 let weexFlight = false;
@@ -1520,22 +1550,23 @@ async function fireAutoPoly() {
     useAgents.setState({ notice: msg || "CLOB 0", polyTicket: null });
   } finally {
     autoPolyFlight = false;
-    if (!endReview(gen)) return;
-    const live = useAgents.getState();
-    const slotFree = live.autoRun && !live.polyOpenId;
-    useAgents.setState({
-      grokFlight: false,
-      polyBusy: false,
-      ...(live.notice === "Grok ще відповідає. Нову не ставлю." ? { notice: null } : {}),
-      ...(slotFree
-        ? {
-            agents: {
-              ...live.agents,
-              prediction: { ...live.agents.prediction, clockMin: 0 },
-            },
-          }
-        : {}),
-    });
+    if (endReview(gen)) {
+      const live = useAgents.getState();
+      const slotFree = live.autoRun && !live.polyOpenId;
+      useAgents.setState({
+        grokFlight: false,
+        polyBusy: false,
+        ...(live.notice === "Grok ще відповідає. Нову не ставлю." ? { notice: null } : {}),
+        ...(slotFree
+          ? {
+              agents: {
+                ...live.agents,
+                prediction: { ...live.agents.prediction, clockMin: 0 },
+              },
+            }
+          : {}),
+      });
+    }
   }
 }
 
@@ -3458,20 +3489,17 @@ export const useAgents = create<AgentsState>((set, get) => ({
       return false;
     }
     set({ sol: solNow, solKnown: true, solMiss: false });
-    if (tier === "free") {
-      // Server re-checks on-chain (tr=free owned by this wallet) before any mint.
-      try {
-        const { claimFreeMint } = await import("./free-mint");
-        const proof = await signProof(kp, "free-mint", "");
-        const gate = await claimFreeMint({ data: { proof } });
-        if (!gate.ok) {
-          set({ notice: gate.reason });
-          return false;
-        }
-      } catch {
-        set({ notice: "Сервер не підтвердив безкоштовний мінт. Мінт не почато." });
-        return false;
-      }
+    // The server decides the mint path before any money moves.
+    let status: Awaited<ReturnType<typeof callMintStatus>> | null = null;
+    try {
+      status = await callMintStatus();
+    } catch {
+      status = null;
+    }
+    const gate = status?.[tier];
+    if (!gate || (gate.mode !== "cosign" && gate.mode !== "client")) {
+      set({ notice: gate?.reason || "Сервер мінту не відповів. Нічого не списано." });
+      return false;
     }
     const feeReserve = 0.02;
     if (solNow < feeReserve) {
@@ -3481,19 +3509,42 @@ export const useAgents = create<AgentsState>((set, get) => ({
     }
     let paySig = "";
     if (sku.priceSol > 0) {
-      set({ chainBusy: true, notice: "Оплата з твого гаманця на казну…" });
-      const paid = await paySkuFromPlayer(sku.priceSol, get().externalWallet, currentPhantomSigner());
-      if (!paid.ok) {
-        set({ chainBusy: false, notice: paid.reason });
-        return false;
+      const pending = readPendingPro(wallet.pubkey, sku.id);
+      if (pending) {
+        paySig = pending;
+      } else {
+        set({ chainBusy: true, notice: "Оплата з твого гаманця на казну…" });
+        const paid = await paySkuFromPlayer(sku.priceSol, get().externalWallet, currentPhantomSigner(), proMemo(wallet.pubkey));
+        if (!paid.ok) {
+          set({ chainBusy: false, notice: paid.reason });
+          return false;
+        }
+        paySig = paid.sig;
+        writePendingPro(wallet.pubkey, sku.id, paySig);
       }
-      paySig = paid.sig;
+    }
+    set({ chainBusy: true, notice: "Сервер перевіряє право на мінт…" });
+    let prep: Awaited<ReturnType<typeof callPrepareMint>>;
+    try {
+      const proof = await signProof(kp, "mint", `${sku.id}:${paySig}`);
+      prep = await callPrepareMint({ proof, skuId: sku.id, paySig });
+    } catch {
+      prep = { ok: false, reason: "Сервер мінту не відповів." };
+    }
+    if (!prep.ok) {
+      if (paySig && /використано/.test(prep.reason)) clearPendingPro();
+      set({
+        chainBusy: false,
+        notice: paySig ? `Оплату ${paySig.slice(0, 8)}… збережено, повтори мінт. ${prep.reason}` : `${prep.reason} Мінт не почато.`,
+      });
+      return false;
     }
     set({ chainBusy: true, notice: sku.priceSol > 0 ? "Мінчу агента в Core…" : "Мінчу агента. Списується лише комісія мережі…" });
     try {
       const now = Date.now();
       const draft: AgentNft = {
         ...sku.nft,
+        tier: prep.tier,
         asset: "",
         owner: wallet.pubkey,
         mintedAt: now,
@@ -3503,7 +3554,12 @@ export const useAgents = create<AgentsState>((set, get) => ({
         graduated: false,
         metrics: { ...sku.nft.metrics, workedSec: 0, aprPct: null },
       };
-      const minted = await (await loadChain()).mintCore(kp, draft);
+      const chain = await loadChain();
+      const minted =
+        prep.mode === "cosign"
+          ? { asset: prep.asset, coreCollection: prep.collection, signature: await chain.sendServerMint(kp, prep.txs) }
+          : await chain.mintCore(kp, draft);
+      clearPendingPro();
       const nft: AgentNft = { ...draft, asset: minted.asset, coreCollection: minted.coreCollection };
       const sol = await readSol(kp.publicKey);
       set((s) => ({
@@ -3828,7 +3884,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
             arbFlight = false;
           });
       }
-      let evolved = step.nft;
+      const evolved = step.nft;
       if (step.counted || step.log) {
         nextNfts = nextNfts.map((n) => (n.asset === nft.asset ? evolved : n));
         if (step.counted) dirty.push(evolved);
@@ -4037,7 +4093,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
       }
       const [quote, house] = await Promise.all([
         liveQuotes({ data: { keywords: [...keywords].slice(0, 4), titanKey: readTitanKey(), sizeSol, side } }),
-        readArbHouse().catch(() => null),
+        callArbHouse().catch(() => null),
       ]);
       if (quote && typeof quote === "object" && "solUsd" in quote && "btcUsd" in quote) {
         set({ quote, ...(house ? { arbHouse: house } : {}) });

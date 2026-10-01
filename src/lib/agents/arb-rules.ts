@@ -53,9 +53,6 @@ export function utcDay(now: number): string {
   return new Date(now).toISOString().slice(0, 10);
 }
 
-/** Free-mint claim lock. After this the on-chain check is the only truth again. */
-export const FREE_CLAIM_LOCK_MS = 10 * 60_000;
-
 /** Same cleanup on both sides, so the signed text matches what the server checks. */
 export function cleanArbSymbol(symbol: string | undefined): string {
   const out = (symbol ?? "").toUpperCase().replace(/[^A-Z0-9.]/g, "").slice(0, 16);
