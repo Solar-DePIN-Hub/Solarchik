@@ -33,22 +33,40 @@ export function tierFromUri(uri: string | undefined | null): MintTier | null {
   return null;
 }
 
+/**
+ * Which mint path is allowed.
+ * - Key: the server co-signs. Asset addresses are derived from the key
+ *   (free: per wallet, pro: per payment signature), so Core itself refuses a
+ *   second mint for the same wallet / payment. No database is needed for that.
+ * - No key, vite dev: browser mint.
+ * - No key on a deploy: Pro closed; Free from the browser only with a database
+ *   (slot lock), otherwise closed so two tabs cannot race the on-chain check.
+ */
 export function mintModeFor(
   tier: MintTier,
   cfg: { hasKey: boolean; store: ArbStore; dev: boolean },
 ): { mode: MintMode; reason: string } {
-  if (cfg.hasKey) {
-    if (tier === "pro" && cfg.store === "none") {
-      return { mode: "closed", reason: "Pro закрито: на сервері немає бази (DATABASE_URL) для перевірки оплати. Нічого не списано." };
-    }
-    return { mode: "cosign", reason: "Сервер підписує мінт." };
-  }
+  if (cfg.hasKey) return { mode: "cosign", reason: "Сервер підписує мінт." };
   if (cfg.dev) return { mode: "client", reason: "Dev: ключа мінту немає, мінт з браузера." };
   if (tier === "pro") {
     return { mode: "closed", reason: "Pro закрито: на сервері немає ключа мінту (MINT_AUTHORITY_SECRET). Нічого не списано." };
   }
+  if (cfg.store === "none") {
+    return { mode: "closed", reason: "Free закрито: на сервері немає ні ключа мінту, ні бази. Нічого не списано." };
+  }
   return { mode: "client", reason: "Ключа мінту немає. Free перевіряє сервер ончейн." };
 }
+
+/** Derivation labels for deterministic asset addresses (one free per wallet, one Pro per payment). */
+export function freeAssetLabel(wallet: string): string {
+  return `asset:free:${wallet}`;
+}
+export function proAssetLabel(paySig: string): string {
+  return `asset:pro:${paySig}`;
+}
+
+/** Pro payments before co-signed mints went live had no memo; they may still re-issue a legacy Pro NFT. */
+export const COSIGN_LAUNCH_SEC = Math.floor(Date.UTC(2026, 9, 2) / 1000);
 
 type ParsedIx = { program?: string; programId?: string; parsed?: unknown };
 export type ParsedPaymentTx = {
@@ -62,10 +80,14 @@ export function checkProPaymentTx(
   tx: ParsedPaymentTx,
   roomWallet: string,
   nowSec: number,
+  opts: { legacy?: boolean } = {},
 ): { ok: true } | { ok: false; reason: string } {
   if (!tx) return { ok: false, reason: "Оплату не знайдено на Devnet. Зачекай підтвердження і спробуй ще раз." };
   if (tx.meta?.err) return { ok: false, reason: "Оплата впала з помилкою." };
-  if (typeof tx.blockTime === "number" && nowSec - tx.blockTime > PRO_PAYMENT_MAX_AGE_SEC) {
+  // Re-issue of a legacy Pro NFT: a payment made before co-signing went live counts without memo or age limit.
+  const legacy = Boolean(opts.legacy) && typeof tx.blockTime === "number" && tx.blockTime < COSIGN_LAUNCH_SEC;
+  if (!legacy && typeof tx.blockTime !== "number") return { ok: false, reason: "Оплата ще не в блоці." };
+  if (!legacy && typeof tx.blockTime === "number" && nowSec - tx.blockTime > PRO_PAYMENT_MAX_AGE_SEC) {
     return { ok: false, reason: "Оплата застара для нового мінту." };
   }
   const ixs = tx.transaction?.message?.instructions ?? [];
@@ -82,6 +104,6 @@ export function checkProPaymentTx(
   const bound =
     source === roomWallet ||
     ixs.some((ix) => (ix.program === "spl-memo" || ix.programId === "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr") && ix.parsed === memo);
-  if (!bound) return { ok: false, reason: "Оплата не прив'язана до цього гаманця кімнати." };
+  if (!bound && !legacy) return { ok: false, reason: "Оплата не прив'язана до цього гаманця кімнати." };
   return { ok: true };
 }

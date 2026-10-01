@@ -27,9 +27,18 @@ import { readTitanKey } from "./titan-key";
 import { coachAgent } from "./coach";
 import { encodeBase58 } from "./base58";
 import { confirmMainnetTx, peekMainnetSig, prepareMainnetSend, prepareMainnetSweep, readMainnetBalance, readMainnetUsdc, sendMainnetTx } from "./mainnet";
-import { addArbCredit, readArbCredit, takeArbCredit } from "./arb-credit";
+import { readArbCredit, writeArbCreditCache, addPendingCredit, readPendingCredits, dropPendingCredit } from "./arb-credit";
 import type { ArbHouse } from "./arb-house";
-import { callArbFire, callArbHouse, callMintStatus, callPrepareMint } from "./server-calls";
+import {
+  callArbFire,
+  callArbHouse,
+  callClaimArbCredit,
+  callMintStatus,
+  callPrepareMint,
+  callPrepareReissue,
+  callReadArbCredit,
+  callRecordFee,
+} from "./server-calls";
 import { proMemo } from "./mint-rules";
 import { SIM_LABEL, cleanArbSymbol } from "./arb-rules";
 import { signProof } from "./wallet-sign";
@@ -37,7 +46,8 @@ import { feeCovered, planFee, type FeeRow } from "./fee-ledger";
 import { paySkuFromPlayer } from "./tier-pay";
 import { readCaps, userTradeBlock } from "./user-limits";
 import { loadSave } from "@/lib/game/save";
-import { ARB_TREASURY } from "@/lib/game/pay";
+import { ARB_TREASURY, PAY_WALLET } from "@/lib/game/pay";
+import { feeMemo } from "./payment-rules";
 import { GROK_MODEL } from "./grok-model";
 import { decideBet } from "./decide";
 import { stepWeex } from "./weex";
@@ -163,6 +173,10 @@ type AgentsState = {
   withdrawMainnet: (to: string, amount: number) => Promise<void>;
   fundArbDesk: (asset: string, sol: number) => Promise<void>;
   arbCredit: Record<string, number>;
+  /** Server collection address (null: no server mint authority, or unknown). */
+  mintCollection: string | null;
+  /** Re-issue a pre-co-sign agent into the server collection; paySig keeps Pro. */
+  reissueAgent: (asset: string, paySig?: string) => Promise<boolean>;
   arbHouse: ArbHouse | null;
   withdrawPusd: (to: string, amount: number) => Promise<void>;
   buySlice: (mint: string, sol: number) => Promise<void>;
@@ -560,15 +574,75 @@ async function sendDueFees(due: FeeRow[]) {
     return;
   }
   const chain = await loadChain();
+  const wallet = kp.publicKey.toBase58();
   for (const row of due) {
     try {
-      const sig = await chain.payTreasury(kp, row.fee);
+      const sig = await chain.payAccount(kp, new PublicKey(PAY_WALLET), row.fee, feeMemo(row.id));
       useAgents.setState((s) => ({
-        feeLedger: s.feeLedger.map((r) => (r.id === row.id ? { ...r, charged: true, reason: "charged", sig } : r)),
+        feeLedger: s.feeLedger.map((r) => (r.id === row.id ? { ...r, charged: true, reason: "charged", sig, verified: false } : r)),
       }));
+      await verifyFeeRow(wallet, { ...row, sig });
     } catch {
       useAgents.setState({ notice: "Комісію не відправлено. Підпис не вигадую." });
     }
+  }
+  useAgents.getState().persist();
+}
+
+/** The server reads the fee transfer on devnet and records it once. The row is "verified" only then. */
+async function verifyFeeRow(wallet: string, row: FeeRow): Promise<void> {
+  if (!row.sig) return;
+  try {
+    const res = await callRecordFee({ wallet, rowId: row.id, sig: row.sig, lamports: Math.round(row.fee * 1e9) });
+    if (res.ok) {
+      useAgents.setState((s) => ({ feeLedger: s.feeLedger.map((r) => (r.id === row.id ? { ...r, verified: true } : r)) }));
+    } else if (!res.retry) {
+      useAgents.setState((s) => ({
+        feeLedger: s.feeLedger.map((r) => (r.id === row.id ? { ...r, verified: false, note: res.reason.slice(0, 120) } : r)),
+      }));
+    }
+  } catch {
+    /* server quiet: retried on the next load */
+  }
+}
+
+async function claimCredit(input: { sig: string; asset: string; wallet: string }) {
+  try {
+    const res = await callClaimArbCredit(input);
+    if (res.ok || /вже зараховано|застара|немає|більший/i.test(res.reason)) dropPendingCredit(input.sig);
+    if (res.creditSol != null) writeArbCreditCache(input.asset, res.creditSol);
+    return res;
+  } catch {
+    return { ok: false as const, reason: "Сервер не відповів. Спробую ще раз пізніше.", creditSol: null };
+  }
+}
+
+/** After load: server credit per arb NFT, unfinished credit claims, unverified fee rows. */
+async function syncServerLedgers(room: string): Promise<void> {
+  const state = useAgents.getState();
+  if (state.wallet?.pubkey !== room) return;
+  for (const pending of readPendingCredits().filter((p) => p.wallet === room)) {
+    await claimCredit(pending);
+  }
+  const arbAssets = state.nfts.filter((n) => n.classId === 2 && n.owner === room && n.asset.length >= 32).map((n) => n.asset);
+  for (const asset of arbAssets) {
+    try {
+      const res = await callReadArbCredit(asset);
+      if (res.ok) {
+        writeArbCreditCache(asset, res.creditSol);
+        useAgents.setState((s) => ({ arbCredit: { ...s.arbCredit, [asset]: res.creditSol } }));
+      }
+    } catch {
+      /* keep the cached figure */
+    }
+  }
+  const unverified = useAgents.getState().feeLedger.filter((r) => r.charged && r.sig && r.verified !== true && !r.note).slice(-20);
+  for (const row of unverified) await verifyFeeRow(room, row);
+  try {
+    const status = await callMintStatus();
+    useAgents.setState({ mintCollection: status.collection });
+  } catch {
+    /* status unknown: no re-issue button */
   }
   useAgents.getState().persist();
 }
@@ -2014,6 +2088,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
   roomMainnetUsdc: null,
   roomMainnetUsdcKnown: false,
   arbCredit: {},
+  mintCollection: null,
   arbHouse: null,
   liveArmed: false,
   liveAck: false,
@@ -2865,6 +2940,9 @@ export const useAgents = create<AgentsState>((set, get) => ({
               ? {
                   ...pulled,
                   ...old,
+                  // Chain is the truth for tier and collection (server URI), not the local save.
+                  tier: pulled.tier,
+                  coreCollection: pulled.coreCollection,
                   owner: wallet.pubkey,
                   strategy: clampStrategy(old.strategy),
                   graduated: workedSec >= 480 * 3600,
@@ -2879,6 +2957,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
           );
         }
         set({ nfts: [...byAsset.values()] });
+        void syncServerLedgers(wallet.pubkey);
         const live = get();
         const real = [...byAsset.values()].find((n) => n.classId === 2 && n.asset !== "local-dex-arb" && n.owner === wallet.pubkey);
         if (real && live.agents.dex.sourceAsset === "local-dex-arb") {
@@ -2891,6 +2970,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
         }
       } catch {
         /* RPC quiet — keep what was already saved for this room */
+        void syncServerLedgers(wallet.pubkey);
       }
     })();
     const resume = () => {
@@ -3286,16 +3366,20 @@ export const useAgents = create<AgentsState>((set, get) => ({
         set({ chainBusy: false, notice: sent.error });
         return;
       }
+      addPendingCredit({ sig: sent.signature, asset, wallet: room });
       const confirmed = await confirmMainnetTx({ data: { signature: sent.signature } });
       const main = await readMainnetBalance({ data: { owner: room } });
-      const credit = confirmed.ok ? addArbCredit(asset, amount) : readArbCredit(asset);
+      // The server reads the deposit on mainnet and keeps the credit; the browser only shows it.
+      const claim = confirmed.ok ? await claimCredit({ sig: sent.signature, asset, wallet: room }) : null;
       set((s) => ({
         chainBusy: false,
-        arbCredit: { ...s.arbCredit, [asset]: credit },
+        ...(claim && claim.creditSol != null ? { arbCredit: { ...s.arbCredit, [asset]: claim.creditSol } } : {}),
         ...(typeof main === "number" ? { roomMainnetSol: main } : {}),
-        notice: confirmed.ok
-          ? `На касу арбу ${amount} SOL. Кредит ${credit.toFixed(4)}.`
-          : `Підпис пішов, кредит ще не зарахував · ${sent.signature}`,
+        notice: claim?.ok
+          ? `На касу арбу ${amount} SOL. Кредит ${claim.creditSol.toFixed(4)}.`
+          : claim
+            ? `Переказ ${sent.signature.slice(0, 8)}… пішов. Кредит не зараховано: ${claim.reason}`
+            : `Підпис пішов, кредит зарахую після підтвердження · ${sent.signature}`,
         log: pushLog(s.log, {
           id: sent.signature,
           at: Date.now(),
@@ -3462,6 +3546,66 @@ export const useAgents = create<AgentsState>((set, get) => ({
         solMiss: false,
         notice: errText(e),
       });
+    }
+  },
+
+  async reissueAgent(asset, paySig = "") {
+    if (get().chainBusy) {
+      set({ notice: "Ще йде транзакція. Зачекайте." });
+      return false;
+    }
+    const room = get().wallet?.pubkey;
+    const old = get().nfts.find((n) => n.asset === asset && n.owner === room);
+    const kp = await loadKeypair();
+    if (!old || !room || !kp || kp.publicKey.toBase58() !== room) {
+      set({ notice: "Немає цього NFT або ключа кімнати." });
+      return false;
+    }
+    set({ chainBusy: true, notice: "Сервер готує перенос у свою колекцію…" });
+    let prep: Awaited<ReturnType<typeof callPrepareReissue>>;
+    try {
+      const sig = paySig.trim();
+      const proof = await signProof(kp, "reissue", `${asset}:${sig}`);
+      prep = await callPrepareReissue({ proof, oldAsset: asset, paySig: sig });
+    } catch {
+      prep = { ok: false, reason: "Сервер не відповів." };
+    }
+    if (!prep.ok) {
+      set({ chainBusy: false, notice: `${prep.reason} Нічого не змінено.` });
+      return false;
+    }
+    try {
+      const chain = await loadChain();
+      const signature = await chain.sendServerMint(kp, prep.txs);
+      let burned = true;
+      try {
+        await chain.burnCore(kp, asset);
+      } catch {
+        burned = false;
+      }
+      const next: AgentNft = { ...old, asset: prep.asset, coreCollection: prep.collection, tier: prep.tier, updatedAt: Date.now() };
+      set((s) => {
+        const agents = { ...s.agents };
+        for (const kind of KINDS) {
+          if (agents[kind].sourceAsset === asset) agents[kind] = { ...agents[kind], sourceAsset: prep.asset };
+        }
+        const credit = s.arbCredit[asset];
+        return {
+          chainBusy: false,
+          agents,
+          nfts: [...s.nfts.filter((n) => n.asset !== asset && n.asset !== prep.asset), next],
+          ...(credit != null ? { arbCredit: { ...s.arbCredit, [prep.asset]: credit } } : {}),
+          notice: burned
+            ? `${next.name} у колекції сервера. Старий NFT спалено.`
+            : `${next.name} у колекції сервера. Старий NFT не спалився — він більше не працює на арбі.`,
+          log: pushLog(s.log, { id: signature, at: Date.now(), kind: "system", text: `Перенос ${asset} → ${prep.asset} (${prep.tier})` }),
+        };
+      });
+      get().persist();
+      return true;
+    } catch (e) {
+      set({ chainBusy: false, notice: `Перенос не пройшов. ${errText(e)}` });
+      return false;
     }
   },
 
@@ -3854,7 +3998,8 @@ export const useAgents = create<AgentsState>((set, get) => ({
               return;
             }
             if (res.ok) {
-              const left = takeArbCredit(asset, res.size);
+              const left = typeof res.creditSol === "number" ? res.creditSol : null;
+              if (left != null) writeArbCreditCache(asset, left);
               useAgents.setState((s) => ({
                 ...(left == null ? {} : { arbCredit: { ...s.arbCredit, [asset]: left } }),
                 notice: `MAINNET · ${dir} ${res.qty} ${res.base} · Backpack ${res.bp} · Titan ${res.titan}`,

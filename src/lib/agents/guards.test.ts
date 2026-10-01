@@ -4,9 +4,38 @@ import { readFileSync } from "node:fs";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import { ARB_LIMITS, arbModeFor, cleanArbSymbol } from "./arb-rules.ts";
-import { claimMintSlot, reserveArb, settleArb, spendProofOnce, type GuardSql } from "./guard-ledger.server.ts";
-import { CLIENT_SLOT_MS, COSIGN_SLOT_MS, PRO_LAMPORTS, checkProPaymentTx, mintModeFor, mintUri, proMemo, tierFromUri } from "./mint-rules.ts";
-import { PAY_WALLET } from "../game/pay.ts";
+import {
+  arbCreditLamports,
+  claimMintSlot,
+  linkReissuedAsset,
+  recordPayment,
+  reserveArb,
+  settleArb,
+  spendProofOnce,
+  verifiedFeeRefs,
+  type GuardSql,
+} from "./guard-ledger.server.ts";
+import {
+  CLIENT_SLOT_MS,
+  COSIGN_LAUNCH_SEC,
+  COSIGN_SLOT_MS,
+  PRO_LAMPORTS,
+  checkProPaymentTx,
+  freeAssetLabel,
+  mintModeFor,
+  mintUri,
+  proAssetLabel,
+  proMemo,
+  tierFromUri,
+} from "./mint-rules.ts";
+import {
+  ARB_CREDIT_MIN_LAMPORTS,
+  checkArbCreditTx,
+  checkFeeTx,
+  cleanRowId,
+  feeMemo,
+} from "./payment-rules.ts";
+import { ARB_TREASURY, PAY_WALLET } from "../game/pay.ts";
 import { Keypair } from "@solana/web3.js";
 import { backpackFromFile, backpackFromText, derivedKeypair, keypairFromText } from "./secret-key.server.ts";
 import { encodeBase58 } from "./base58.ts";
@@ -80,6 +109,7 @@ describe("guard ledger on Postgres (PGLite)", () => {
     const pg = new PGlite();
     await pg.exec(readFileSync(new URL("../../../migrations/0002_guards.sql", import.meta.url), "utf8"));
     await pg.exec(readFileSync(new URL("../../../migrations/0003_mints.sql", import.meta.url), "utf8"));
+    await pg.exec(readFileSync(new URL("../../../migrations/0004_payments.sql", import.meta.url), "utf8"));
     sql = { query: async (text: string, params: unknown[] = []) => (await pg.query(text, params)).rows as never[] };
   });
   const base = { mode: "mainnet" as const, asset: "Asset1111111111111111111111111111", symbol: "SOL", dir: "A", sol: 0.005, limits: ARB_LIMITS.mainnet };
@@ -151,6 +181,41 @@ describe("guard ledger on Postgres (PGLite)", () => {
     assert.equal(again.ok, false, "payment already minted");
   });
 
+  it("arb credit: verified deposits minus mainnet fires; a signature credits once", async () => {
+    const asset = "CreditAsset11111111111111111111111";
+    const row = { sig: "sigC1", kind: "arb-credit" as const, cluster: "mainnet" as const, wallet: "walletK", asset, ref: "", lamports: 10_000_000, now: t0 };
+    assert.equal(await recordPayment(sql, row), true);
+    assert.equal(await recordPayment(sql, { ...row, lamports: 20_000_000 }), false, "same signature never credits twice");
+    assert.equal(await arbCreditLamports(sql, asset), 10_000_000);
+    const t = Date.UTC(2026, 9, 9, 12, 0, 0);
+    const r = await reserveArb(sql, { ...base, asset, wallet: "walletK", now: t });
+    assert.ok(r.ok);
+    assert.equal(await arbCreditLamports(sql, asset), 5_000_000, "an in-flight fire is already counted");
+    await settleArb(sql, r.reservation, "failed", "miss", t + 1);
+    assert.equal(await arbCreditLamports(sql, asset), 10_000_000, "a refunded fire gives the credit back");
+    const sim = await reserveArb(sql, { ...base, mode: "sim", limits: ARB_LIMITS.sim, asset, wallet: "walletK", now: t + 40_000 });
+    assert.ok(sim.ok);
+    assert.equal(await arbCreditLamports(sql, asset), 10_000_000, "simulation never spends credit");
+  });
+
+  it("re-issued asset carries the old asset's credit", async () => {
+    const oldA = "OldAsset1111111111111111111111111";
+    const newA = "NewAsset1111111111111111111111111";
+    await recordPayment(sql, { sig: "sigOld", kind: "arb-credit", cluster: "mainnet", wallet: "walletL", asset: oldA, ref: "", lamports: 7_000_000, now: t0 });
+    assert.equal(await arbCreditLamports(sql, newA), 0);
+    await linkReissuedAsset(sql, { newAsset: newA, oldAsset: oldA, wallet: "walletL", now: t0 });
+    await linkReissuedAsset(sql, { newAsset: newA, oldAsset: "Other", wallet: "walletL", now: t0 });
+    assert.equal(await arbCreditLamports(sql, newA), 7_000_000);
+  });
+
+  it("fee rows: one signature, one row", async () => {
+    const fee = { sig: "feeSig1", kind: "fee" as const, cluster: "devnet" as const, wallet: "walletF", asset: "", ref: "row1", lamports: 50_000, now: t0 };
+    assert.equal(await recordPayment(sql, fee), true);
+    assert.equal(await recordPayment(sql, { ...fee, sig: "feeSig2" }), false, "same row cannot be paid by two transfers");
+    assert.equal(await recordPayment(sql, { ...fee, ref: "row2" }), false, "same transfer cannot pay two rows");
+    assert.deepEqual(await verifiedFeeRefs(sql, "walletF"), ["row1"]);
+  });
+
   it("free slot per wallet; client-mode slot holds longer", async () => {
     const slot = { kind: "free" as const, key: "roomF", wallet: "roomF", asset: "", now: t0, holdMs: CLIENT_SLOT_MS };
     const never = async () => false;
@@ -192,14 +257,36 @@ describe("mint rules", () => {
   const tx = (ixs: unknown[], extra: Record<string, unknown> = {}) =>
     ({ blockTime: now - 60, meta: { err: null }, transaction: { message: { instructions: ixs } }, ...extra }) as never;
 
-  it("mode: key co-signs, no key closes Pro on deploys", () => {
+  it("mode: key co-signs (no DB needed), no key closes Pro on deploys", () => {
     assert.equal(mintModeFor("pro", { hasKey: true, store: "shared", dev: false }).mode, "cosign");
     assert.equal(mintModeFor("free", { hasKey: true, store: "none", dev: false }).mode, "cosign");
-    assert.equal(mintModeFor("pro", { hasKey: true, store: "none", dev: false }).mode, "closed");
+    assert.equal(mintModeFor("pro", { hasKey: true, store: "none", dev: false }).mode, "cosign");
     assert.equal(mintModeFor("pro", { hasKey: false, store: "shared", dev: false }).mode, "closed");
     assert.match(mintModeFor("pro", { hasKey: false, store: "shared", dev: false }).reason, /MINT_AUTHORITY_SECRET/);
     assert.equal(mintModeFor("pro", { hasKey: false, store: "none", dev: true }).mode, "client");
-    assert.equal(mintModeFor("free", { hasKey: false, store: "none", dev: false }).mode, "client");
+  });
+
+  it("free without key and without DB on a deploy is closed (no race)", () => {
+    assert.equal(mintModeFor("free", { hasKey: false, store: "none", dev: false }).mode, "closed");
+    assert.equal(mintModeFor("free", { hasKey: false, store: "shared", dev: false }).mode, "client");
+    assert.equal(mintModeFor("free", { hasKey: false, store: "none", dev: true }).mode, "client");
+  });
+
+  it("deterministic asset labels: one free per wallet, one Pro per payment", () => {
+    const kp = Keypair.generate();
+    const a = derivedKeypair(kp, freeAssetLabel("walletA")).publicKey.toBase58();
+    assert.equal(a, derivedKeypair(kp, freeAssetLabel("walletA")).publicKey.toBase58());
+    assert.notEqual(a, derivedKeypair(kp, freeAssetLabel("walletB")).publicKey.toBase58());
+    assert.notEqual(a, derivedKeypair(kp, proAssetLabel("walletA")).publicKey.toBase58());
+    assert.notEqual(a, derivedKeypair(Keypair.generate(), freeAssetLabel("walletA")).publicKey.toBase58());
+  });
+
+  it("legacy Pro payment (before co-sign launch) is accepted only for re-issue", () => {
+    const old = tx([transfer("Phantom1")], { blockTime: COSIGN_LAUNCH_SEC - 86_400 });
+    assert.equal(checkProPaymentTx(old, room, now).ok, false);
+    assert.equal(checkProPaymentTx(old, room, now, { legacy: true }).ok, true);
+    const late = tx([transfer("Phantom1")], { blockTime: COSIGN_LAUNCH_SEC + 60 });
+    assert.equal(checkProPaymentTx(late, room, COSIGN_LAUNCH_SEC + 120, { legacy: true }).ok, false);
   });
 
   it("tier lives in the uri", () => {
@@ -252,5 +339,50 @@ describe("server secrets from env", () => {
     assert.equal(backpackFromText("", seed), null);
     assert.equal(backpackFromFile(`key2\r\n${seed}\n`)?.apiKey, "key2");
     assert.equal(backpackFromFile("key2"), null);
+  });
+});
+
+describe("payment checks", () => {
+  const room = "Room111111111111111111111111111111111111111";
+  const asset = "Asset111111111111111111111111111111111111";
+  const now = 1_800_000_000;
+  const transfer = (source: string, destination: string, lamports: number) => ({
+    program: "system",
+    parsed: { type: "transfer", info: { source, destination, lamports } },
+  });
+  const memo = (text: string) => ({ program: "spl-memo", parsed: text });
+  const tx = (ixs: unknown[], extra: Record<string, unknown> = {}) =>
+    ({ blockTime: now - 60, meta: { err: null }, transaction: { message: { instructions: ixs } }, ...extra }) as never;
+
+  it("arb credit: room wallet to the arb treasury with the NFT memo", () => {
+    const ok = checkArbCreditTx(tx([memo(asset), transfer(room, ARB_TREASURY, 5_000_000)]), { wallet: room, asset, nowSec: now });
+    assert.deepEqual(ok, { ok: true, lamports: 5_000_000 });
+  });
+  it("arb credit refuses wrong sender, recipient, memo, amount, failed, missing or old tx", () => {
+    const c = (t: never) => checkArbCreditTx(t, { wallet: room, asset, nowSec: now }).ok;
+    assert.equal(c(tx([memo(asset), transfer("Other", ARB_TREASURY, 5_000_000)])), false);
+    assert.equal(c(tx([memo(asset), transfer(room, PAY_WALLET, 5_000_000)])), false);
+    assert.equal(c(tx([memo("OtherAsset"), transfer(room, ARB_TREASURY, 5_000_000)])), false);
+    assert.equal(c(tx([transfer(room, ARB_TREASURY, 5_000_000)])), false);
+    assert.equal(c(tx([memo(asset), transfer(room, ARB_TREASURY, ARB_CREDIT_MIN_LAMPORTS - 1)])), false);
+    assert.equal(c(tx([memo(asset), transfer(room, ARB_TREASURY, 30_000_000)])), false);
+    assert.equal(c(tx([memo(asset), transfer(room, ARB_TREASURY, 5_000_000)], { meta: { err: { x: 1 } } })), false);
+    assert.equal(c(tx([memo(asset), transfer(room, ARB_TREASURY, 5_000_000)], { blockTime: null })), false);
+    assert.equal(c(tx([memo(asset), transfer(room, ARB_TREASURY, 5_000_000)], { blockTime: now - 40 * 86_400 })), false);
+    assert.equal(c(null as never), false);
+  });
+  it("fee: exact amount, room wallet to pay wallet, row memo", () => {
+    const rowId = "poly-123:abc";
+    const good = tx([memo(feeMemo(rowId)), transfer(room, PAY_WALLET, 50_000)]);
+    assert.deepEqual(checkFeeTx(good, { wallet: room, rowId, lamports: 50_000, nowSec: now }), { ok: true, lamports: 50_000 });
+    assert.equal(checkFeeTx(good, { wallet: room, rowId, lamports: 49_999, nowSec: now }).ok, false);
+    assert.equal(checkFeeTx(good, { wallet: room, rowId: "other", lamports: 50_000, nowSec: now }).ok, false);
+    assert.equal(checkFeeTx(good, { wallet: "Other", rowId, lamports: 50_000, nowSec: now }).ok, false);
+    assert.equal(checkFeeTx(tx([memo(feeMemo(rowId)), transfer(room, ARB_TREASURY, 50_000)]), { wallet: room, rowId, lamports: 50_000, nowSec: now }).ok, false);
+    assert.equal(checkFeeTx(good, { wallet: room, rowId, lamports: 0, nowSec: now }).ok, false);
+  });
+  it("fee memo and server ref use the same cleaned row id", () => {
+    assert.equal(feeMemo("a b/c?d"), `solarchik-fee:${cleanRowId("a b/c?d")}`);
+    assert.equal(cleanRowId("x".repeat(100)).length, 64);
   });
 });

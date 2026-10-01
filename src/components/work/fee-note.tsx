@@ -17,6 +17,7 @@ export function FeeNote() {
     <p className="rounded-md border border-border bg-surface px-3 py-2 text-xs text-muted" data-testid="fee-note">
       {`PnL ${sign}${row.pnl.toFixed(4)} · комісія ${row.fee.toFixed(4)} · ${WHY[row.reason] ?? row.reason}`}
       {row.sig ? ` · ${row.sig.slice(0, 8)}…` : ""}
+      {row.reason === "charged" ? (row.verified ? " · звірено сервером" : row.note ? ` · не звірено: ${row.note}` : " · чекає звірки") : ""}
     </p>
   );
 }

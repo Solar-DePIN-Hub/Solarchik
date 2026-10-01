@@ -10,7 +10,16 @@ interface NativeEvent {
   req: { method?: string; text?: () => Promise<string>; headers?: Headers };
 }
 
-const ROUTES = new Set(["arb-fire", "arb-house", "mint-status", "mint-prepare"]);
+const ROUTES = new Set([
+  "arb-fire",
+  "arb-house",
+  "arb-credit",
+  "arb-credit-claim",
+  "fee-record",
+  "mint-status",
+  "mint-prepare",
+  "mint-reissue",
+]);
 const MAX_BODY = 16 * 1024;
 const allow = rateLimiter(DESK_PROXY_PER_MIN);
 
@@ -78,6 +87,31 @@ export default async function nativeApiMiddleware(
     if (route === "mint-status") {
       const { mintStatusOnServer } = await import("../../src/lib/agents/mint.server.ts");
       return reply(200, mintStatusOnServer());
+    }
+    const b58 = (v: unknown, max: number) => str(v).replace(/[^1-9A-HJ-NP-Za-km-z]/g, "").slice(0, max);
+    if (route === "arb-credit") {
+      const { readArbCreditOnServer } = await import("../../src/lib/agents/payments.server.ts");
+      return reply(200, await readArbCreditOnServer(b58(body.asset, 44)));
+    }
+    if (route === "arb-credit-claim") {
+      const { claimArbCreditOnServer } = await import("../../src/lib/agents/payments.server.ts");
+      return reply(200, await claimArbCreditOnServer({ wallet: b58(body.wallet, 44), asset: b58(body.asset, 44), sig: b58(body.sig, 100) }));
+    }
+    if (route === "fee-record") {
+      const { recordFeeOnServer } = await import("../../src/lib/agents/payments.server.ts");
+      return reply(
+        200,
+        await recordFeeOnServer({
+          wallet: b58(body.wallet, 44),
+          rowId: str(body.rowId).slice(0, 64),
+          sig: b58(body.sig, 100),
+          lamports: typeof body.lamports === "number" && Number.isFinite(body.lamports) ? Math.round(body.lamports) : 0,
+        }),
+      );
+    }
+    if (route === "mint-reissue") {
+      const { prepareReissueOnServer } = await import("../../src/lib/agents/mint.server.ts");
+      return reply(200, await prepareReissueOnServer({ proof: readProof(body.proof), oldAsset: b58(body.oldAsset, 44), paySig: b58(body.paySig, 100) }));
     }
     const { prepareMintOnServer } = await import("../../src/lib/agents/mint.server.ts");
     return reply(

@@ -66,6 +66,18 @@ export async function readMainnetUsdcOnServer(owner: string): Promise<number | n
   }
 }
 
+/** Parsed mainnet transaction (read only). Null when not found or the RPC is down. */
+export async function readMainnetTxOnServer(signature: string): Promise<unknown | null> {
+  if (!/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(signature)) return null;
+  const body = await postMainnet({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "getTransaction",
+    params: [signature, { encoding: "jsonParsed", commitment: "confirmed", maxSupportedTransactionVersion: 0 }],
+  });
+  return (body?.result as unknown) ?? null;
+}
+
 export async function readMainnetBalanceOnServer(owner: string): Promise<number | null> {
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(owner)) return null;
   try {

@@ -1,6 +1,6 @@
 /** Signed wallet proofs. The room key signs a short text; the server checks it. No secret leaves the browser. */
 
-export type ProofAction = "arb" | "mint";
+export type ProofAction = "arb" | "mint" | "reissue";
 
 export type WalletProof = { wallet: string; ts: number; sig: string };
 

@@ -21,6 +21,7 @@ import {
 } from "@metaplex-foundation/umi";
 import {
   addPlugin,
+  burn,
   collectionAddress,
   create,
   createCollection,
@@ -560,6 +561,24 @@ export async function writeCore(payer: Keypair, nft: AgentNft): Promise<string> 
     if (builder === attrs) throw e;
     return sendUmi(umi, attrs);
   }
+}
+
+/** Owner burns an agent (used after a re-issue into the server collection). Thaws first when frozen. */
+export async function burnCore(owner: Keypair, asset: string): Promise<string> {
+  const umi = umiFor(owner);
+  const fetched = await loadAsset(asset);
+  if (String(fetched.owner) !== owner.publicKey.toBase58()) throw new Error("NFT не в цьому гаманці");
+  const col = collectionAddress(fetched);
+  const collection = col ? { publicKey: col, oracles: [], lifecycleHooks: [] } : undefined;
+  let builder = burn(umi, { asset: fetched, ...(collection ? { collection } : {}) });
+  if (fetched.freezeDelegate?.frozen) {
+    builder = updatePlugin(umi, {
+      asset: publicKey(asset),
+      ...(col ? { collection: col } : {}),
+      plugin: { type: "FreezeDelegate", frozen: false },
+    }).add(builder);
+  }
+  return sendUmi(umi, builder);
 }
 
 export async function transferCore(from: Keypair, nft: AgentNft, to: PublicKey): Promise<string> {

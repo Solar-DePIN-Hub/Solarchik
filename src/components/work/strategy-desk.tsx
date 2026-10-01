@@ -26,6 +26,10 @@ export function StrategyDesk({ nft }: { nft: AgentNft }) {
   const fundArbDesk = useAgents((s) => s.fundArbDesk);
   const chainBusy = useAgents((s) => s.chainBusy);
   const credit = useAgents((s) => s.arbCredit[nft.asset] ?? 0);
+  const mintCollection = useAgents((s) => s.mintCollection);
+  const reissueAgent = useAgents((s) => s.reissueAgent);
+  const [proSig, setProSig] = useState("");
+  const legacy = Boolean(mintCollection) && nft.coreCollection !== mintCollection && nft.asset.length >= 32;
   const notes = useAgents((s) => s.laneNotes);
   const kinds = kindsForClass(nft.classId);
   const [titanKey, setTitanKey] = useState("");
@@ -62,6 +66,23 @@ export function StrategyDesk({ nft }: { nft: AgentNft }) {
           {CLASS_META[nft.classId].title}. Увімкни лише смуги цього NFT. Нових ринків тут немає. Робота {workLabel(nft)}. APR {aprLabel(nft)}.
         </p>
       </div>
+
+      {legacy ? (
+        <div className="rounded-md border border-border bg-bg p-3 grid gap-2 min-w-0" data-testid="reissue">
+          <p className="text-xs text-muted leading-normal break-words">
+            Цей NFT старий: він не з колекції сервера, тому арбітраж його не приймає. Перенос створить копію з тими самими
+            стратегією і статистикою, а старий спалить. Без підпису оплати буде Free (один на гаманець). Для Pro встав підпис
+            оплати 0.1 SOL.
+          </p>
+          <label className="grid gap-1 text-xs text-muted">
+            Підпис оплати Pro (необов'язково)
+            <input className={field} value={proSig} onChange={(e) => setProSig(e.target.value)} autoComplete="off" spellCheck={false} />
+          </label>
+          <Button type="button" variant="ghost" disabled={chainBusy} onClick={() => void reissueAgent(nft.asset, proSig)}>
+            Перенести в колекцію сервера
+          </Button>
+        </div>
+      ) : null}
 
       {kinds.includes("prediction") ? (
         <fieldset className="grid gap-3 min-w-0">

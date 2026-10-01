@@ -1,48 +1,68 @@
-const KEY = "solarchik.arb-credit.v1";
+/**
+ * Arb credit lives on the server (verified deposits minus mainnet fires).
+ * This file only keeps a display cache and the list of deposits whose server
+ * claim did not finish yet, so they are retried on the next load.
+ */
+const KEY = "solarchik.arb-credit.v2";
+const PENDING_KEY = "solarchik.arb-credit-pending.v1";
 
+function readMap(key: string): Record<string, unknown> {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) ?? "null") as unknown;
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Last credit the server reported for this NFT (display only). */
 export function readArbCredit(asset: string): number {
-  if (typeof localStorage === "undefined") return 0;
-  try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? "") as Record<string, unknown>;
-    const n = raw[asset];
-    return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
-  } catch {
-    return 0;
-  }
+  const n = readMap(KEY)[asset];
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-export function addArbCredit(asset: string, sol: number): number {
-  if (typeof localStorage === "undefined") return 0;
-  const next = Math.round((readArbCredit(asset) + sol) * 1e9) / 1e9;
-  let all: Record<string, number> = {};
-  try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? "") as Record<string, unknown>;
-    for (const [k, v] of Object.entries(raw)) {
-      if (typeof v === "number" && Number.isFinite(v) && v > 0) all[k] = v;
-    }
-  } catch {
-    all = {};
-  }
-  all[asset] = next;
-  localStorage.setItem(KEY, JSON.stringify(all));
-  return next;
-}
-
-export function takeArbCredit(asset: string, sol: number): number | null {
-  const have = readArbCredit(asset);
-  if (!(have + 1e-9 >= sol)) return null;
-  const next = Math.round((have - sol) * 1e9) / 1e9;
-  let all: Record<string, number> = {};
-  try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? "") as Record<string, unknown>;
-    for (const [k, v] of Object.entries(raw)) {
-      if (typeof v === "number" && Number.isFinite(v) && v > 0) all[k] = v;
-    }
-  } catch {
-    all = {};
-  }
-  if (next > 0) all[asset] = next;
+export function writeArbCreditCache(asset: string, sol: number): void {
+  if (typeof localStorage === "undefined") return;
+  const all = readMap(KEY);
+  if (Number.isFinite(sol) && sol > 0) all[asset] = Math.round(sol * 1e9) / 1e9;
   else delete all[asset];
-  localStorage.setItem(KEY, JSON.stringify(all));
-  return next;
+  try {
+    localStorage.setItem(KEY, JSON.stringify(all));
+  } catch {
+    /* storage full or private mode */
+  }
+}
+
+export type PendingCredit = { sig: string; asset: string; wallet: string };
+
+export function readPendingCredits(): PendingCredit[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(PENDING_KEY) ?? "[]") as unknown;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((r): r is PendingCredit => Boolean(r) && typeof r.sig === "string" && typeof r.asset === "string" && typeof r.wallet === "string")
+      .slice(-20);
+  } catch {
+    return [];
+  }
+}
+
+function writePending(rows: PendingCredit[]): void {
+  try {
+    localStorage.setItem(PENDING_KEY, JSON.stringify(rows.slice(-20)));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function addPendingCredit(row: PendingCredit): void {
+  if (typeof localStorage === "undefined") return;
+  writePending([...readPendingCredits().filter((r) => r.sig !== row.sig), row]);
+}
+
+export function dropPendingCredit(sig: string): void {
+  if (typeof localStorage === "undefined") return;
+  writePending(readPendingCredits().filter((r) => r.sig !== sig));
 }

@@ -8,7 +8,16 @@ const PUBLIC_DEVNET = "https://api.devnet.solana.com";
 /** Key::AssetV1 = 1, base58 of a single 0x01 byte. */
 const ASSET_V1_TAG = "2";
 
-export type CoreAgent = { asset: string; owner: string; uri: string; attrs: Map<string, string> };
+export type CoreAgent = {
+  asset: string;
+  owner: string;
+  name: string;
+  uri: string;
+  /** Collection address when the update authority is a collection, else null. */
+  collection: string | null;
+  frozen: boolean;
+  attrs: Map<string, string>;
+};
 
 function devnetUrl(): string {
   const fromEnv = (process.env.SOLANA_RPC_DEVNET || "").trim();
@@ -40,7 +49,9 @@ function parse(address: string, raw: { lamports: number; owner: string; executab
       data: Uint8Array.from(Buffer.from(raw.data[0], "base64")),
     });
     const attrs = new Map((asset.attributes?.attributeList ?? []).map((a) => [a.key, a.value] as [string, string]));
-    return { asset: address, owner: String(asset.owner), uri: asset.uri, attrs };
+    const ua = asset.updateAuthority as { type?: string; address?: unknown } | undefined;
+    const collection = ua?.type === "Collection" && ua.address ? String(ua.address) : null;
+    return { asset: address, owner: String(asset.owner), name: asset.name, uri: asset.uri, collection, frozen: asset.freezeDelegate?.frozen === true, attrs };
   } catch {
     return null;
   }
@@ -87,4 +98,10 @@ export function isArbAgent(agent: CoreAgent): boolean {
 /** Free if either the server-set URI or the attribute says so (the attribute alone is owner-editable on new mints). */
 export function isFreeTier(agent: CoreAgent): boolean {
   return agent.uri.endsWith(":free") || agent.attrs.get("tr") === "free";
+}
+
+/** With a server mint authority, only agents in the server collection count. Without one, any agent counts. */
+export function inServerCollection(agent: CoreAgent, serverCollection: string | null): boolean {
+  if (!serverCollection) return true;
+  return agent.collection === serverCollection;
 }

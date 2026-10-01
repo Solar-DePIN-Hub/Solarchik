@@ -159,3 +159,51 @@ export async function claimMintSlot(
   );
   return updated.length ? { ok: true } : { ok: false, reason: "Спробуй ще раз." };
 }
+
+/** Records one verified on-chain payment. False when the signature (or the fee row) was already used. */
+export async function recordPayment(
+  sql: GuardSql,
+  row: { sig: string; kind: "arb-credit" | "fee"; cluster: "mainnet" | "devnet"; wallet: string; asset: string; ref: string; lamports: number; now: number },
+): Promise<boolean> {
+  const rows = await sql.query<{ ok: number }>(
+    `insert into chain_payments (sig, kind, cluster, wallet, asset, ref, lamports, recorded_ms)
+     values ($1, $2, $3, $4, $5, $6, $7, $8) on conflict do nothing returning 1 as ok`,
+    [row.sig, row.kind, row.cluster, row.wallet, row.asset, row.ref, row.lamports, row.now],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Mainnet arb credit left on one NFT: verified deposits minus mainnet fires that were not refunded.
+ * A re-issued agent also carries its old asset's deposits and fires (asset_links).
+ */
+export async function arbCreditLamports(sql: GuardSql, asset: string): Promise<number> {
+  const rows = await sql.query<{ paid: number; spent: number }>(
+    `with ids as (
+       select $1::text as a
+       union select old_asset from asset_links where new_asset = $1
+     )
+     select
+       coalesce((select sum(lamports) from chain_payments where kind = 'arb-credit' and asset in (select a from ids)), 0)::float8 as paid,
+       coalesce((select sum(size_lamports) from arb_fires where mode = 'mainnet' and asset in (select a from ids) and status <> 'failed'), 0)::float8 as spent`,
+    [asset],
+  );
+  const row = rows[0];
+  return Math.max(0, Math.round(Number(row?.paid ?? 0) - Number(row?.spent ?? 0)));
+}
+
+/** Links a re-issued asset to the one it replaces. First link wins. */
+export async function linkReissuedAsset(sql: GuardSql, input: { newAsset: string; oldAsset: string; wallet: string; now: number }): Promise<void> {
+  await sql.query(
+    "insert into asset_links (new_asset, old_asset, wallet, created_ms) values ($1, $2, $3, $4) on conflict do nothing",
+    [input.newAsset, input.oldAsset, input.wallet, input.now],
+  );
+}
+
+/** Verified fee rows for a wallet (ledger row ids). */
+export async function verifiedFeeRefs(sql: GuardSql, wallet: string): Promise<string[]> {
+  const rows = await sql.query<{ ref: string }>("select ref from chain_payments where kind = 'fee' and wallet = $1 order by recorded_ms desc limit 500", [
+    wallet,
+  ]);
+  return rows.map((r) => r.ref);
+}

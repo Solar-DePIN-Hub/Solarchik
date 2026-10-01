@@ -5,7 +5,8 @@
  */
 import type { ArbHouse } from "./arb-house";
 import type { WalletProof } from "./wallet-proof";
-import type { MintStatus, PrepareMintResult } from "./mint.server";
+import type { MintStatus, PrepareMintResult, PrepareReissueResult } from "./mint.server";
+import type { CreditResult, FeeResult } from "./payments.server";
 import type { ArbFireResult } from "./arb-guard.server";
 
 export const NATIVE_API_ORIGIN = "https://solarchik-super-app.vercel.app";
@@ -51,4 +52,28 @@ export async function callPrepareMint(data: { proof: WalletProof; skuId: string;
   if (NATIVE) return nativePost<PrepareMintResult>("mint-prepare", data);
   const { prepareMint } = await import("./mint");
   return prepareMint({ data });
+}
+
+export async function callPrepareReissue(data: { proof: WalletProof; oldAsset: string; paySig: string }): Promise<PrepareReissueResult> {
+  if (NATIVE) return nativePost<PrepareReissueResult>("mint-reissue", data);
+  const { prepareReissue } = await import("./mint");
+  return prepareReissue({ data });
+}
+
+export async function callReadArbCredit(asset: string): Promise<{ ok: true; creditSol: number } | { ok: false; reason: string }> {
+  if (NATIVE) return nativePost("arb-credit", { asset });
+  const { readArbCreditFn } = await import("./payments");
+  return readArbCreditFn({ data: { asset } });
+}
+
+export async function callClaimArbCredit(data: { wallet: string; asset: string; sig: string }): Promise<CreditResult> {
+  if (NATIVE) return nativePost<CreditResult>("arb-credit-claim", data);
+  const { claimArbCreditFn } = await import("./payments");
+  return claimArbCreditFn({ data });
+}
+
+export async function callRecordFee(data: { wallet: string; rowId: string; sig: string; lamports: number }): Promise<FeeResult> {
+  if (NATIVE) return nativePost<FeeResult>("fee-record", data);
+  const { recordFeeFn } = await import("./payments");
+  return recordFeeFn({ data });
 }

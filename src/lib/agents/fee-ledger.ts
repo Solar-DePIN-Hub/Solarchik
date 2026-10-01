@@ -14,6 +14,10 @@ export type FeeRow = {
   charged: boolean;
   reason: FeeReason;
   sig: string;
+  /** True once the server read the transfer on devnet and recorded it. */
+  verified?: boolean;
+  /** Why the server refused to verify (final). */
+  note?: string;
 };
 
 export function feeCut(pnl: number): number {
@@ -78,6 +82,8 @@ export function readFeeRows(raw: unknown): FeeRow[] {
       charged: o.charged === true && reason === "charged",
       reason,
       sig: typeof o.sig === "string" ? o.sig.slice(0, 100) : "",
+      ...(o.verified === true ? { verified: true } : {}),
+      ...(typeof o.note === "string" && o.note ? { note: o.note.slice(0, 120) } : {}),
     });
     if (out.length >= 200) break;
   }
