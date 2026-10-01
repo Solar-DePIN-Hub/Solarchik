@@ -59,7 +59,7 @@ object Fmt {
         return if (s == "-0") "0" else s
     }
 
-    fun signedSol(v: Double): String = (if (v > 0) "+" else "") + sol(v)
+    fun signedSol(v: Double, max: Int = 4): String = (if (v > 0) "+" else "") + sol(v, max)
 
     fun short(addr: String): String = if (addr.length < 12) addr else addr.take(4) + "…" + addr.takeLast(4)
 
@@ -73,6 +73,8 @@ object Fmt {
         return if (d > 0) String.format(Locale.US, "%dd %02dh %02dm", d, h, m)
         else String.format(Locale.US, "%02d:%02d:%02d", h, m, s)
     }
+
+    fun clock(ms: Long): String = if (ms <= 0) "—" else SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms))
 
     fun time(ms: Long): String = if (ms <= 0) "—" else SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(ms))
 

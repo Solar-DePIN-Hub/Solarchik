@@ -90,7 +90,7 @@
 
     <!-- Agents -->
     <string name="agents_title">Strategy agents</string>
-    <string name="agents_sub">Each agent is a Metaplex Core NFT you own. It trades with your limits.</string>
+    <string name="agents_sub">Each strategy is a Metaplex Core NFT you own. It forecasts and acts only within your limits.</string>
     <string name="tier_free">Free</string>
     <string name="tier_pro">Pro</string>
     <string name="tier_free_line">Free mint · one per wallet · 5% fee on realized profit only</string>
@@ -106,11 +106,11 @@
     <string name="mint_err_free">This wallet already has its free agent. Go Pro for 0% fee.</string>
     <string name="mint_err_pro_off">Paid Pro mint is off on mainnet for now. Switch to devnet in Settings.</string>
     <string name="mint_err_big">Transaction too big. Nothing was sent.</string>
-    <string name="mint_lanes">Lanes: %1$s</string>
+    <string name="mint_lanes">Market: %1$s</string>
     <string name="lane_c">BTC 15m</string>
     <string name="lane_e">Events</string>
     <string name="lane_w">Weather</string>
-    <string name="lane_dex">DEX arb</string>
+    <string name="lane_dex">SOL/USDC</string>
     <string name="agents_mine">My agents</string>
     <string name="agents_mine_empty">Nothing minted on %1$s yet.</string>
     <string name="agents_connect_hint">Connect a wallet to see agents you own.</string>
@@ -119,7 +119,7 @@
     <string name="agent_missing">Not found</string>
     <string name="agent_fee_line">Performance fee %1$s</string>
     <string name="ledger_title">Fee ledger</string>
-    <string name="ledger_empty">No closed positions yet. Agents start trading in the next update; every close lands here with its fee decision.</string>
+    <string name="ledger_empty">No closed positions yet. Start a strategy on the desk; every close lands here with its fee decision.</string>
     <string name="ledger_summary">%1$d positions · P&amp;L %2$s SOL</string>
     <string name="ledger_fees">Charged %1$s · owed %2$s · waived %3$s SOL</string>
     <string name="reason_pro">Pro · 0% fee</string>
@@ -133,20 +133,20 @@
     <!-- Classes (web classes.ts) -->
     <string name="class_pred_title">Prediction Agent</string>
     <string name="class_pred_short">Predictions</string>
-    <string name="class_pred_blurb">Bitcoin Up/Down windows on Polymarket. Events: finds the favorite by itself.</string>
+    <string name="class_pred_blurb">Forecasts on live market data: Bitcoin windows and Polymarket events.</string>
     <string name="class_dex_title">Titan × Backpack</string>
     <string name="class_dex_short">Arbitrage</string>
-    <string name="class_dex_blurb">Every Solana pair on Backpack against USDC. Fires only when there is an edge and cash.</string>
+    <string name="class_dex_blurb">SOL/USDC on Backpack against Coinbase. Acts only when the move clears the edge.</string>
     <string name="class_combo_title">Combo Agent</string>
     <string name="class_combo_short">Combo</string>
-    <string name="class_combo_blurb">One NFT: crypto 15m, events and weather. No DEX here.</string>
+    <string name="class_combo_blurb">One strategy: crypto 15m, events and weather. Takes the strongest forecast.</string>
 
     <!-- SKUs (web catalog.ts) -->
-    <string name="sku_alpha_blurb">Bitcoin Up/Down, 15-minute windows only. Grok bets from 65% confidence.</string>
-    <string name="sku_events_blurb">Events that are not Bitcoin or sports. Up to 2 days out. Grok from 65%.</string>
-    <string name="sku_weather_blurb">Daily high from the station in the rules only. No recorded high, no order.</string>
-    <string name="sku_combo_blurb">Three lanes in one NFT: crypto 15m, events, weather. No DEX.</string>
-    <string name="sku_arb_blurb">Titan × Backpack. Every Solana pair against USDC. Fires only with an edge and cash.</string>
+    <string name="sku_alpha_blurb">Bitcoin 15-minute windows on the live Coinbase price. Forecasts up or down and enters only when confidence ≥65%.</string>
+    <string name="sku_events_blurb">Polymarket events beyond Bitcoin. Follows the favorite outcome only when it is at ≥65%.</string>
+    <string name="sku_weather_blurb">Kyiv temperature from Open-Meteo in 1-hour windows. Forecasts the next move, enters at ≥65% confidence.</string>
+    <string name="sku_combo_blurb">Three markets in one strategy: Bitcoin 15m, events, weather. Takes the strongest forecast at ≥65%.</string>
+    <string name="sku_arb_blurb">SOL/USDC on Backpack in 10-minute windows. Enters only when the move clears the edge and confidence ≥65%.</string>
 
     <!-- Sol -->
     <string name="sol_title">Sol</string>
@@ -209,4 +209,65 @@
     <string name="note_reward_toggle">Reward reminder</string>
     <string name="note_window_toggle">Window ending</string>
     <string name="note_report_toggle">Daily note</string>
+    <string name="desk_tab">Desk</string>
+    <string name="strategies_tab">Strategies</string>
+    <string name="desk_title">Agent desk</string>
+    <string name="desk_sub">Strategies forecast on live market data and hold each position for one window. Positions are simulated; on Devnet the Free-tier 5% fee settles in devnet SOL.</string>
+    <string name="track_paper">Paper</string>
+    <string name="track_devnet">Devnet</string>
+    <string name="track_paper_hint">Paper: a virtual 1 SOL purse. Any strategy, no mint needed. Fees are only recorded.</string>
+    <string name="track_devnet_hint">Devnet: your minted NFTs, sized from your devnet balance. Owed Free-tier fees are paid to the treasury in devnet SOL.</string>
+    <string name="desk_running">%1$d running</string>
+    <string name="desk_idle">Nothing running</string>
+    <string name="desk_purse_paper">Paper purse %1$s SOL</string>
+    <string name="desk_purse_devnet">Devnet balance %1$s SOL</string>
+    <string name="desk_today">Today: %1$s / %2$s SOL used · losses in a row %3$d/%4$d</string>
+    <string name="desk_pnl">Realized P&amp;L %1$s SOL</string>
+    <string name="desk_start">Start</string>
+    <string name="desk_stop">Stop</string>
+    <string name="desk_status_running">Running</string>
+    <string name="desk_status_stopped">Stopped</string>
+    <string name="desk_status_holding">In position</string>
+    <string name="desk_open_line">%1$s · %2$s SOL · closes in %3$s</string>
+    <string name="desk_stats">%1$d positions · %2$d W / %3$d L · %4$s SOL</string>
+    <string name="desk_devnet_empty">Mint a strategy NFT on devnet (Strategies tab) to run it here. Paper works without a mint.</string>
+    <string name="desk_devnet_connect">Connect a devnet wallet to run your own strategy NFTs.</string>
+    <string name="desk_trial">Trial</string>
+    <string name="desk_started">%1$s started on %2$s</string>
+    <string name="desk_stopped">%1$s stopped. An open position still closes on time.</string>
+    <string name="desk_not_owned">Devnet runs need your own minted NFT.</string>
+    <string name="desk_bg_note">The desk checks markets every 30 s while the app is open and about every 15 min in the background.</string>
+    <string name="side_up">Up</string>
+    <string name="side_down">Down</string>
+    <string name="side_yes">Yes</string>
+    <string name="side_no">No</string>
+    <string name="ev_watch">%1$s: watching %2$s. First price taken.</string>
+    <string name="ev_skip">%1$s: %2$s · %3$s at %4$s confidence. Below 65%%, no entry.</string>
+    <string name="ev_funds">%1$s: forecast %2$s, but free funds are too small.</string>
+    <string name="ev_block">%1$s: %2$s. Position not opened.</string>
+    <string name="ev_open">%1$s entered %2$s · %3$s · %4$s SOL · confidence %5$s</string>
+    <string name="ev_close">%1$s closed %2$s · %3$s · %4$s SOL</string>
+    <string name="ev_nodata">%1$s: market data did not load. Waiting.</string>
+    <string name="block_paused">Desk paused</string>
+    <string name="block_losses">%1$d losses in a row (limit)</string>
+    <string name="block_trade">Position limit %1$s SOL</string>
+    <string name="block_day_cap">Day limit %1$s SOL</string>
+    <string name="block_day_loss">Day loss stop %1$s SOL</string>
+    <string name="risk_title">Risk limits</string>
+    <string name="risk_sub">Hard caps are built in. You can only set them lower.</string>
+    <string name="risk_trade">Max per position</string>
+    <string name="risk_day">Per day</string>
+    <string name="risk_losses">Losses in a row</string>
+    <string name="risk_day_loss">Day loss stop</string>
+    <string name="risk_pause">Pause all strategies</string>
+    <string name="risk_hard">max %1$s</string>
+    <string name="fees_title">Fees</string>
+    <string name="fees_owed">Owed %1$s SOL from %2$d profitable Free-tier positions.</string>
+    <string name="fees_none">Nothing owed. Pro pays 0%; losses, paper and fee-free windows pay nothing.</string>
+    <string name="fees_pay">Pay %1$s SOL on devnet</string>
+    <string name="fees_paid">Fees paid on devnet</string>
+    <string name="fees_devnet_only">Fees settle on devnet only. Turn on Force devnet in Settings.</string>
+    <string name="fees_nothing">Nothing owed</string>
+    <string name="desk_log">Activity</string>
+    <string name="desk_log_empty">Start a strategy to see each decision here.</string>
 </resources>

@@ -59,6 +59,12 @@ class AgentStore(context: Context) {
         prefs.edit().putString(KEY_FEES, json.encodeToString(ListSerializer(FeeRow.serializer()), all)).apply()
     }
 
+    /** Rewrites fee rows in place, keeping their order (used after a fee payment lands). */
+    fun updateFees(transform: (FeeRow) -> FeeRow) {
+        val all = fees().map(transform)
+        prefs.edit().putString(KEY_FEES, json.encodeToString(ListSerializer(FeeRow.serializer()), all)).apply()
+    }
+
     companion object {
         private const val KEY_AGENTS = "owned.v1"
         private const val KEY_FEES = "fees.v1"

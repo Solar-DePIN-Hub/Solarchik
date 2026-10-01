@@ -63,28 +63,28 @@ class StreakRulesTest {
         val s7 = StreakRules.stamp(s6, day(6), noon(6))
         assertEquals(1, s7.feeWindows.size)
         val w = s7.feeWindows.single()
-        assertEquals("h48-1", w.id)
+        assertEquals("h48-1-${day(6)}", w.id)
         assertEquals(FeeWindow.KIND_SHORT, w.kind)
         assertEquals(FeeWindow.AVAILABLE, w.status)
         assertEquals(7, w.milestone)
         assertEquals(0, s7.seven)
         assertEquals(7, s7.thirty)
         val s14 = signRun(s7, 7, 13)
-        assertEquals(listOf("h48-1", "h48-2"), s14.feeWindows.map { it.id })
+        assertEquals(listOf("h48-1-${day(6)}", "h48-2-${day(13)}"), s14.feeWindows.map { it.id })
         assertEquals(14, s14.feeWindows.last().milestone)
     }
 
     @Test fun thirtyDaysGrantSevenDayWindowAndCounterContinues() {
         val s30 = signRun(StreakState(), 0, 29)
         val long = s30.feeWindows.filter { it.kind == FeeWindow.KIND_LONG }
-        assertEquals(listOf("d7-30"), long.map { it.id })
+        assertEquals(listOf("d7-30-${day(29)}"), long.map { it.id })
         assertEquals(4, s30.feeWindows.count { it.kind == FeeWindow.KIND_SHORT })
         assertEquals(30, s30.thirty)
         assertEquals(30 % 7, s30.seven)
         val s31 = StreakRules.stamp(s30, day(30), noon(30))
         assertEquals(31, s31.thirty)
         val s60 = signRun(s31, 31, 59)
-        assertEquals(listOf("d7-30", "d7-60"), s60.feeWindows.filter { it.kind == FeeWindow.KIND_LONG }.map { it.id })
+        assertEquals(listOf("d7-30-${day(29)}", "d7-60-${day(59)}"), s60.feeWindows.filter { it.kind == FeeWindow.KIND_LONG }.map { it.id })
     }
 
     @Test fun rewardsWaitUntilActivated() {
@@ -158,5 +158,28 @@ class StreakRulesTest {
     @Test fun seedsHistoryFromOldSave() {
         assertEquals(listOf("2026-09-29", "2026-09-30", "2026-10-01"), StreakRules.seedDays("2026-10-01", 3))
         assertTrue(StreakRules.seedDays("", 3).isEmpty())
+    }
+
+    @Test fun secondThirtyDayStreakAfterResetIsGranted() {
+        val first = signRun(StreakState(), 0, 29)
+        // miss day 30, then sign 30 more days
+        val second = signRun(first, 31, 60)
+        val long = second.feeWindows.filter { it.kind == FeeWindow.KIND_LONG }.map { it.id }
+        assertEquals(listOf("d7-30-${day(29)}", "d7-30-${day(60)}"), long)
+        assertEquals(2, second.feeWindows.count { it.kind == FeeWindow.KIND_LONG && it.status == FeeWindow.AVAILABLE })
+    }
+
+    @Test fun oldIdsWithoutDayStayValid() {
+        val old = StreakState(
+            streak = 30, signedDay = day(0), seven = 2, thirty = 30,
+            feeWindows = listOf(FeeWindow("d7-30", FeeWindow.KIND_LONG, 30, FeeWindow.AVAILABLE, grantedAt = noon(0))),
+        )
+        val t = noon(0) + hour
+        val a = StreakRules.activate(old, t)
+        assertEquals(FeeWindow.ACTIVE, a.feeWindows.single().status)
+        assertTrue(StreakRules.covers(a, t + hour))
+        // the next 30 continues to 60 with a new-format id, the old one is untouched
+        val s60 = signRun(a, 1, 30)
+        assertEquals(listOf("d7-30", "d7-60-${day(30)}"), s60.feeWindows.filter { it.kind == FeeWindow.KIND_LONG }.map { it.id })
     }
 }

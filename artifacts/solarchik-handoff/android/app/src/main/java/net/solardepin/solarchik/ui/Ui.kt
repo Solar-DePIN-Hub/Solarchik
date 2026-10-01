@@ -254,6 +254,42 @@ object Ui {
     }
 
     // ---------- color helpers ----------
+    fun switchRow(ctx: Context, label: String, on: Boolean, cb: (android.widget.CompoundButton, Boolean) -> Unit): LinearLayout {
+        val r = row(ctx)
+        r.addView(weight(body(ctx, label)))
+        val sw = android.widget.Switch(ctx).apply {
+            isChecked = on
+            thumbTintList = android.content.res.ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()), intArrayOf(GOLD, MUTED),
+            )
+            trackTintList = android.content.res.ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()), intArrayOf(withAlpha(GOLD, 0x66), STROKE),
+            )
+            setOnCheckedChangeListener(cb)
+        }
+        r.addView(sw)
+        return r
+    }
+
+    /** Two-or-more option segmented control. [onPick] gets the index. */
+    fun segmented(ctx: Context, labels: List<String>, selected: Int, onPick: (Int) -> Unit): LinearLayout {
+        val seg = row(ctx).apply {
+            background = rounded(SURFACE, ctx.dp(18).toFloat(), STROKE, ctx.dp(1))
+            setPadding(ctx.dp(4), ctx.dp(4), ctx.dp(4), ctx.dp(4))
+        }
+        labels.forEachIndexed { i, label ->
+            val on = i == selected
+            val tv = text(ctx, label, 14f, if (on) INK else MUTED, 800).apply {
+                gravity = android.view.Gravity.CENTER
+                isClickable = true
+                background = if (on) gradient(intArrayOf(GOLD, AMBER), ctx.dp(14).toFloat(), GradientDrawable.Orientation.LEFT_RIGHT) else null
+                setOnClickListener { if (!on) onPick(i) }
+            }
+            seg.addView(tv, LinearLayout.LayoutParams(0, ctx.dp(40), 1f))
+        }
+        return seg
+    }
+
     fun withAlpha(color: Int, alpha: Int): Int = (color and 0x00FFFFFF) or (alpha shl 24)
 
     fun blend(a: Int, b: Int, t: Float): Int {

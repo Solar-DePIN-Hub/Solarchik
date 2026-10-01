@@ -69,7 +69,7 @@ class GameSaveTest {
             s.recordRun(1200, 1200)
             granted = s.stampClock("Addr", "Sig$i", "devnet", "tx")
         }
-        assertEquals(listOf("h48-1"), granted.map { it.id })
+        assertEquals(listOf("h48-1-2026-10-07"), granted.map { it.id })
         val s = save()
         assertTrue(s.feeProgress() is FeeProgress.Ready)
         val opened = now + 1000

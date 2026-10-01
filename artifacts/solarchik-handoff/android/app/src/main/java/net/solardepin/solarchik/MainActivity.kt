@@ -23,9 +23,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import net.solardepin.solarchik.agents.AgentStore
 import net.solardepin.solarchik.agents.MintError
 import net.solardepin.solarchik.agents.Minter
+import net.solardepin.solarchik.agents.engine.Desk
+import net.solardepin.solarchik.agents.engine.DeskWorker
 import net.solardepin.solarchik.game.GameSave
 import net.solardepin.solarchik.game.RunActivity
 import net.solardepin.solarchik.ui.AgentsScreen
@@ -60,6 +64,9 @@ class MainActivity : ComponentActivity() {
         private set
     lateinit var minter: Minter
         private set
+    lateinit var desk: Desk
+        private set
+    private var ticker: kotlinx.coroutines.Job? = null
 
     private val screens = LinkedHashMap<Tab, Screen>()
     private lateinit var content: FrameLayout
@@ -85,6 +92,7 @@ class MainActivity : ComponentActivity() {
         save = GameSave(this)
         store = AgentStore(this)
         minter = Minter(wallet, store)
+        desk = Desk(this)
         Ui.init(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(buildRoot())
@@ -100,11 +108,46 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         screens[current]?.onShow()
+        startTicker()
     }
 
     override fun onPause() {
         screens[current]?.onHide()
+        ticker?.cancel()
+        ticker = null
         super.onPause()
+    }
+
+    /** While the app is open the desk ticks every 30 s; the worker covers the background. */
+    private fun startTicker() {
+        ticker?.cancel()
+        ticker = scope.launch {
+            while (true) {
+                if (desk.state().anyRunning) {
+                    val report = runCatching { desk.tick() }.getOrNull()
+                    if (report != null) {
+                        onDeskReport(report)
+                        if (current == Tab.AGENTS || current == Tab.YARD) screens[current]?.render()
+                    }
+                } else if (current == Tab.AGENTS) {
+                    screens[current]?.render()
+                }
+                delay(TICK_MS)
+            }
+        }
+    }
+
+    /** Start or stop the background worker to match the desk. */
+    fun deskChanged() {
+        DeskWorker.sync(this, desk.state().anyRunning)
+        scope.launch {
+            runCatching { desk.tick() }.getOrNull()?.let { onDeskReport(it) }
+            screens[current]?.render()
+        }
+    }
+
+    private fun onDeskReport(report: net.solardepin.solarchik.agents.engine.TickReport) {
+        net.solardepin.solarchik.agents.engine.DeskHooks.afterTick?.invoke(this, report)
     }
 
     override fun onDestroy() {
@@ -257,5 +300,6 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private val TOAST = Any()
+        private const val TICK_MS = 30_000L
     }
 }

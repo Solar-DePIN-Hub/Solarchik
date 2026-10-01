@@ -71,11 +71,11 @@ object StreakRules {
         var windows = expire(s.feeWindows, now)
         if (seven >= SolarchikConfig.STREAK_SHORT_DAYS) {
             val n = windows.count { it.kind == FeeWindow.KIND_SHORT } + 1
-            windows = grant(windows, "h48-$n", FeeWindow.KIND_SHORT, n * SolarchikConfig.STREAK_SHORT_DAYS, now)
+            windows = grant(windows, rewardId(FeeWindow.KIND_SHORT, n, today), FeeWindow.KIND_SHORT, n * SolarchikConfig.STREAK_SHORT_DAYS, now)
             seven = 0
         }
         if (thirty > 0 && thirty % SolarchikConfig.STREAK_LONG_DAYS == 0) {
-            windows = grant(windows, "d7-$thirty", FeeWindow.KIND_LONG, thirty, now)
+            windows = grant(windows, rewardId(FeeWindow.KIND_LONG, thirty, today), FeeWindow.KIND_LONG, thirty, now)
         }
         val days = (if (continued) s.clockDays else emptyList()).filter { it != today } + today
         return s.copy(
@@ -126,6 +126,13 @@ object StreakRules {
                 it.startedAt > 0 && openedAt >= it.startedAt && openedAt < it.endsAt
         }
     }
+
+    /**
+     * Reward ids carry the UTC grant day: `h48-<N>-<YYYY-MM-DD>`, `d7-<thirty>-<YYYY-MM-DD>`.
+     * Same scheme as web. Old ids without a day (`h48-1`, `d7-30`) stay valid on read;
+     * a new streak can no longer collide with them, so a second 30-day reward is granted.
+     */
+    fun rewardId(kind: String, n: Int, day: String): String = "$kind-$n-$day"
 
     fun expire(rows: List<FeeWindow>, now: Long): List<FeeWindow> = rows.map {
         if (it.status == FeeWindow.ACTIVE && it.endsAt in 1..now) it.copy(status = FeeWindow.SPENT) else it

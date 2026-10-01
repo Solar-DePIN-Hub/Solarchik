@@ -11,6 +11,12 @@ import net.solardepin.solarchik.MainActivity
 import net.solardepin.solarchik.R
 import net.solardepin.solarchik.agents.MintError
 import net.solardepin.solarchik.agents.OwnedAgent
+import net.solardepin.solarchik.agents.engine.AgentRun
+import net.solardepin.solarchik.agents.engine.DeskError
+import net.solardepin.solarchik.agents.engine.DeskState
+import net.solardepin.solarchik.agents.engine.RiskCaps
+import net.solardepin.solarchik.agents.engine.Track
+import net.solardepin.solarchik.agents.engine.UserCaps
 import net.solardepin.solarchik.core.AgentSku
 import net.solardepin.solarchik.core.AgentTier
 import net.solardepin.solarchik.core.Catalog
@@ -25,6 +31,14 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
     private var busySku: String? = null
     private var balance: Double? = null
     private var refreshed = false
+    /** 0 = desk, 1 = strategies (catalog + mint). */
+    private var section = 0
+    private var track = Track.PAPER
+    private var paying = false
+
+    private lateinit var sectionBox: LinearLayout
+    private lateinit var deskBox: LinearLayout
+    private lateinit var shopBox: LinearLayout
 
     private lateinit var walletPill: TextView
     private lateinit var clusterLabel: TextView
@@ -44,6 +58,13 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         addView(head)
         addView(Ui.display(ctx, ctx.getString(R.string.agents_title), 24f))
         addView(Ui.muted(ctx, ctx.getString(R.string.agents_sub), 14f))
+        sectionBox = Ui.column(ctx)
+        addView(sectionBox)
+        deskBox = Ui.column(ctx, gap = 14)
+        addView(deskBox)
+        shopBox = Ui.column(ctx, gap = 14)
+        addView(shopBox)
+        shopBox.apply {
 
         // Tier switch
         val seg = Ui.row(ctx).apply {
@@ -68,9 +89,8 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         mineBox = Ui.column(ctx, gap = 10)
         addView(mineBox)
 
-        addView(Ui.top(Ui.h2(ctx, ctx.getString(R.string.ledger_title)), 10))
+        }
         ledgerBox = Ui.column(ctx, gap = 10)
-        addView(ledgerBox)
     }
 
     private fun segment(label: String, onClick: () -> Unit): TextView = Ui.text(ctx, label, 15f, Ui.MUTED, 800).apply {
@@ -115,10 +135,234 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         tierLine.text = if (pro) ctx.getString(R.string.tier_pro_line, Fmt.sol(SolarchikConfig.PRO_PRICE_SOL)) else ctx.getString(R.string.tier_free_line)
         tierLine.setTextColor(if (pro) Ui.GOLD else Ui.TEXT)
 
-        catalogBox.removeAllViews()
-        Catalog.skus.forEach { catalogBox.addView(skuCard(it)) }
-        renderMine()
+        sectionBox.removeAllViews()
+        sectionBox.addView(Ui.segmented(ctx, listOf(ctx.getString(R.string.desk_tab), ctx.getString(R.string.strategies_tab)), section) {
+            section = it
+            render()
+        })
+        deskBox.visibility = if (section == 0) View.VISIBLE else View.GONE
+        shopBox.visibility = if (section == 1) View.VISIBLE else View.GONE
+        if (section == 0) {
+            renderDesk()
+        } else {
+            catalogBox.removeAllViews()
+            Catalog.skus.forEach { catalogBox.addView(skuCard(it)) }
+            renderMine()
+        }
+    }
+
+    // ---------------- Desk ----------------
+
+    private fun renderDesk() {
+        val st = host.desk.state()
+        deskBox.removeAllViews()
+        deskBox.addView(deskHero(st))
+        deskBox.addView(Ui.segmented(ctx, listOf(ctx.getString(R.string.track_paper), ctx.getString(R.string.track_devnet)), if (track == Track.PAPER) 0 else 1) {
+            track = if (it == 0) Track.PAPER else Track.DEVNET
+            render()
+        })
+        deskBox.addView(Ui.muted(ctx, ctx.getString(if (track == Track.PAPER) R.string.track_paper_hint else R.string.track_devnet_hint), 12f))
+        runnable(st).forEach { deskBox.addView(runCard(it, st)) }
+        if (track == Track.DEVNET && runnable(st).isEmpty()) {
+            deskBox.addView(emptyCard(ctx.getString(if (host.wallet.connected) R.string.desk_devnet_empty else R.string.desk_devnet_connect)))
+        }
+        deskBox.addView(riskPanel(st.caps))
+        deskBox.addView(feesCard())
+        deskBox.addView(Ui.top(Ui.h2(ctx, ctx.getString(R.string.desk_log)), 6))
+        if (st.log.isEmpty()) deskBox.addView(emptyCard(ctx.getString(R.string.desk_log_empty)))
+        else deskBox.addView(Ui.card(ctx, pad = 14).apply {
+            st.log.take(12).forEachIndexed { i, e ->
+                if (i > 0) addView(Ui.top(Ui.divider(ctx), 8))
+                val line = Ui.row(ctx, gap = 10).apply { gravity = Gravity.TOP }
+                line.addView(Ui.text(ctx, Fmt.clock(e.at), 11f, Ui.MUTED, 700))
+                val color = when (e.kind) {
+                    "open" -> Ui.GOLD
+                    "close" -> if (e.pnl > 0) Ui.GREEN else if (e.pnl < 0) Ui.RED else Ui.TEXT
+                    "block" -> Ui.AMBER
+                    else -> Ui.TEXT
+                }
+                line.addView(Ui.weight(Ui.text(ctx, DeskText.event(ctx, e), 12f, color, 600)))
+                addView(Ui.top(line, if (i == 0) 0 else 8))
+            }
+        })
+        deskBox.addView(Ui.top(Ui.h2(ctx, ctx.getString(R.string.ledger_title)), 6))
+        deskBox.addView(ledgerBox)
         renderLedger()
+        deskBox.addView(Ui.muted(ctx, ctx.getString(R.string.desk_bg_note), 11f))
+    }
+
+    private fun deskHero(st: DeskState): View = Ui.card(ctx, accent = Ui.GOLD).apply {
+        val running = st.runs.count { it.running }
+        val head = Ui.row(ctx, gap = 10)
+        head.addView(Ui.weight(Ui.text(ctx, ctx.getString(R.string.desk_title), 18f, Ui.TEXT, 900)))
+        head.addView(Ui.pill(ctx, if (running > 0) ctx.getString(R.string.desk_running, running) else ctx.getString(R.string.desk_idle), if (running > 0) Ui.GREEN else Ui.MUTED, filled = running > 0))
+        addView(head)
+        addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.desk_sub), 12f), 6))
+        val day = st.day(track).rolled(net.solardepin.solarchik.core.StreakRules.dayKey(System.currentTimeMillis()))
+        val purse = if (track == Track.PAPER) ctx.getString(R.string.desk_purse_paper, Fmt.sol(host.desk.freeFor(st, Track.PAPER) + st.runs.filter { it.track == Track.PAPER }.sumOf { it.open?.stake ?: 0.0 }, 4))
+        else ctx.getString(R.string.desk_purse_devnet, Fmt.sol(balance ?: st.devnetBalance, 4))
+        addView(Ui.top(Ui.text(ctx, purse, 20f, Ui.GOLD, 900), 12))
+        val pnl = st.runs.filter { it.track == track }.sumOf { it.pnl }
+        addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.desk_pnl, Fmt.signedSol(pnl, 6)), 13f, if (pnl > 0) Ui.GREEN else if (pnl < 0) Ui.RED else Ui.TEXT, 700), 4))
+        val caps = st.caps
+        addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.desk_today, Fmt.sol(day.spent), Fmt.sol(caps.dayCapSol), day.lossStreak, caps.maxLosses), 12f), 4))
+        val bar = SolarProgress(ctx)
+        bar.fraction = (day.spent / caps.dayCapSol).toFloat()
+        addView(Ui.top(bar, 10))
+    }
+
+    /** Paper: every catalog strategy as a trial (or the owned NFT). Devnet: owned devnet NFTs only. */
+    private fun runnable(st: DeskState): List<AgentRun> {
+        val w = host.wallet
+        if (track == Track.PAPER) {
+            return Catalog.skus.map { sku ->
+                val key = "paper:${sku.id}"
+                st.run(key) ?: AgentRun(key, sku.id, AgentTier.FREE, sku.name, Track.PAPER)
+            }
+        }
+        if (!w.connected) return emptyList()
+        return host.store.agentsFor(w.address, "devnet").filter { it.status != OwnedAgent.STATUS_MISSING }.map { a ->
+            st.run(a.asset)?.takeIf { it.track == Track.DEVNET } ?: AgentRun(a.asset, a.skuId, a.tier, a.name, Track.DEVNET)
+        }
+    }
+
+    private fun runCard(r: AgentRun, st: DeskState): View {
+        val sku = Catalog.baseOf(r.skuId)
+        val accent = sku?.accent ?: Ui.GOLD
+        return Ui.card(ctx, accent = if (r.running) accent else null, pad = 14).apply {
+            val row = Ui.row(ctx, gap = 12).apply { gravity = Gravity.TOP }
+            val art = FrameLayout(ctx).apply { background = Ui.rounded(Ui.withAlpha(accent, 0x1E), dp(14).toFloat()) }
+            art.addView(Ui.image(ctx, sku?.artRes ?: R.drawable.robot_sunflower), FrameLayout.LayoutParams(dp(40), dp(54), Gravity.CENTER))
+            row.addView(art, LinearLayout.LayoutParams(dp(54), dp(66)))
+            val col = Ui.column(ctx)
+            val pills = Ui.row(ctx, gap = 6)
+            val (stLabel, stColor) = when {
+                r.open != null -> ctx.getString(R.string.desk_status_holding) to Ui.GOLD
+                r.running -> ctx.getString(R.string.desk_status_running) to Ui.GREEN
+                else -> ctx.getString(R.string.desk_status_stopped) to Ui.MUTED
+            }
+            pills.addView(Ui.pill(ctx, stLabel, stColor, filled = r.running || r.open != null))
+            if (r.track == Track.PAPER && r.key.startsWith("paper:")) pills.addView(Ui.pill(ctx, ctx.getString(R.string.desk_trial), Ui.CYAN))
+            pills.addView(Ui.pill(ctx, ctx.getString(if (r.tier == AgentTier.PRO) R.string.tier_pro else R.string.tier_free), if (r.tier == AgentTier.PRO) Ui.GOLD else Ui.CYAN))
+            col.addView(pills)
+            col.addView(Ui.top(Ui.text(ctx, r.name, 15f, Ui.TEXT, 800), 6))
+            sku?.let { col.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.mint_lanes, lanes(it.lanes)), 11f, accent, 700), 2)) }
+            r.open?.let { p ->
+                val left = (p.closeAt - System.currentTimeMillis()).coerceAtLeast(0)
+                col.addView(Ui.top(Ui.text(ctx, DeskText.side(ctx, p.side) + " · " + p.label, 12f, Ui.TEXT, 700), 6))
+                col.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.desk_open_line, DeskText.conf(p.confidence), Fmt.sol(p.stake), Fmt.countdown(left)), 11f), 2))
+            }
+            if (r.open == null) r.last?.let { col.addView(Ui.top(Ui.muted(ctx, DeskText.event(ctx, it), 11f), 6)) }
+            if (r.jobs > 0 || r.wins + r.losses > 0) {
+                col.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.desk_stats, r.jobs, r.wins, r.losses, Fmt.signedSol(r.pnl, 6)), 11f, if (r.pnl > 0) Ui.GREEN else if (r.pnl < 0) Ui.RED else Ui.MUTED, 700), 4))
+            }
+            row.addView(Ui.weight(col))
+            addView(row)
+            val btn = if (r.running) Ui.button(ctx, ctx.getString(R.string.desk_stop), Ui.Btn.GHOST) { stopRun(r) }
+            else Ui.button(ctx, ctx.getString(R.string.desk_start), Ui.Btn.SECONDARY, R.drawable.ic_bolt_small) { startRun(r) }
+            addView(Ui.top(btn, 12))
+        }
+    }
+
+    private fun startRun(r: AgentRun) {
+        host.scope.launch {
+            host.desk.start(r.key, r.skuId, r.tier, r.name, r.track)
+                .onSuccess {
+                    host.toast(ctx.getString(R.string.desk_started, r.name, ctx.getString(if (r.track == Track.PAPER) R.string.track_paper else R.string.track_devnet)))
+                    host.deskChanged()
+                }
+                .onFailure { host.toast(if (it is DeskError) ctx.getString(R.string.desk_not_owned) else host.errorText(it)) }
+            render()
+        }
+    }
+
+    private fun stopRun(r: AgentRun) {
+        host.scope.launch {
+            host.desk.stop(r.key)
+            host.toast(ctx.getString(R.string.desk_stopped, r.name))
+            host.deskChanged()
+            render()
+        }
+    }
+
+    private fun riskPanel(caps: UserCaps): View = Ui.card(ctx, accent = Ui.CYAN).apply {
+        val head = Ui.row(ctx, gap = 12)
+        head.addView(Ui.iconBadge(ctx, R.drawable.ic_timer, Ui.CYAN, 36))
+        head.addView(Ui.weight(Ui.h2(ctx, ctx.getString(R.string.risk_title))))
+        addView(head)
+        addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.risk_sub), 12f), 6))
+        addView(Ui.top(stepper(R.string.risk_trade, caps.maxTradeSol, TRADE_STEPS, SolarchikConfig.HARD_MAX_TRADE_SOL) { setCaps(caps.copy(maxTradeSol = it)) }, 12))
+        addView(Ui.top(stepper(R.string.risk_day, caps.dayCapSol, DAY_STEPS, SolarchikConfig.HARD_DAY_CAP_SOL) { setCaps(caps.copy(dayCapSol = it)) }, 10))
+        addView(Ui.top(stepper(R.string.risk_losses, caps.maxLosses.toDouble(), LOSS_STEPS, SolarchikConfig.HARD_MAX_LOSSES.toDouble(), whole = true) { setCaps(caps.copy(maxLosses = it.toInt())) }, 10))
+        addView(Ui.top(stepper(R.string.risk_day_loss, caps.dayLossSol, DAY_STEPS, SolarchikConfig.HARD_DAY_LOSS_SOL) { setCaps(caps.copy(dayLossSol = it)) }, 10))
+        addView(Ui.top(Ui.switchRow(ctx, ctx.getString(R.string.risk_pause), caps.paused) { _, on -> setCaps(caps.copy(paused = on)) }, 12))
+    }
+
+    private fun stepper(label: Int, value: Double, steps: List<Double>, hard: Double, whole: Boolean = false, onSet: (Double) -> Unit): View {
+        val r = Ui.row(ctx, gap = 8)
+        val col = Ui.column(ctx)
+        col.addView(Ui.text(ctx, ctx.getString(label), 13f, Ui.TEXT, 700))
+        val hardTxt = if (whole) hard.toInt().toString() else Fmt.sol(hard) + " SOL"
+        col.addView(Ui.muted(ctx, ctx.getString(R.string.risk_hard, hardTxt), 11f))
+        r.addView(Ui.weight(col))
+        val idx = steps.indexOfFirst { it >= value - 1e-9 }.let { if (it < 0) steps.lastIndex else it }
+        fun mini(txt: String, enabled: Boolean, go: () -> Unit) = Ui.text(ctx, txt, 18f, Ui.TEXT, 900).apply {
+            gravity = Gravity.CENTER
+            background = Ui.rounded(Ui.SURFACE2, dp(12).toFloat(), Ui.STROKE, dp(1))
+            isClickable = enabled
+            alpha = if (enabled) 1f else 0.35f
+            setOnClickListener { if (enabled) go() }
+        }
+        r.addView(mini("−", idx > 0) { onSet(steps[idx - 1]) }, LinearLayout.LayoutParams(dp(40), dp(36)))
+        r.addView(Ui.text(ctx, if (whole) value.toInt().toString() else Fmt.sol(value), 15f, Ui.GOLD, 900).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(64), dp(36)))
+        r.addView(mini("+", idx < steps.lastIndex) { onSet(steps[idx + 1]) }, LinearLayout.LayoutParams(dp(40), dp(36)))
+        return r
+    }
+
+    private fun setCaps(c: UserCaps) {
+        host.scope.launch {
+            host.desk.setCaps(c)
+            render()
+        }
+    }
+
+    private fun feesCard(): View = Ui.card(ctx, accent = Ui.AMBER).apply {
+        val head = Ui.row(ctx, gap = 12)
+        head.addView(Ui.iconBadge(ctx, R.drawable.ic_gift, Ui.AMBER, 36))
+        head.addView(Ui.weight(Ui.h2(ctx, ctx.getString(R.string.fees_title))))
+        addView(head)
+        val owed = host.desk.owedRows()
+        val total = owed.sumOf { it.fee }
+        if (owed.isEmpty()) {
+            addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.fees_none), 12f), 8))
+            return@apply
+        }
+        addView(Ui.top(Ui.body(ctx, ctx.getString(R.string.fees_owed, Fmt.sol(total, 9), owed.size)), 8))
+        val b = Ui.button(ctx, if (paying) ctx.getString(R.string.mint_busy) else ctx.getString(R.string.fees_pay, Fmt.sol(total, 9)), Ui.Btn.PRIMARY, R.drawable.ic_wallet) { payFees() }
+        Ui.setEnabled(b, !paying)
+        addView(Ui.top(b, 12))
+    }
+
+    private fun payFees() {
+        if (paying) return
+        if (host.wallet.mainnet) { host.toast(ctx.getString(R.string.fees_devnet_only)); return }
+        paying = true
+        render()
+        host.scope.launch {
+            host.desk.payFees(host.wallet, host.sender)
+                .onSuccess { host.toast(ctx.getString(R.string.fees_paid)) }
+                .onFailure {
+                    host.toast(
+                        when ((it as? DeskError)?.kind) {
+                            DeskError.Kind.DEVNET_ONLY -> ctx.getString(R.string.fees_devnet_only)
+                            DeskError.Kind.NOTHING_OWED -> ctx.getString(R.string.fees_nothing)
+                            else -> host.errorText(it)
+                        },
+                    )
+                }
+            paying = false
+            render()
+        }
     }
 
     private fun styleSeg(tv: TextView, on: Boolean) {
@@ -276,5 +520,11 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
 
     private fun emptyCard(text: String): View = Ui.card(ctx, pad = 16).apply {
         addView(Ui.muted(ctx, text, 13f))
+    }
+
+    companion object {
+        private val TRADE_STEPS = listOf(0.002, 0.005, 0.01, 0.015, 0.02)
+        private val DAY_STEPS = listOf(0.02, 0.05, 0.1, 0.2, 0.3)
+        private val LOSS_STEPS = listOf(1.0, 2.0)
     }
 }
