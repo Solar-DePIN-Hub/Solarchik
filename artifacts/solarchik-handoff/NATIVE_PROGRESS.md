@@ -123,6 +123,10 @@ All numbers live in `core/SolarchikConfig.kt`.
 - The Yard crew card shows the desk state.
 - Copy avoids gambling words: strategies "forecast" and "enter when confidence ≥ 65%"; lanes are labelled Market / Ринок.
 
+**APKs (box, `/workspace/apk-test/`)**
+- `solarchik-0.20.1-B-debug.apk`: 7,169,732 B, sha256 `f4234c78dc65e94fe3442df400bb9b4c03c644cc4bb138f1c4e321933009c1d1`, Android debug key.
+- `solarchik-0.20.1-B-release-boxkey.apk`: 3,182,570 B, sha256 `2c9d4c23732e229263478a72c77a728b439d5dda7da811c0f71a3de056e4d8e8`, R8, signed with the box test key (not production).
+
 ## Tests (milestone B)
 
 `./gradlew :app:testDebugUnitTest -Plive=… -Pchat=…`: 82 tests, 80 pass, 0 fail, 2 skipped (the opt-in `DevnetMintIT`). With `-Pdevnet=1` the simulation of all 10 mints passes; the live send is still skipped because the faucet returns 429.
