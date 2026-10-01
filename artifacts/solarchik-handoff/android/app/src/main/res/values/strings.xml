@@ -43,7 +43,7 @@
     <string name="yard_proof_msg">%1$s · signature</string>
     <string name="yard_reset_in">New UTC day in %1$s</string>
     <string name="yard_week_title">This week</string>
-    <string name="yard_week_sub">%1$d signed days in a row</string>
+    <string name="yard_week_sub">Signed days in a row: %1$d</string>
     <string name="yard_fee_title">Fee-free rewards</string>
     <string name="yard_fee_wait_48">Signed days left to 48h fee-free: %1$d</string>
     <string name="yard_fee_wait_7d">Signed days left to 7 days fee-free: %1$d</string>
@@ -284,7 +284,7 @@
     <string name="report_run">Roof run today: %1$d m.</string>
     <string name="report_window_active">Fee-free window: %1$d h left.</string>
     <string name="report_window_ready">A fee-free window is ready to start.</string>
-    <string name="report_window_wait">%1$d signed days to the next 48 h window.</string>
+    <string name="report_window_wait">Signed days left to the next 48 h window: %1$d.</string>
     <string name="report_desk">Running now: %1$s.</string>
     <string name="report_desk_idle">No strategy is running.</string>
     <string name="report_listen">Listen</string>

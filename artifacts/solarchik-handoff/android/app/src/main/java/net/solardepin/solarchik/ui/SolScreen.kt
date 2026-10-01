@@ -57,6 +57,7 @@ class SolScreen(host: MainActivity) : Screen(host) {
             background = Ui.rounded(Ui.withAlpha(Ui.BG, 0xD8), dp(18).toFloat(), Ui.withAlpha(Ui.CYAN, 0x66), dp(1))
             setPadding(dp(14), dp(12), dp(14), dp(12))
             maxLines = 7
+            ellipsize = android.text.TextUtils.TruncateAt.END
         }
         stage.addView(bubble, FrameLayout.LayoutParams(dp(205), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
             topMargin = dp(16); leftMargin = dp(14)

@@ -40,7 +40,7 @@
     <string name="yard_proof_msg">%1$s · підпис</string>
     <string name="yard_reset_in">Новий UTC-день за %1$s</string>
     <string name="yard_week_title">Цей тиждень</string>
-    <string name="yard_week_sub">%1$d підписаних днів поспіль</string>
+    <string name="yard_week_sub">Підписано поспіль: %1$d дн.</string>
     <string name="yard_fee_title">Нагороди без комісії</string>
     <string name="yard_fee_wait_48">Ще %1$d дн. до 48 год без комісії</string>
     <string name="yard_fee_wait_7d">Ще %1$d дн. до 7 днів без комісії</string>
@@ -273,7 +273,7 @@
     <string name="report_run">Пробіжка дахом сьогодні: %1$d м.</string>
     <string name="report_window_active">Вікно без комісії: лишилось %1$d год.</string>
     <string name="report_window_ready">Вікно без комісії готове до запуску.</string>
-    <string name="report_window_wait">%1$d підписаних днів до наступного вікна 48 год.</string>
+    <string name="report_window_wait">Підписаних днів до наступного вікна 48 год: %1$d.</string>
     <string name="report_desk">Зараз працюють: %1$s.</string>
     <string name="report_desk_idle">Жодна стратегія не працює.</string>
     <string name="report_listen">Слухати</string>

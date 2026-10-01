@@ -125,7 +125,7 @@ All numbers live in `core/SolarchikConfig.kt`.
 
 ## Tests (milestone B)
 
-`./gradlew :app:testDebugUnitTest`: TESTCOUNT
+`./gradlew :app:testDebugUnitTest -Plive=… -Pchat=…`: 82 tests, 80 pass, 0 fail, 2 skipped (the opt-in `DevnetMintIT`). With `-Pdevnet=1` the simulation of all 10 mints passes; the live send is still skipped because the faucet returns 429.
 - New:
   - `AgentEngineTest` (12), `DeskTest` (5), `FeeWindowsTest` (11, ported from web), `NotePlannerTest` (3), `NotesTest` (2), `SolChatTest` (3), `SolRulesTest` (1)
   - `StreakRulesTest` grew to 14
@@ -144,3 +144,5 @@ All numbers live in `core/SolarchikConfig.kt`.
 - The friend worker gives generic answers and cuts Ukrainian replies short. Server-side fix: add game facts to its system prompt and raise `max_tokens`. The app answers rule questions locally.
 - Positions are simulated on real market data. On devnet only fees move.
 - Global loss brake: 2 losses in a row stop the whole desk for the UTC day (web rule).
+- Events picks the highest-priced favourite, which tends to be a long-dated market. Over its 30-minute window the price barely moves, so most Events/Combo paper closes settle at 0 P&L. Consider preferring markets that end within days.
+- Screens: `/workspace/apk-test/screens-B` (box). They come from a 4.5 h real-time session on live data (14 closes). Rows are booked as paper.
