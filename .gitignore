@@ -22,4 +22,5 @@ server/*.key
 server/arb-fire-ledger.json
 .env
 .env.*
+!.env.example
 *.log
