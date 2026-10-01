@@ -45,8 +45,8 @@
     <string name="yard_week_title">This week</string>
     <string name="yard_week_sub">%1$d signed days in a row</string>
     <string name="yard_fee_title">Fee-free rewards</string>
-    <string name="yard_fee_wait_48">%1$d more days to 48h fee-free</string>
-    <string name="yard_fee_wait_7d">%1$d more days to 7 days fee-free</string>
+    <string name="yard_fee_wait_48">Signed days left to 48h fee-free: %1$d</string>
+    <string name="yard_fee_wait_7d">Signed days left to 7 days fee-free: %1$d</string>
     <string name="yard_fee_ready">Reward ready: %1$s fee-free</string>
     <string name="yard_fee_ready_more">%1$d rewards waiting. They start only when you tap.</string>
     <string name="yard_fee_ready_one">It starts only when you tap. Use it when your agents trade.</string>

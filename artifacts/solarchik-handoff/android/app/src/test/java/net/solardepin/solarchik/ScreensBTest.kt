@@ -19,6 +19,7 @@ import net.solardepin.solarchik.core.AgentTier
 import net.solardepin.solarchik.core.FeeLedger
 import net.solardepin.solarchik.sol.ChatTurn
 import net.solardepin.solarchik.sol.SolChatStore
+import net.solardepin.solarchik.sol.SolRules
 import net.solardepin.solarchik.ui.SolScreen
 import org.junit.After
 import org.junit.Assume.assumeTrue
@@ -79,7 +80,8 @@ class ScreensBTest {
         if (chat.isFile) {
             val turns = json.decodeFromString(ListSerializer(ChatTurn.serializer()), chat.readText())
             val sol = SolChatStore(ctx)
-            turns.take(2).forEach { sol.add(it) }
+            // Stored as the app stores them: worker replies pass through SolRules.tidy.
+            turns.take(2).forEach { sol.add(if (it.role == "assistant") it.copy(text = SolRules.tidy(it.text)) else it) }
         }
     }
 
