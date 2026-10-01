@@ -304,3 +304,33 @@ export async function fireArbOnServer(
   if (bpId || sent) return { ok: false, broken: true, reason: "Зламано, чекає зведення." };
   return { ok: false, broken: false, reason: "Ончейн не відповів." };
 }
+
+/**
+ * Same sizing as fireArbOnServer against the live Backpack book, but nothing is
+ * signed or sent. No keys are read. Used whenever mainnet is not armed.
+ */
+export async function simulateArbOnServer(
+  dir: "A" | "B",
+  symbol = "SOL",
+): Promise<
+  | { ok: true; size: number; qty: number; base: string; bp: string; titan: string }
+  | { ok: false; broken: boolean; reason: string }
+> {
+  const spot = await findSpot(symbol);
+  if (!spot) return { ok: false, broken: false, reason: "Немає цієї пари на Backpack." };
+  const [book, solBook] = await Promise.all([
+    bookTop(spot.market),
+    spot.base === "SOL" ? Promise.resolve(null) : bookTop("SOL_USDC"),
+  ]);
+  const bid = book?.bid ?? 0;
+  const ask = book?.ask ?? 0;
+  if (!(bid > 0) || !(ask > bid)) return { ok: false, broken: false, reason: "Чекаю книгу." };
+  const solPx = spot.base === "SOL" ? ask : (solBook?.ask ?? 0);
+  if (!(solPx > 0)) return { ok: false, broken: false, reason: "Чекаю ціну SOL." };
+  const rawQty = spot.base === "SOL" ? LIVE_MAX : (LIVE_MAX * solPx) / ask;
+  const qty = floorToStep(rawQty, spot.step);
+  if (!(qty + 1e-12 >= spot.minQty)) return { ok: false, broken: false, reason: "Нога менша за мінімум біржі." };
+  const px = dir === "A" ? ask : bid;
+  const tag = `sim-${Date.now().toString(36)}`;
+  return { ok: true, size: LIVE_MAX, qty, base: spot.base, bp: `${tag}@${px}`, titan: tag };
+}

@@ -1,6 +1,7 @@
 import { CLASS_META } from "@/lib/agents/classes";
 import { useAgents } from "@/lib/agents/store";
 import { arbNets, type ArbHouseView, type ArbQuote } from "@/lib/agents/engine";
+import { SIM_LABEL } from "@/lib/agents/arb-rules";
 import type { AgentKind, AgentNft, AgentRuntime, StrategyBundle } from "@/lib/agents/types";
 import { cn } from "@/lib/utils";
 import { TierBadge } from "./tier-badge";
@@ -75,8 +76,10 @@ export function AgentBay({ runtime, nft }: { runtime: AgentRuntime; nft: AgentNf
 
 function houseLine(credit: number, house: ArbHouseView | null): string {
   if (!house) return `Кредит ${credit.toFixed(4)} SOL. Чекаю касу.`;
+  if (house.mode === "closed") return house.modeReason || "Каса закрита.";
+  if (house.mode === "sim") return `${SIM_LABEL}. Кредит не списується. Mainnet вимкнено на сервері.`;
   const n = (v: number | null) => (v == null ? "…" : v.toFixed(4));
-  return `Кредит ${credit.toFixed(4)} · Backpack ${n(house.bpSol)} SOL ${n(house.bpUsdc)} USDC · ончейн ${n(house.chainSol)} SOL ${n(house.chainUsdc)} USDC`;
+  return `MAINNET · Кредит ${credit.toFixed(4)} · Backpack ${n(house.bpSol)} SOL ${n(house.bpUsdc)} USDC · ончейн ${n(house.chainSol)} SOL ${n(house.chainUsdc)} USDC`;
 }
 
 function px(n: number): string {

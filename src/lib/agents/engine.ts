@@ -65,6 +65,9 @@ export type ArbHouseView = {
   houseKey: boolean;
   /** Base symbol → available on Backpack and on the Solana desk. Absent until both reads land. */
   tokens?: Record<string, { bp: number; chain: number }> | null;
+  /** Server decision. "sim" never moves money; "closed" never fires. Missing = treat as mainnet rules. */
+  mode?: "mainnet" | "sim" | "closed";
+  modeReason?: string;
 };
 
 export type ChainJob =
@@ -425,7 +428,13 @@ function arbDex(
   }
   const liveMax = args.liveMaxSol ?? 0.005;
   const credit = args.creditSol ?? 0;
-  if (!(credit + 1e-9 >= liveMax)) {
+  const house = args.house;
+  if (house?.mode === "closed") {
+    return hold(`${head}. ${house.modeReason || "Каса закрита."}`, mark);
+  }
+  // Simulation: nothing is spent, so credit and treasury balances do not gate it.
+  const sim = house?.mode === "sim";
+  if (!sim && !(credit + 1e-9 >= liveMax)) {
     return hold(`${head}. Немає кредиту.`, mark);
   }
   const solPx = args.quote?.solUsd && args.quote.solUsd > 0 ? args.quote.solUsd : book.base === "SOL" ? book.ask : 0;
@@ -434,29 +443,30 @@ function arbDex(
   if (book.minQty > 0 && !(qty + 1e-9 >= book.minQty)) {
     return hold(`${head}. Нога менша за мінімум біржі.`, mark);
   }
-  const house = args.house;
   const needUsdc = qty * book.ask;
   const row = house?.tokens?.[book.base];
   const bpBase = book.base === "SOL" ? house?.bpSol : row?.bp;
   const chainBase = book.base === "SOL" ? house?.chainSol : row?.chain;
   const covered = (base: number | null | undefined, usdc: number | null | undefined) =>
     base != null && usdc != null && base + 1e-12 >= qty && usdc + 1e-9 >= needUsdc;
-  if (!house || house.bpUsdc == null || (book.base !== "SOL" && !house.tokens)) {
-    return hold(`${head}. Чекаю касу.`, mark);
+  if (!sim) {
+    if (!house || house.bpUsdc == null || (book.base !== "SOL" && !house.tokens)) {
+      return hold(`${head}. Чекаю касу.`, mark);
+    }
+    if (!covered(bpBase, house.bpUsdc)) {
+      return hold(`${head}. Каса Backpack порожня.`, mark);
+    }
+    if (house.chainUsdc == null || (book.base === "SOL" ? house.chainSol == null : chainBase == null)) {
+      return hold(`${head}. Чекаю касу.`, mark);
+    }
+    if (!covered(chainBase, house.chainUsdc)) {
+      return hold(`${head}. Ончейн-каса порожня.`, mark);
+    }
+    if (!house.houseKey) {
+      return hold(`${head}. Немає ключа каси ончейн.`, mark);
+    }
   }
-  if (!covered(bpBase, house.bpUsdc)) {
-    return hold(`${head}. Каса Backpack порожня.`, mark);
-  }
-  if (house.chainUsdc == null || (book.base === "SOL" ? house.chainSol == null : chainBase == null)) {
-    return hold(`${head}. Чекаю касу.`, mark);
-  }
-  if (!covered(chainBase, house.chainUsdc)) {
-    return hold(`${head}. Ончейн-каса порожня.`, mark);
-  }
-  if (!house.houseKey) {
-    return hold(`${head}. Немає ключа каси ончейн.`, mark);
-  }
-  const text = `${head}. ${dir}. Чистий край ${bps.toFixed(1)} bps. Нога ${qty.toPrecision(4)} ${book.base}.`;
+  const text = `${sim ? "СИМУЛЯЦІЯ · " : ""}${head}. ${dir}. Чистий край ${bps.toFixed(1)} bps. Нога ${qty.toPrecision(4)} ${book.base}.`;
   return {
     nft,
     log: { id: uid(), at: args.now, kind: "dex", text },

@@ -29,6 +29,8 @@ import { encodeBase58 } from "./base58";
 import { confirmMainnetTx, peekMainnetSig, prepareMainnetSend, prepareMainnetSweep, readMainnetBalance, readMainnetUsdc, sendMainnetTx } from "./mainnet";
 import { addArbCredit, readArbCredit, takeArbCredit } from "./arb-credit";
 import { fireArb, readArbHouse, type ArbHouse } from "./arb-house";
+import { SIM_LABEL, cleanArbSymbol } from "./arb-rules";
+import { signProof } from "./wallet-sign";
 import { planFee, type FeeRow } from "./fee-ledger";
 import { paySkuFromPlayer } from "./tier-pay";
 import { readCaps, userTradeBlock } from "./user-limits";
@@ -567,6 +569,15 @@ async function sendDueFees(due: FeeRow[]) {
     }
   }
   useAgents.getState().persist();
+}
+
+/** Sign with the room key, then let the server decide. The browser holds no arb secret. */
+async function signedArbFire(dir: "A" | "B", rawSymbol: string, asset: string) {
+  const kp = await loadKeypair();
+  if (!kp) return { ok: false as const, mode: "closed" as const, broken: false, reason: "Немає ключа кімнати." };
+  const symbol = cleanArbSymbol(rawSymbol);
+  const proof = await signProof(kp, "arb", `${dir}:${symbol}:${asset}`);
+  return fireArb({ data: { dir, symbol, asset, proof } });
 }
 
 type HeldTrade = PendingTrade & { job: ChainJob };
@@ -3447,6 +3458,21 @@ export const useAgents = create<AgentsState>((set, get) => ({
       return false;
     }
     set({ sol: solNow, solKnown: true, solMiss: false });
+    if (tier === "free") {
+      // Server re-checks on-chain (tr=free owned by this wallet) before any mint.
+      try {
+        const { claimFreeMint } = await import("./free-mint");
+        const proof = await signProof(kp, "free-mint", "");
+        const gate = await claimFreeMint({ data: { proof } });
+        if (!gate.ok) {
+          set({ notice: gate.reason });
+          return false;
+        }
+      } catch {
+        set({ notice: "Сервер не підтвердив безкоштовний мінт. Мінт не почато." });
+        return false;
+      }
+    }
     const feeReserve = 0.02;
     if (solNow < feeReserve) {
       set({ notice: "Поповни Devnet краном. Для мінту треба 0.02 SOL." });
@@ -3760,18 +3786,27 @@ export const useAgents = create<AgentsState>((set, get) => ({
         const dir = step.arbFire.dir;
         const symbol = step.arbFire.symbol;
         const asset = nft.asset;
-        void fireArb({ data: { dir, symbol } })
+        void signedArbFire(dir, symbol, asset)
           .then((res) => {
+            if (res.ok && res.simulated) {
+              // Simulation: no money moved, so arb credit is not spent.
+              const text = `${SIM_LABEL} · ${dir} ${res.qty} ${res.base} · ${res.bp}`;
+              useAgents.setState((s) => ({
+                notice: text,
+                log: pushLog(s.log, { id: res.titan, at: Date.now(), kind: "dex", text }),
+              }));
+              return;
+            }
             if (res.ok) {
               const left = takeArbCredit(asset, res.size);
               useAgents.setState((s) => ({
                 ...(left == null ? {} : { arbCredit: { ...s.arbCredit, [asset]: left } }),
-                notice: `${dir} ${res.qty} ${res.base} · Backpack ${res.bp} · Titan ${res.titan}`,
+                notice: `MAINNET · ${dir} ${res.qty} ${res.base} · Backpack ${res.bp} · Titan ${res.titan}`,
                 log: pushLog(s.log, {
                   id: res.titan,
                   at: Date.now(),
                   kind: "dex",
-                  text: `${dir} ${res.qty} ${res.base} · Backpack ${res.bp} · Titan ${res.titan}`,
+                  text: `MAINNET · ${dir} ${res.qty} ${res.base} · Backpack ${res.bp} · Titan ${res.titan}`,
                 }),
               }));
               return;

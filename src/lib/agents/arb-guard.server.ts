@@ -1,52 +1,107 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { timingSafeEqual } from "node:crypto";
+import { ARB_FIRE_SOL, ARB_LIMITS, arbModeFor, type ArbModeInfo, type ArbStore } from "./arb-rules";
+import { verifyProof } from "./wallet-proof.server";
+import type { WalletProof } from "./wallet-proof";
+import type { GuardSql } from "./guard-ledger.server";
 
-/** Server-side arb fire cap. Not the browser credit ledger. */
-const DAY_CAP_SOL = 0.02;
-const MIN_GAP_MS = 30_000;
-const LEDGER_URL = new URL("../../../server/arb-fire-ledger.json", import.meta.url);
+/**
+ * Server-side arb authorization. The browser never holds a secret: it sends a
+ * room-key proof, and the server checks the signature, that the wallet owns a
+ * dex agent on devnet, then books the fire against shared caps in Postgres.
+ * Mainnet needs ARB_MAINNET_ENABLED=true AND DATABASE_URL. Otherwise it is a
+ * simulation, or closed when there is no shared store. No file writes.
+ */
 
-type Ledger = { day: string; spent: number; lastAt: number };
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
+export function arbStore(): ArbStore {
+  const url = (process.env.DATABASE_URL || "").trim();
+  if (url) return "shared";
+  // In-memory PGLite is per process. Fine for `vite dev`, never for a deploy.
+  if (import.meta.env.DEV) return "dev";
+  return "none";
 }
 
-function readLedger(): Ledger {
-  const empty = { day: today(), spent: 0, lastAt: 0 };
-  if (!existsSync(LEDGER_URL)) return empty;
+export function currentArbMode(): ArbModeInfo {
+  return arbModeFor(process.env.ARB_MAINNET_ENABLED, arbStore());
+}
+
+async function guardSql(): Promise<GuardSql> {
+  const { getSql } = await import("@/lib/db");
+  return getSql();
+}
+
+export type ArbFireResult =
+  | { ok: true; mode: "mainnet" | "sim"; simulated: boolean; size: number; qty: number; base: string; bp: string; titan: string }
+  | { ok: false; mode: "mainnet" | "sim" | "closed"; broken: boolean; reason: string };
+
+export async function guardedArbFire(input: {
+  dir: "A" | "B";
+  symbol: string;
+  asset: string;
+  proof: WalletProof | null;
+}): Promise<ArbFireResult> {
+  const info = currentArbMode();
+  if (info.mode === "closed") return { ok: false, mode: "closed", broken: false, reason: info.reason };
+  const mode = info.mode;
+  const refuse = (reason: string): ArbFireResult => ({ ok: false, mode, broken: false, reason });
+  if (!input.proof) return refuse("Немає підпису гаманця.");
+  if (input.asset.length < 32) return refuse("Немає NFT агента.");
+  const extra = `${input.dir}:${input.symbol}:${input.asset}`;
+  const signed = verifyProof(input.proof, "arb", extra);
+  if (!signed.ok) return refuse(signed.reason);
+  const wallet = input.proof.wallet;
+
+  let sql: GuardSql;
   try {
-    const raw = JSON.parse(readFileSync(LEDGER_URL, "utf8")) as Partial<Ledger>;
-    if (raw.day !== today()) return empty;
-    return {
-      day: today(),
-      spent: typeof raw.spent === "number" && raw.spent > 0 ? raw.spent : 0,
-      lastAt: typeof raw.lastAt === "number" ? raw.lastAt : 0,
-    };
+    sql = await guardSql();
   } catch {
-    return empty;
+    return { ok: false, mode: "closed", broken: false, reason: "Каса закрита: база не відповіла." };
   }
-}
+  const { spendProofOnce, reserveArb, settleArb } = await import("./guard-ledger.server");
+  const now = Date.now();
+  try {
+    if (!(await spendProofOnce(sql, wallet, "arb", input.proof.ts, now))) return refuse("Цей підпис уже використано.");
+  } catch {
+    return { ok: false, mode: "closed", broken: false, reason: "Каса закрита: база не відповіла." };
+  }
 
-function writeLedger(row: Ledger) {
-  writeFileSync(LEDGER_URL, JSON.stringify(row), { mode: 0o600 });
-}
+  try {
+    const { fetchCoreAgent, isArbAgent } = await import("./core-owned.server");
+    const agent = await fetchCoreAgent(input.asset);
+    if (!agent || agent.owner !== wallet) return refuse("Цей NFT не в твоєму гаманці.");
+    if (!isArbAgent(agent)) return refuse("Арбітраж лише для агента класу 2 або комбо.");
+  } catch {
+    return refuse("Не вдалося перевірити NFT ончейн. Спробуй пізніше.");
+  }
 
-/** Client credit is ignored. The secret never leaves the server. */
-export function assertArbFire(ticket: string): { ok: true } | { ok: false; reason: string } {
-  const secret = (process.env.ARB_FIRE_SECRET || "").trim();
-  if (secret.length < 16) return { ok: false, reason: "Каса не озброєна." };
-  const given = Buffer.from(ticket);
-  const want = Buffer.from(secret);
-  if (given.length !== want.length || !timingSafeEqual(given, want)) return { ok: false, reason: "Каса не озброєна." };
-  const ledger = readLedger();
-  if (Date.now() - ledger.lastAt < MIN_GAP_MS) return { ok: false, reason: "Зачекай. Ліміт каси." };
-  if (ledger.spent + 1e-9 >= DAY_CAP_SOL) return { ok: false, reason: "Денний ліміт каси." };
-  return { ok: true };
-}
+  let booked;
+  try {
+    booked = await reserveArb(sql, {
+      mode,
+      wallet,
+      asset: input.asset,
+      symbol: input.symbol,
+      dir: input.dir,
+      sol: ARB_FIRE_SOL,
+      limits: ARB_LIMITS[mode],
+      now,
+    });
+  } catch {
+    return { ok: false, mode: "closed", broken: false, reason: "Каса закрита: база не відповіла." };
+  }
+  if (!booked.ok) return refuse(booked.reason);
 
-export function noteArbFire(sol: number) {
-  const ledger = readLedger();
-  const spent = Math.round((ledger.spent + (sol > 0 ? sol : 0)) * 1e9) / 1e9;
-  writeLedger({ day: today(), spent, lastAt: Date.now() });
+  const house = await import("./arb-house.server");
+  let result: Awaited<ReturnType<typeof house.fireArbOnServer>>;
+  try {
+    result = mode === "mainnet" ? await house.fireArbOnServer(input.dir, input.symbol) : await house.simulateArbOnServer(input.dir, input.symbol);
+  } catch (error) {
+    // Unknown outcome. Keep the booking so the cap stays conservative.
+    await settleArb(sql, booked.reservation, "broken", error instanceof Error ? error.message : "throw", Date.now());
+    return { ok: false, mode, broken: true, reason: "Зламано, чекає зведення." };
+  }
+  if (result.ok) {
+    await settleArb(sql, booked.reservation, "ok", `${result.bp} ${result.titan}`, Date.now());
+    return { ...result, mode, simulated: mode !== "mainnet" };
+  }
+  await settleArb(sql, booked.reservation, result.broken ? "broken" : "failed", result.reason, Date.now());
+  return { ...result, mode };
 }
