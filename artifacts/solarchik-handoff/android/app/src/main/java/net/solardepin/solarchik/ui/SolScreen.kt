@@ -124,7 +124,7 @@ class SolScreen(host: MainActivity) : Screen(host) {
 
     override fun onShow() {
         render()
-        retellOnce()
+        if (MainActivity.tickerEnabled) retellOnce()
     }
 
     override fun onHide() {
@@ -177,19 +177,26 @@ class SolScreen(host: MainActivity) : Screen(host) {
         }
         col.addView(tv)
         if (t.fallback) col.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.chat_fallback), 10f, Ui.MUTED, 700), 2))
+        if (t.local) col.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.chat_rules), 10f, Ui.GOLD, 700), 2))
         wrap.addView(col, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             if (mine) leftMargin = dp(48) else rightMargin = dp(48)
         })
         return wrap
     }
 
-    private fun send(raw: String) {
+    fun send(raw: String) {
         val msg = raw.trim()
         if (msg.isEmpty() || sending) return
-        sending = true
         val history = store.turns()
         store.add(ChatTurn("user", msg, System.currentTimeMillis()))
         input.setText("")
+        net.solardepin.solarchik.sol.SolRules.answer(ctx, msg)?.let { rule ->
+            store.add(ChatTurn("assistant", rule, System.currentTimeMillis(), local = true))
+            render()
+            speak(rule, auto = true)
+            return
+        }
+        sending = true
         status.text = "…"
         status.visibility = View.VISIBLE
         render()

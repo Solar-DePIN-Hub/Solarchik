@@ -57,7 +57,7 @@
     <string name="window_48h">48h</string>
     <string name="window_7d">7-day</string>
     <string name="yard_crew_title">Your crew</string>
-    <string name="yard_crew_empty">No agents yet. Mint a free strategy NFT to start.</string>
+    <string name="yard_crew_empty">No agents yet. Mint a free strategy NFT, or try any strategy on paper.</string>
     <string name="yard_crew_line">%1$d agents · P&amp;L %2$s SOL · fees saved %3$s SOL</string>
     <string name="yard_sol_title">Sol says</string>
     <string name="yard_granted">New reward: %1$s fee-free window!</string>
@@ -303,4 +303,10 @@
     <string name="chat_fallback">server fallback</string>
     <string name="chat_offline">offline</string>
     <string name="chat_clear">Clear</string>
+    <string name="yard_crew_desk">Desk: %1$d running · %2$d in position</string>
+    <string name="rule_window">Every %1$d signed days in a row earn a %2$d-hour fee-free window, and every %3$d days a %4$d-day one. It starts only when you tap Activate. A position opened inside an activated window pays no fee, even if it closes later.</string>
+    <string name="rule_streak">Run %1$d m on the roof to unlock the day, then sign CLOCK IN with your wallet. Only signed UTC days count; miss one and the streak starts over.</string>
+    <string name="rule_fee">Free strategies pay %1$d%% only on realized profit; losses pay nothing. Pro costs %2$s SOL once and pays 0%%. Both carry a %3$d%% royalty on resale.</string>
+    <string name="rule_risk">Hard limits: %1$s SOL per position, %2$s SOL per day, stop after %3$d losses in a row or %4$s SOL lost in a day. You can only set them lower on the desk.</string>
+    <string name="chat_rules">Sol · game rules</string>
 </resources>

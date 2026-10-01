@@ -29,6 +29,8 @@ data class ChatTurn(
     val at: Long,
     /** The worker answered with its canned fallback, or the phone was offline. */
     val fallback: Boolean = false,
+    /** Answered on the phone from the game rules, not by the worker. */
+    val local: Boolean = false,
 )
 
 data class SolReply(val text: String, val fallback: Boolean, val offline: Boolean)
@@ -52,7 +54,7 @@ class SolChat(
             put("name", "Sol")
             if (context.isNotBlank()) put("context", context.take(400))
             put("history", buildJsonArray {
-                history.filter { !it.fallback }.takeLast(4).forEach { t ->
+                history.filter { !it.fallback && !it.local }.takeLast(4).forEach { t ->
                     add(buildJsonObject { put("role", t.role); put("content", t.text.take(400)) })
                 }
             })
@@ -62,7 +64,7 @@ class SolChat(
             val o = json.parseToJsonElement(text).jsonObject
             val reply = o["reply"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
             val fb = o["fallback"]?.jsonPrimitive?.booleanOrNull == true
-            if (reply.isBlank()) SolReply(offlineLine(language), true, true) else SolReply(reply, fb, false)
+            if (reply.isBlank()) SolReply(offlineLine(language), true, true) else SolReply(SolRules.tidy(reply), fb, false)
         }.getOrElse { SolReply(offlineLine(language), true, true) }
     }
 

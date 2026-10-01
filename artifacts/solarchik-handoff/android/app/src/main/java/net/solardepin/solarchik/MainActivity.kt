@@ -172,6 +172,7 @@ class MainActivity : ComponentActivity() {
     /** While the app is open the desk ticks every 30 s; the worker covers the background. */
     private fun startTicker() {
         ticker?.cancel()
+        if (!tickerEnabled) return
         ticker = scope.launch {
             while (true) {
                 if (desk.state().anyRunning) {
@@ -190,6 +191,7 @@ class MainActivity : ComponentActivity() {
 
     /** Start or stop the background worker to match the desk. */
     fun deskChanged() {
+        if (!tickerEnabled) return
         DeskWorker.sync(this, desk.state().anyRunning)
         if (desk.state().anyRunning) requestNotifications(fromUser = false)
         scope.launch {
@@ -304,6 +306,8 @@ class MainActivity : ComponentActivity() {
         Tab.SETTINGS -> SettingsScreen(this)
     }
 
+    fun screen(tab: Tab): Screen? = screens[tab]
+
     fun renderAll() {
         screens.values.forEach { it.render() }
     }
@@ -354,5 +358,7 @@ class MainActivity : ComponentActivity() {
         private val TOAST = Any()
         private const val TICK_MS = 30_000L
         const val EXTRA_TAB = "net.solardepin.solarchik.TAB"
+        /** Screenshot tests switch the live desk loop off so renders are deterministic. */
+        @JvmStatic var tickerEnabled = true
     }
 }

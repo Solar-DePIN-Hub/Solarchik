@@ -23,8 +23,8 @@ android {
         applicationId = "net.solardepin.solarchik"
         minSdk = 26
         targetSdk = 35
-        versionCode = 60
-        versionName = "0.20.0"
+        versionCode = 61
+        versionName = "0.20.1"
         buildConfigField("boolean", "MAINNET_PAID_MINT", "false")
     }
 
@@ -35,6 +35,8 @@ android {
         unitTests.all {
             it.maxHeapSize = "1536m"
             it.systemProperty("solarchik.devnet", (project.findProperty("devnet") as String?) ?: "0")
+            it.systemProperty("solarchik.live", (project.findProperty("live") as String?) ?: "")
+            it.systemProperty("solarchik.chat", (project.findProperty("chat") as String?) ?: "")
             it.systemProperty("solarchik.shots", (project.findProperty("shots") as String?) ?: layout.buildDirectory.dir("screens").get().asFile.path)
         }
     }

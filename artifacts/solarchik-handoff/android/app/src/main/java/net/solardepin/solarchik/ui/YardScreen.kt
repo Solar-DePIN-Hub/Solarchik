@@ -326,8 +326,12 @@ class YardScreen(host: MainActivity) : Screen(host) {
         val w = host.wallet
         val agents = if (w.connected) host.store.agentsFor(w.address, w.clusterName).filter { it.status != "missing" } else emptyList()
         val sum = FeeLedger.summarize(host.store.fees())
-        crewLine.text = if (agents.isEmpty() && sum.positions == 0) ctx.getString(R.string.yard_crew_empty)
-        else ctx.getString(R.string.yard_crew_line, agents.size, Fmt.signedSol(sum.pnl), Fmt.sol(sum.feesWaived))
+        val desk = host.desk.state()
+        val running = desk.runs.count { it.running }
+        val holding = desk.runs.count { it.open != null }
+        val base = if (agents.isEmpty() && sum.positions == 0) ctx.getString(R.string.yard_crew_empty)
+        else ctx.getString(R.string.yard_crew_line, agents.size, Fmt.signedSol(sum.pnl, 6), Fmt.sol(sum.feesWaived, 6))
+        crewLine.text = if (running + holding > 0) base + "\n" + ctx.getString(R.string.yard_crew_desk, running, holding) else base
     }
 
     private fun renderClocks() {

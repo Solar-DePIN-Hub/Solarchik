@@ -54,7 +54,7 @@
     <string name="window_48h">48 год</string>
     <string name="window_7d">7 днів</string>
     <string name="yard_crew_title">Твоя команда</string>
-    <string name="yard_crew_empty">Агентів ще нема. Збий безкоштовний NFT стратегії, щоб почати.</string>
+    <string name="yard_crew_empty">Агентів ще немає. Створи безкоштовний NFT стратегії або спробуй будь-яку на папері.</string>
     <string name="yard_crew_line">Агентів: %1$d · P&amp;L %2$s SOL · заощаджено %3$s SOL</string>
     <string name="yard_sol_title">Сол каже</string>
     <string name="yard_granted">Нова нагорода: вікно %1$s без комісії!</string>
@@ -292,4 +292,10 @@
     <string name="chat_fallback">резервна відповідь</string>
     <string name="chat_offline">офлайн</string>
     <string name="chat_clear">Очистити</string>
+    <string name="yard_crew_desk">Пульт: працює %1$d · у позиції %2$d</string>
+    <string name="rule_window">Кожні %1$d підписаних днів поспіль дають вікно без комісії на %2$d год, а кожні %3$d днів — на %4$d днів. Воно стартує лише коли ти натиснеш «Активувати». Позиція, відкрита в активованому вікні, не платить комісію, навіть якщо закриється пізніше.</string>
+    <string name="rule_streak">Пробіжи %1$d м дахом, щоб відкрити день, і підпиши CLOCK IN гаманцем. Рахуються лише підписані дні UTC; пропустиш день — серія почнеться заново.</string>
+    <string name="rule_fee">Free-стратегії платять %1$d%% лише з реалізованого прибутку; збитки нічого не платять. Pro коштує %2$s SOL один раз і платить 0%%. В обох роялті %3$d%% при перепродажі.</string>
+    <string name="rule_risk">Жорсткі ліміти: %1$s SOL на позицію, %2$s SOL на день, стоп після %3$d збитків поспіль або %4$s SOL мінусу за день. На пульті їх можна лише зменшити.</string>
+    <string name="chat_rules">Sol · правила гри</string>
 </resources>

@@ -48,3 +48,12 @@ class SolChatTest {
         assertTrue(SolChat.onlyKnownNumbers("Nice work today.", note))
     }
 }
+
+class SolRulesTest {
+    @Test fun tidyKeepsWholeSentences() {
+        val s = net.solardepin.solarchik.sol.SolRules
+        assertEquals("Run early. It is cool.", s.tidy("Run early. It is cool. And then when the"))
+        assertEquals("Hi!", s.tidy("Hi!"))
+        assertEquals("Привіт! Краще бігти зранку, коли ще…", s.tidy("Привіт! Краще бігти зранку, коли ще"))
+    }
+}
