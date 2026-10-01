@@ -18,6 +18,10 @@ const ALLOW = new Set([
 ]);
 
 const locks = new Map();
+/** Cyrillic needs ~2-3x the tokens of English; 120 cut Ukrainian replies mid-sentence. */
+const MAX_TOKENS = 600;
+const RETRY_TOKENS = 800;
+const REPLY_CHARS = 900;
 
 function cors(origin) {
   const allow = ALLOW.has(origin) ? origin : "https://appassets.androidplatform.net";
@@ -44,6 +48,13 @@ function clip(s, n) {
     .slice(0, n);
 }
 
+/** Drops a dangling half sentence (model hit the token cap). Keeps the text when no sentence end exists. */
+function wholeSentences(text) {
+  const t = String(text || "").trim();
+  const m = t.match(/^[\s\S]*[.!?…。！？](?=\s|$)/);
+  return m && m[0].length >= 12 ? m[0].trim() : t;
+}
+
 function extractText(body) {
   const c = body?.choices?.[0];
   const msg = c?.message;
@@ -52,7 +63,7 @@ function extractText(body) {
   else if (Array.isArray(msg?.content)) raw = msg.content.map((p) => p?.text || p?.content || "").join("");
   else if (typeof c?.text === "string") raw = c.text;
   else if (typeof body?.output_text === "string") raw = body.output_text;
-  return clip(raw, 420);
+  return clip(raw, REPLY_CHARS);
 }
 
 function classify(body, http) {
@@ -92,14 +103,49 @@ function shapeLog(body, http, ms, model, attempt) {
   };
 }
 
+const LANG_NAMES = { en: "English", uk: "Ukrainian", es: "Spanish", pt: "Portuguese", de: "German", ja: "Japanese", ru: "Russian" };
+
+/** Best guess of the language of the player's own message. Falls back to the app language. */
+function detectLanguage(message, fallback) {
+  const s = String(message || "");
+  if (/[\u0400-\u04FF]/.test(s)) {
+    if (/[іїєґІЇЄҐ]/.test(s)) return "uk";
+    if (/[ыэъЫЭЪё]/.test(s)) return "ru";
+    return fallback === "ru" ? "ru" : "uk";
+  }
+  if (/[\u3040-\u30FF\u4E00-\u9FFF]/.test(s)) return "ja";
+  if (/[ãõç]|\b(você|voce|não|nao|obrigad[oa]|tá|está bem)\b/i.test(s)) return "pt";
+  if (/[ñ¿¡]|\b(hola|gracias|qué|cómo|por favor|estoy)\b/i.test(s)) return "es";
+  if (/[äöüß]|\b(hallo|danke|bitte|ich bin)\b/i.test(s)) return "de";
+  if (/^[\x00-\x7F]+$/.test(s) && /\b(the|you|what|how|is|are|hi|hello|thanks)\b/i.test(s)) return "en";
+  return fallback;
+}
+
+/** Facts the friend may state. Keep in sync with fees.config.ts, user-limits.ts and fee-windows.ts. */
+const GAME_FACTS = [
+  "Game facts (state only these, never invent numbers):",
+  "Clock in once per day to grow the streak; a missed day resets it.",
+  "Every 7 clock-in days earn a 48-hour fee-free window; every 30 days earn a 7-day fee-free window. The player activates a window when they choose; trades opened inside it pay no fee.",
+  "Free agents pay a 5% fee on profitable closed trades only (no fee on losses or inside a fee-free window).",
+  "Pro agent costs 0.1 SOL once and pays no profit fee.",
+  "Risk limits: at most 0.02 SOL per trade, 0.3 SOL spend per day, 0.3 SOL loss per day, and auto-stop after 2 losses in a row. The player can only lower these limits.",
+  "Practice runs on Solana devnet by default; real mainnet trading is off unless the player turns it on.",
+  "Strategies and agent picks are forecasts, not promises or bets: never promise profit, never tell the player to bet or to put in more money, and remind them they can lose.",
+  "If asked something you do not know about the game, say you are not sure.",
+].join(" ");
+
 function systemPrompt(input) {
   const name = clip(input.name, 16) || "Solarchik";
   const scene = clip(input.scene, 12);
   const lang = clip(input.language, 8) || "en";
+  const replyLang = clip(input.replyLanguage, 8) || lang;
+  const langName = LANG_NAMES[replyLang] || replyLang;
   return [
     `You are ${name}, a small navy-and-gold solar robot with a gold visor and cyan eyes.`,
     `You are the player's pocket friend in Solarchik CLOCK IN. Never a battery, egg, Tamagotchi, AI, Gemini, Grok, or chatbot.`,
-    `Reply in the same language as the player (fallback ${lang}). 1-2 complete spoken sentences. No markdown, no lists.`,
+    `Always answer in the language the player wrote their last message in (looks like ${langName}; app language ${lang}). Never switch to English unless the player wrote English.`,
+    `1-3 short complete spoken sentences, always finish the last sentence. No markdown, no lists.`,
+    GAME_FACTS,
     scene === "run" ? `You are IN a roof run (${clip(input.context, 80) || "running"}). One clear spoken sentence.` : "",
   ]
     .filter(Boolean)
@@ -157,7 +203,8 @@ export default {
     const message = clip(input.message, 2000);
     if (message.length < 1) return json({ error: "message_must_be_1_to_2000_characters" }, origin, 400);
 
-    const language = clip(input.language, 8) || "en";
+    const appLanguage = clip(input.language, 8) || "en";
+    const language = detectLanguage(message, appLanguage);
     const playerId = clip(input.playerId, 80) || crypto.randomUUID();
     const conversationId = clip(input.conversationId, 80) || crypto.randomUUID();
     const historyIn = Array.isArray(input.history) ? input.history.slice(-4) : [];
@@ -168,7 +215,7 @@ export default {
       if (content) history.push({ role, content });
     }
 
-    const messages = [{ role: "system", content: systemPrompt({ ...input, language }) }, ...history, { role: "user", content: message }];
+    const messages = [{ role: "system", content: systemPrompt({ ...input, language: appLanguage, replyLanguage: language }) }, ...history, { role: "user", content: message }];
 
     return withLock(playerId, async () => {
       const out = await chat(env, messages, language);
@@ -187,15 +234,15 @@ export default {
 };
 
 async function chat(env, messages, language) {
-  let r = await callFeatherless(env, messages, PRIMARY, 120, 0);
+  let r = await callFeatherless(env, messages, PRIMARY, MAX_TOKENS, 0);
   if (r.kind === "ok") return { text: r.text, provider: "featherless", fallback: false };
 
   const retryable = new Set(["no_choice", "empty_content", "length", "http_500", "http_502", "http_503", "http_429", "http_0"]);
   if (retryable.has(r.kind) || r.kind.startsWith("http_5") || r.kind.startsWith("http_429")) {
     await sleep(300);
-    r = await callFeatherless(env, slimMessages(messages), PRIMARY, 160, 1);
+    r = await callFeatherless(env, slimMessages(messages), PRIMARY, RETRY_TOKENS, 1);
     if (r.kind === "ok") return { text: r.text, provider: "featherless", fallback: false };
-    r = await callFeatherless(env, slimMessages(messages), SECONDARY, 120, 2);
+    r = await callFeatherless(env, slimMessages(messages), SECONDARY, RETRY_TOKENS, 2);
     if (r.kind === "ok") return { text: r.text, provider: "featherless", fallback: false };
   }
 
@@ -228,7 +275,9 @@ async function callFeatherless(env, messages, model, maxTokens, attempt) {
     const ms = Date.now() - t0;
     const kind = classify(body, res.status);
     console.log(JSON.stringify(shapeLog(body, res.status, ms, model, attempt)));
-    return { kind, text: extractText(body) };
+    const raw = extractText(body);
+    const cut = body?.choices?.[0]?.finish_reason === "length" || raw.length >= REPLY_CHARS;
+    return { kind, text: cut ? wholeSentences(raw) : raw };
   } catch (err) {
     console.log(JSON.stringify({ event: "llm_shape", model, attempt, http: 0, ms: Date.now() - t0, hasText: false, error: "network" }));
     return { kind: "http_0", text: "" };
@@ -253,12 +302,14 @@ async function callGemini(env, messages, language) {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: sys }] },
         contents,
-        generationConfig: { maxOutputTokens: 140, temperature: 0.7 },
+        generationConfig: { maxOutputTokens: RETRY_TOKENS, temperature: 0.7 },
       }),
     });
     const body = await res.json().catch(() => null);
     const parts = body?.candidates?.[0]?.content?.parts || [];
-    const text = clip(parts.map((p) => p?.text || "").join(" "), 420);
+    const joined = clip(parts.map((p) => p?.text || "").join(" "), REPLY_CHARS);
+    const cut = body?.candidates?.[0]?.finishReason === "MAX_TOKENS" || joined.length >= REPLY_CHARS;
+    const text = cut ? wholeSentences(joined) : joined;
     console.log(
       JSON.stringify({
         event: "llm_shape",

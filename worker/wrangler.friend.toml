@@ -1,0 +1,5 @@
+# Sol friend Worker. Secrets (FEATHERLESS_API_KEY, GEMINI_API_KEY) stay in Cloudflare; deploy does not touch them.
+name = "solarchik-ai-friend"
+main = "solarchik-ai-friend.js"
+compatibility_date = "2026-09-01"
+routes = [{ pattern = "friend.solardepin.net", custom_domain = true }]
