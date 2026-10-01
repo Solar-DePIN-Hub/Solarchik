@@ -142,7 +142,7 @@
     <string name="sku_arb_blurb">SOL/USDC на Backpack, вікна по 10 хв. Входить лише коли рух більший за поріг і впевненість ≥65%.</string>
 
     <string name="sol_title">Сол</string>
-    <string name="sol_sub">Твій кишеньковий сонячний друг.</string>
+    <string name="sol_sub">Твій кишеньковий сонячний друг. Говори або пиши; Sol відповідає твоєю мовою.</string>
     <string name="sol_report_title">Денний звіт</string>
     <string name="sol_report_streak">Стрік: %1$d дн.</string>
     <string name="sol_report_signed">Сьогодні підписано. Гарна зміна.</string>
@@ -263,4 +263,33 @@
     <string name="notes_allowed">Сповіщення дозволено</string>
     <string name="notes_blocked">Сповіщення для Solarchik вимкнено.</string>
     <string name="notes_allow">Дозволити сповіщення</string>
+    <string name="report_title">Нотатка дня · день UTC</string>
+    <string name="report_none">Сьогодні закритих позицій немає.</string>
+    <string name="report_positions">Закрито позицій: %1$d, у плюсі: %2$d. P&amp;L %3$s SOL.</string>
+    <string name="report_fees">Комісії сплачено %1$s, до сплати %2$s, прощено %3$s SOL.</string>
+    <string name="report_streak">Серія: %1$d дн.</string>
+    <string name="report_signed">Сьогодні підписано.</string>
+    <string name="report_unsigned">Сьогодні ще не підписано.</string>
+    <string name="report_run">Пробіжка дахом сьогодні: %1$d м.</string>
+    <string name="report_window_active">Вікно без комісії: лишилось %1$d год.</string>
+    <string name="report_window_ready">Вікно без комісії готове до запуску.</string>
+    <string name="report_window_wait">%1$d підписаних днів до наступного вікна 48 год.</string>
+    <string name="report_desk">Зараз працюють: %1$s.</string>
+    <string name="report_desk_idle">Жодна стратегія не працює.</string>
+    <string name="report_listen">Слухати</string>
+    <string name="report_retold">Версія Sol</string>
+    <string name="report_plain">Sol читає просту нотатку: у переказі були числа, яких у ній немає.</string>
+    <string name="report_plain_offline">Sol читає просту нотатку: сервер друга не відповів.</string>
+    <string name="chat_title">Поговори з Sol</string>
+    <string name="chat_hint">Напиши Sol…</string>
+    <string name="chat_send">Надіслати</string>
+    <string name="chat_empty">Привітайся. Sol бачить лише 4 останні повідомлення; більше нічого не покидає телефон.</string>
+    <string name="chat_voice">Озвучувати відповіді Sol</string>
+    <string name="chat_listening">Слухаю…</string>
+    <string name="chat_mic_off">Голосовий ввід недоступний на цьому телефоні.</string>
+    <string name="chat_mic_denied">Доступ до мікрофона вимкнено. Писати можна.</string>
+    <string name="chat_tts_missing">На телефоні немає голосу для цієї мови. Відповіді лишаються текстом.</string>
+    <string name="chat_fallback">резервна відповідь</string>
+    <string name="chat_offline">офлайн</string>
+    <string name="chat_clear">Очистити</string>
 </resources>

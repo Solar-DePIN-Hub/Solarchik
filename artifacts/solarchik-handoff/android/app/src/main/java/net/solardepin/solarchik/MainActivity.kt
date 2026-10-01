@@ -90,6 +90,25 @@ class MainActivity : ComponentActivity() {
         if (it) runCatching { net.solardepin.solarchik.notify.Notes.check(this) }
     }
 
+    private var permCallback: ((Boolean) -> Unit)? = null
+    private val permLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        permCallback?.invoke(ok)
+        permCallback = null
+    }
+
+    /** Runtime permission with a callback (microphone for Sol). */
+    fun withPermission(perm: String, cb: (Boolean) -> Unit) {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(this, perm) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            cb(true)
+            return
+        }
+        permCallback = cb
+        permLauncher.launch(perm)
+    }
+
+    /** "uk" or "en" from the app locale. */
+    val lang: String get() = if (resources.configuration.locales[0].language == "uk") "uk" else "en"
+
     /**
      * Android 13+: asks for POST_NOTIFICATIONS. If the system will not show the dialog any more
      * (denied twice), opens the app's notification settings instead.

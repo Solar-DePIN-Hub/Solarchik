@@ -150,7 +150,7 @@
 
     <!-- Sol -->
     <string name="sol_title">Sol</string>
-    <string name="sol_sub">Your pocket solar friend.</string>
+    <string name="sol_sub">Your pocket solar friend. Talk or type; Sol answers in your language.</string>
     <string name="sol_report_title">Daily report</string>
     <string name="sol_report_streak">Streak: %1$d days.</string>
     <string name="sol_report_signed">Today is signed. Nice shift.</string>
@@ -274,4 +274,33 @@
     <string name="notes_allowed">Notifications allowed</string>
     <string name="notes_blocked">Notifications are off for Solarchik.</string>
     <string name="notes_allow">Allow notifications</string>
+    <string name="report_title">Today\'s note · UTC day</string>
+    <string name="report_none">No closed positions today.</string>
+    <string name="report_positions">Closed positions: %1$d, in profit: %2$d. P&amp;L %3$s SOL.</string>
+    <string name="report_fees">Fees charged %1$s, owed %2$s, waived %3$s SOL.</string>
+    <string name="report_streak">Streak: %1$d days.</string>
+    <string name="report_signed">Today is signed.</string>
+    <string name="report_unsigned">Today is not signed yet.</string>
+    <string name="report_run">Roof run today: %1$d m.</string>
+    <string name="report_window_active">Fee-free window: %1$d h left.</string>
+    <string name="report_window_ready">A fee-free window is ready to start.</string>
+    <string name="report_window_wait">%1$d signed days to the next 48 h window.</string>
+    <string name="report_desk">Running now: %1$s.</string>
+    <string name="report_desk_idle">No strategy is running.</string>
+    <string name="report_listen">Listen</string>
+    <string name="report_retold">Sol\'s version</string>
+    <string name="report_plain">Sol reads the plain note: the retelling had numbers that are not in it.</string>
+    <string name="report_plain_offline">Sol reads the plain note: the friend server did not answer.</string>
+    <string name="chat_title">Talk to Sol</string>
+    <string name="chat_hint">Message Sol…</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_empty">Say hi. Sol keeps the last 4 messages for context; nothing else leaves the phone.</string>
+    <string name="chat_voice">Speak Sol\'s replies</string>
+    <string name="chat_listening">Listening…</string>
+    <string name="chat_mic_off">Voice input is not available on this phone.</string>
+    <string name="chat_mic_denied">Microphone access is off. Typing still works.</string>
+    <string name="chat_tts_missing">This phone has no voice for this language. Replies stay as text.</string>
+    <string name="chat_fallback">server fallback</string>
+    <string name="chat_offline">offline</string>
+    <string name="chat_clear">Clear</string>
 </resources>
