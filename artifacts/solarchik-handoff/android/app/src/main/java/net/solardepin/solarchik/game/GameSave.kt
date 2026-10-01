@@ -151,9 +151,7 @@ class GameSave(context: Context, private val clock: () -> Long = { System.curren
 
     private fun readWindows(): List<FeeWindow> {
         val raw = prefs.getString("feeWindows", null) ?: return emptyList()
-        return runCatching { json.decodeFromString(ListSerializer(FeeWindow.serializer()), raw) }.getOrDefault(emptyList())
-            .filter { it.id.isNotBlank() && (it.kind == FeeWindow.KIND_SHORT || it.kind == FeeWindow.KIND_LONG) }
-            .take(24)
+        return runCatching { net.solardepin.solarchik.core.FeeWindows.read(json.parseToJsonElement(raw)) }.getOrDefault(emptyList())
     }
 
     /** Streak the memo will carry if today gets signed now. */
