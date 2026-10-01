@@ -716,4 +716,5 @@ export const WORK_EN: Record<string, string> = {
   "Покупка не пройшла": "Purchase failed",
   "Комісію не відправлено. Ключ або модуль мережі не відкрився.": "Fee not sent. The key or network module did not open.",
   "Гаманець кімнати не відкрився. Онови сторінку.": "Room wallet did not open. Reload the page.",
+  "Ця оплата не схожа на оплату саме цього NFT (мінт мав бути до 30 хв після оплати).": "This payment does not look like the payment for this NFT (the mint had to follow within 30 min).",
 };

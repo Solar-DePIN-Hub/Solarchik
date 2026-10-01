@@ -81,7 +81,7 @@ export function checkProPaymentTx(
   roomWallet: string,
   nowSec: number,
   opts: { legacy?: boolean } = {},
-): { ok: true } | { ok: false; reason: string } {
+): { ok: true; legacyPaidAt?: number } | { ok: false; reason: string } {
   if (!tx) return { ok: false, reason: "Оплату не знайдено на Devnet. Зачекай підтвердження і спробуй ще раз." };
   if (tx.meta?.err) return { ok: false, reason: "Оплата впала з помилкою." };
   // Re-issue of a legacy Pro NFT: a payment made before co-signing went live counts without memo or age limit.
@@ -105,5 +105,15 @@ export function checkProPaymentTx(
     source === roomWallet ||
     ixs.some((ix) => (ix.program === "spl-memo" || ix.programId === "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr") && ix.parsed === memo);
   if (!bound && !legacy) return { ok: false, reason: "Оплата не прив'язана до цього гаманця кімнати." };
+  // Unbound legacy payment (old flow paid from Phantom/MWA): the caller must tie it to the old NFT by time.
+  if (!bound && legacy) return { ok: true, legacyPaidAt: tx.blockTime as number };
   return { ok: true };
+}
+
+/** Old flow: pay, then mint right away. An unbound legacy payment only counts for an NFT minted soon after it. */
+export const LEGACY_MINT_WINDOW_SEC = 30 * 60;
+
+export function legacyMintFitsPayment(paidAtSec: number, mintedAtSec: number | null): boolean {
+  if (mintedAtSec == null || !Number.isFinite(mintedAtSec)) return false;
+  return mintedAtSec >= paidAtSec - 60 && mintedAtSec <= paidAtSec + LEGACY_MINT_WINDOW_SEC;
 }

@@ -21,6 +21,7 @@ import {
   COSIGN_SLOT_MS,
   PRO_LAMPORTS,
   checkProPaymentTx,
+  legacyMintFitsPayment,
   freeAssetLabel,
   mintModeFor,
   mintUri,
@@ -287,6 +288,18 @@ describe("mint rules", () => {
     assert.equal(checkProPaymentTx(old, room, now, { legacy: true }).ok, true);
     const late = tx([transfer("Phantom1")], { blockTime: COSIGN_LAUNCH_SEC + 60 });
     assert.equal(checkProPaymentTx(late, room, COSIGN_LAUNCH_SEC + 120, { legacy: true }).ok, false);
+  });
+
+  it("an unbound legacy payment must be tied to the old NFT by mint time", () => {
+    const paidAt = COSIGN_LAUNCH_SEC - 86_400;
+    const unbound = checkProPaymentTx(tx([transfer("Phantom1")], { blockTime: paidAt }), room, now, { legacy: true });
+    assert.deepEqual(unbound, { ok: true, legacyPaidAt: paidAt });
+    const bound = checkProPaymentTx(tx([transfer(room)], { blockTime: paidAt }), room, now, { legacy: true });
+    assert.deepEqual(bound, { ok: true });
+    assert.equal(legacyMintFitsPayment(paidAt, paidAt + 90), true);
+    assert.equal(legacyMintFitsPayment(paidAt, paidAt + 31 * 60), false);
+    assert.equal(legacyMintFitsPayment(paidAt, paidAt - 3600), false);
+    assert.equal(legacyMintFitsPayment(paidAt, null), false);
   });
 
   it("tier lives in the uri", () => {

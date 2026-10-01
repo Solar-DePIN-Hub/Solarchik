@@ -16,6 +16,7 @@ import {
   CLIENT_SLOT_MS,
   checkProPaymentTx,
   freeAssetLabel,
+  legacyMintFitsPayment,
   mintModeFor,
   mintUri,
   proAssetLabel,
@@ -98,7 +99,11 @@ async function openSql(): Promise<GuardSql | null | "down"> {
   }
 }
 
-async function verifyProPayment(paySig: string, wallet: string, legacy: boolean): Promise<{ ok: true } | { ok: false; reason: string }> {
+async function verifyProPayment(
+  paySig: string,
+  wallet: string,
+  legacy: boolean,
+): Promise<{ ok: true; legacyPaidAt?: number } | { ok: false; reason: string }> {
   if (!/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(paySig)) return { ok: false, reason: "Немає підпису оплати Pro." };
   try {
     const tx = await rpc<ParsedPaymentTx>("getTransaction", [
@@ -108,6 +113,27 @@ async function verifyProPayment(paySig: string, wallet: string, legacy: boolean)
     return checkProPaymentTx(tx, wallet, Math.floor(Date.now() / 1000), { legacy });
   } catch {
     return { ok: false, reason: "Не вдалося перевірити оплату на Devnet. Спробуй ще раз." };
+  }
+}
+
+/** Block time of the oldest known transaction on an account (its creation for a Core asset). Null when unknown. */
+async function firstSeenSec(account: string): Promise<number | null> {
+  try {
+    let before: string | undefined;
+    let oldest: { blockTime?: number | null; signature: string } | undefined;
+    for (let page = 0; page < 5; page++) {
+      const rows = await rpc<{ signature: string; blockTime?: number | null }[]>("getSignaturesForAddress", [
+        account,
+        { limit: 1000, commitment: "confirmed", ...(before ? { before } : {}) },
+      ]);
+      if (!Array.isArray(rows) || !rows.length) break;
+      oldest = rows[rows.length - 1];
+      if (rows.length < 1000) break;
+      before = oldest.signature;
+    }
+    return typeof oldest?.blockTime === "number" ? oldest.blockTime : null;
+  } catch {
+    return null;
   }
 }
 
@@ -297,6 +323,12 @@ export async function prepareReissueOnServer(input: { proof: WalletProof | null;
   if (tier === "pro") {
     const paid = await verifyProPayment(paySig, wallet, true);
     if (!paid.ok) return paid;
+    if (paid.legacyPaidAt != null) {
+      const mintedAt = await firstSeenSec(oldAsset);
+      if (!legacyMintFitsPayment(paid.legacyPaidAt, mintedAt)) {
+        return { ok: false, reason: "Ця оплата не схожа на оплату саме цього NFT (мінт мав бути до 30 хв після оплати)." };
+      }
+    }
   } else {
     try {
       if (await freeAlreadyOwned(wallet, oldAsset)) {
