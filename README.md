@@ -80,7 +80,9 @@ npm run dev
 - **Free.** Мінт без ціни, один на гаманець кімнати. 5% з реалізованого плюса. Мінус без комісії.
 - **Pro.** 0.1 SOL з гаманця гравця (Phantom або телефон на Devnet) на `8J3hxf1XSYV1HKVUJtwtQtVwSvSeaAyW5RmL8EqC67ic`, потім мінт. 0% з прибутку. Seeker лише на mainnet оплату не бере: реальні SOL не списуються.
 
-На кожному новому Core-активі плагін Royalties 5%, творець — та сама адреса. Рівень лежить в атрибуті `tr` (`pro` або `free`). Старі NFT без атрибута лишаються Pro і не оподатковуються.
+На кожному новому Core-активі плагін Royalties 5%, творець — та сама адреса.
+
+Мінт перевіряє сервер. З `MINT_AUTHORITY_SECRET` сервер сам збирає транзакцію Core і підписує її: актив іде в колекцію сервера, рівень пишеться в URI (`urn:solarchik:agent:pro` або `:free`), змінити його може лише сервер. Ключ кімнати лише додає підпис платника. Pro: оплата 0.1 SOL з мемо `solarchik-pro:<гаманець кімнати>`, сервер читає транзакцію на Devnet, одна оплата — один мінт. Free: один на гаманець, сервер дивиться ончейн. Без ключа на деплої Pro закритий з поясненням, нічого не списується. Старі NFT лишаються з атрибутом `tr`; без атрибута — Pro.
 
 Комісія пишеться в журнал: час відкриття і закриття, PnL, сума, причина (pro, вікно, мінус, папір, відправлено). Папір лише показує «було б». Підпис не вигадується, якщо переказ не пройшов.
 
@@ -90,7 +92,8 @@ npm run dev
 
 - 7 підписів підряд дають 48 годин без комісії. Лічильник сімки після цього починається знову. Кожен такий цикл — один раз.
 - 30, 60, 90… дають 7 днів без комісії. Лічильник тридцятки не скидається через нагороду. Кожну позначку дають один раз.
-- Вікно лежить як «готове», поки гравець не натисне «Увімкнути». Покриває угоду, лише якщо відкриття потрапляє в активне вікно.
+- Вікно лежить як «готове», поки гравець не натисне «Увімкнути». Угода без комісії, якщо її відкриття потрапило в будь-яке увімкнене вікно (startedAt <= openedAt < endsAt), активне чи вже витрачене. Позиція, відкрита у вікні і закрита після його кінця, теж без комісії.
+- Id нагороди містить UTC-день видачі: `h48-<N>-<РРРР-ММ-ДД>`, `d7-<тридцятка>-<РРРР-ММ-ДД>`. Той самий id в той самий день — один раз. Друга серія 30 днів після обриву дає нову нагороду. Старі id (`d7-30`) лишаються і не блокують нових. Зберігається до 24 вікон. Правила в `src/lib/game/fee-windows.ts`; нативний застосунок повторює їх точно.
 
 Двір показує, скільки днів лишилось, і зворотний відлік, коли вікно вже йде. Раз на UTC-день Сол читає вчорашній журнал. Якщо цифр немає, так і каже. Голос не підставляє чужі числа.
 
@@ -128,12 +131,15 @@ ETH, DOGE, XRP та інші без Solana-виводу не входять. І�
 
 ## Ключі, яких немає в git
 
-Кладуться лише на сервер, не в клієнт і не в коміт:
+Кладуться лише у змінні середовища сервера (Vercel), не в клієнт і не в коміт. Див. `.env.example`:
 
-- `server/titan.secret` — ключ Titan
-- `server/backpack.secret` — API key і secret каси, два рядки
+- `TITAN_SECRET` — ключ Titan
+- `BACKPACK_API_KEY`, `BACKPACK_SECRET` — API key і secret каси
+- `ARB_HOUSE_KEY` — ключ гаманця каси. Публічний ключ має дорівнювати `H7zKmmnMNfnsMtib6mopdT8XsPYAyPBFuaQeWhBYTpQg`
+- `MINT_AUTHORITY_SECRET` — ключ мінту на Devnet (SOL не потрібен)
 - `server/gemini.secret` — Gemini
-- `server/arb-house.key` — ключ гаманця каси. Публічний ключ має дорівнювати `H7zKmmnMNfnsMtib6mopdT8XsPYAyPBFuaQeWhBYTpQg`
+
+Старі файли `server/titan.secret`, `server/backpack.secret`, `server/arb-house.key` читаються лише під `vite dev`.
 
 Без них бот читає книгу і стоїть. Угоду не вигадує.
 
@@ -153,7 +159,7 @@ The review APK in `public/` is still `Solarchik-CLOCK-IN-0.19.51.apk`. Native so
 
 Strategy NFTs have two tiers. Free is one mint per room wallet and takes 5% of realized profit. Pro is 0.1 devnet SOL from the player's own wallet to `8J3hxf1XSYV1HKVUJtwtQtVwSvSeaAyW5RmL8EqC67ic`, then 0% of profit. A mainnet-only Seeker is not charged. New Core assets carry a 5% royalties plugin. A 7-day signed streak unlocks 48 fee-free hours and the counter restarts. A 30-day streak unlocks 7 days and the counter keeps going. The window starts only from a button. Prices live in `src/lib/agents/fees.config.ts`.
 
-The arb bot scans every Backpack USDC spot market that withdraws on Solana (24 markets today). It picks the best net edge after 0.15% costs. It fires only when the edge clears the NFT threshold, the player has at least 0.005 SOL of arb credit, both the Backpack account and the on-chain treasury hold that token and USDC, and the treasury key is on the server. The browser holds no arb secret. It signs a short proof with the room key, and the server checks the signature, that the wallet owns the class 2 or combo agent on devnet, and the caps in Postgres: 30 s between fires, 0.01 SOL and 2 fires per wallet per UTC day, 0.02 SOL for all wallets. Mainnet is off by default. It needs `ARB_MAINNET_ENABLED=true` and `DATABASE_URL` on the server. Otherwise the desk runs a simulation on the live Backpack book, labelled «СИМУЛЯЦІЯ · devnet, без грошей», and arb credit is not spent. With no shared database on a deploy the desk is closed. The Free tier is re-checked on the server before a free mint: no Core asset with `tr=free` may already be owned by the wallet on devnet. The desk worker token is the `DESK_TOKEN` server env var; browsers and the native bundle go through `/api/desk/*`. See `.env.example`. The player never pastes a Backpack key. Arb credit is a mainnet transfer to `H7zKmmnMNfnsMtib6mopdT8XsPYAyPBFuaQeWhBYTpQg` with the NFT asset as the memo. That address is not the game pay wallet.
+The arb bot scans every Backpack USDC spot market that withdraws on Solana (24 markets today). It picks the best net edge after 0.15% costs. It fires only when the edge clears the NFT threshold, the player has at least 0.005 SOL of arb credit, both the Backpack account and the on-chain treasury hold that token and USDC, and the treasury key is on the server. The browser holds no arb secret. It signs a short proof with the room key, and the server checks the signature, that the wallet owns the class 2 or combo agent on devnet, and the caps in Postgres: 30 s between fires, 0.01 SOL and 2 fires per wallet per UTC day, 0.02 SOL for all wallets. Mainnet is off by default. It needs `ARB_MAINNET_ENABLED=true` and `DATABASE_URL` on the server. Otherwise the desk runs a simulation on the live Backpack book, labelled «СИМУЛЯЦІЯ · devnet, без грошей», and arb credit is not spent. With no shared database on a deploy the desk is closed. Mints are decided on the server. With `MINT_AUTHORITY_SECRET` the server builds and co-signs the Core mint into its own collection and writes the tier into the URI, which only the server can change; the room key only adds the payer signature. Pro needs a devnet payment of exactly 0.1 SOL to the pay wallet with memo `solarchik-pro:<room wallet>`; one payment mints once. Free is one per wallet, checked on-chain. Without the key a deploy closes Pro (nothing charged). Fee windows cover a trade opened inside any activated window, active or spent; reward ids carry the UTC grant day (`d7-<thirty>-<YYYY-MM-DD>`, `h48-<N>-<YYYY-MM-DD>`). The native bundle reaches arb and mint through `/api/native/*` on the deployed app. The desk worker token is the `DESK_TOKEN` server env var; browsers and the native bundle go through `/api/desk/*`. See `.env.example`. The player never pastes a Backpack key. Arb credit is a mainnet transfer to `H7zKmmnMNfnsMtib6mopdT8XsPYAyPBFuaQeWhBYTpQg` with the NFT asset as the memo. That address is not the game pay wallet.
 
 ```bash
 npm install
