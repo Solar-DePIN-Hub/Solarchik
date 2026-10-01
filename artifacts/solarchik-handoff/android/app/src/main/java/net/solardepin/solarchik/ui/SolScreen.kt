@@ -96,11 +96,16 @@ class SolScreen(host: MainActivity) : Screen(host) {
                 }
             }
             row.addView(input, LinearLayout.LayoutParams(0, dp(48), 1f))
-            micBtn = round(R.drawable.ic_nav_sol, Ui.CYAN) { toggleMic() }
-            micBtn.text = "🎙"
+            micBtn = round(Ui.CYAN) { toggleMic() }.apply { contentDescription = "mic" }
+            micBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_mic, 0, 0, 0)
+            micBtn.setPadding(dp(12), 0, 0, 0)
             row.addView(micBtn, LinearLayout.LayoutParams(dp(48), dp(48)))
-            row.addView(round(0, Ui.GOLD) { send(input.text.toString()) }.apply { text = "➤"; setTextColor(Ui.INK); background = Ui.rounded(Ui.GOLD, dp(16).toFloat()) },
-                LinearLayout.LayoutParams(dp(48), dp(48)))
+            row.addView(round(Ui.GOLD) { send(input.text.toString()) }.apply {
+                contentDescription = ctx.getString(R.string.chat_send)
+                background = Ui.rounded(Ui.GOLD, dp(16).toFloat())
+                setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_send, 0, 0, 0)
+                setPadding(dp(13), 0, 0, 0)
+            }, LinearLayout.LayoutParams(dp(48), dp(48)))
             addView(Ui.top(row, 12))
             addView(Ui.top(Ui.switchRow(ctx, ctx.getString(R.string.chat_voice), store.voiceOn) { _, on ->
                 store.voiceOn = on
@@ -108,15 +113,9 @@ class SolScreen(host: MainActivity) : Screen(host) {
             }, 10))
         })
 
-        addView(Ui.card(ctx).apply {
-            val r = Ui.row(ctx, gap = 12)
-            r.addView(Ui.iconBadge(ctx, R.drawable.ic_flame, Ui.AMBER, 36))
-            r.addView(Ui.weight(Ui.muted(ctx, tipOfDay(ctx, host.save.today()), 13f)))
-            addView(r)
-        })
     }
 
-    private fun round(icon: Int, color: Int, onClick: () -> Unit): TextView = Ui.text(ctx, "", 18f, Ui.TEXT, 800).apply {
+    private fun round(color: Int, onClick: () -> Unit): TextView = Ui.text(ctx, "", 18f, Ui.TEXT, 800).apply {
         gravity = Gravity.CENTER
         background = Ui.rounded(Ui.withAlpha(color, 0x22), dp(16).toFloat(), Ui.withAlpha(color, 0x66), dp(1))
         isClickable = true

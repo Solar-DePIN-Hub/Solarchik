@@ -68,7 +68,7 @@ class Rpc(val url: String) {
         return r.jsonPrimitive.content
     }
 
-    /** Sends an already fully signed transaction (tests and devnet tools only; the app sends through MWA). */
+    /** Sends a fully signed transaction: tests, devnet tools, and the MWA sign-only fallback. */
     suspend fun sendTransaction(signed: ByteArray): String {
         val r = call(
             "sendTransaction",

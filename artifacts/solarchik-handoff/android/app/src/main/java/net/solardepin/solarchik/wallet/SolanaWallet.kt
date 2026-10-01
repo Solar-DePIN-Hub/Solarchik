@@ -108,6 +108,25 @@ class SolanaWallet(context: Context) {
         sender: ActivityResultSender,
         build: suspend (payer: PublicKey, blockhash: ByteArray) -> LegacyTx,
     ): Result<SentTx> {
+        val first = signAndSendOnce(sender, build)
+        val err = first.exceptionOrNull() ?: return first
+        if (!shouldTrySignOnly(err)) return first
+        // Some wallets (or Seed Vault builds) refuse signAndSend for a tx that already carries
+        // another signer. Fall back to sign-only and broadcast through our own RPC.
+        val second = signOnlyThenSend(sender, build)
+        return if (second.isSuccess) second else first
+    }
+
+    /** Declines, missing wallets and our own build errors are final; anything else may work sign-only. */
+    internal fun shouldTrySignOnly(err: Throwable): Boolean {
+        if (err is WalletError) return err.kind == WalletError.Kind.FAILED
+        return false
+    }
+
+    private suspend fun signAndSendOnce(
+        sender: ActivityResultSender,
+        build: suspend (payer: PublicKey, blockhash: ByteArray) -> LegacyTx,
+    ): Result<SentTx> {
         adapter.rpcCluster = rpcCluster()
         val cluster = clusterName
         val client = rpc
@@ -138,6 +157,44 @@ class SolanaWallet(context: Context) {
             is TransactionResult.NoWalletFound -> Result.failure(WalletError(WalletError.Kind.NO_WALLET))
             is TransactionResult.Failure ->
                 Result.failure(buildError?.let(::buildFailure) ?: classify(result.e.message ?: result.message))
+        }
+    }
+
+    private suspend fun signOnlyThenSend(
+        sender: ActivityResultSender,
+        build: suspend (payer: PublicKey, blockhash: ByteArray) -> LegacyTx,
+    ): Result<SentTx> {
+        adapter.rpcCluster = rpcCluster()
+        val cluster = clusterName
+        val client = rpc
+        var buildError: Throwable? = null
+        val result = try {
+            adapter.transact(sender) { auth ->
+                val payer = PublicKey(accountKey(auth) ?: error("No account"))
+                val tx = try {
+                    build(payer, client.latestBlockhash())
+                } catch (t: Throwable) {
+                    buildError = t
+                    throw t
+                }
+                @Suppress("DEPRECATION")
+                signTransactions(arrayOf(tx.serialize()))
+            }
+        } catch (t: Throwable) {
+            return Result.failure(buildError?.let(::buildFailure) ?: classify(t.message))
+        }
+        return when (result) {
+            is TransactionResult.Success -> {
+                val addr = accountKey(result.authResult)?.let { Base58.encode(it) }.orEmpty()
+                remember(result.authResult.authToken, addr)
+                val signed = result.payload.signedPayloads.firstOrNull()
+                    ?: return Result.failure(WalletError(WalletError.Kind.FAILED, "Wallet returned no transaction"))
+                runCatching { client.sendTransaction(signed) }
+                    .map { SentTx(addr, it, cluster) }
+                    .recoverCatching { throw buildFailure(it) }
+            }
+            is TransactionResult.NoWalletFound -> Result.failure(WalletError(WalletError.Kind.NO_WALLET))
+            is TransactionResult.Failure -> Result.failure(classify(result.e.message ?: result.message))
         }
     }
 
