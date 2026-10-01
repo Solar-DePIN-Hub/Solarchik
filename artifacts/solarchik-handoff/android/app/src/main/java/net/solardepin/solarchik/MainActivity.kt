@@ -85,6 +85,32 @@ class MainActivity : ComponentActivity() {
         renderAll()
     }
 
+    private val notePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        renderAll()
+        if (it) runCatching { net.solardepin.solarchik.notify.Notes.check(this) }
+    }
+
+    /**
+     * Android 13+: asks for POST_NOTIFICATIONS. If the system will not show the dialog any more
+     * (denied twice), opens the app's notification settings instead.
+     */
+    fun requestNotifications(fromUser: Boolean) {
+        val notes = net.solardepin.solarchik.notify.Notes
+        if (notes.allowed(this)) return
+        val prefs = getSharedPreferences("solarchik-notes", MODE_PRIVATE)
+        val asked = prefs.getBoolean("asked", false)
+        if (!fromUser && asked) return
+        prefs.edit().putBoolean("asked", true).apply()
+        val perm = android.Manifest.permission.POST_NOTIFICATIONS
+        if (notes.needsRuntimePermission() && (!asked || shouldShowRequestPermissionRationale(perm))) {
+            notePermission.launch(perm)
+        } else if (fromUser) {
+            runCatching {
+                startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName))
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         sender = ActivityResultSender(this)
@@ -96,8 +122,14 @@ class MainActivity : ComponentActivity() {
         Ui.init(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(buildRoot())
-        val start = savedInstanceState?.getString("tab")?.let { name -> Tab.entries.firstOrNull { it.name == name } } ?: Tab.YARD
+        val start = intent?.getStringExtra(EXTRA_TAB)?.let { name -> Tab.entries.firstOrNull { it.name == name } }
+            ?: savedInstanceState?.getString("tab")?.let { name -> Tab.entries.firstOrNull { it.name == name } } ?: Tab.YARD
         select(start)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra(EXTRA_TAB)?.let { name -> Tab.entries.firstOrNull { it.name == name } }?.let { select(it) }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -140,6 +172,7 @@ class MainActivity : ComponentActivity() {
     /** Start or stop the background worker to match the desk. */
     fun deskChanged() {
         DeskWorker.sync(this, desk.state().anyRunning)
+        if (desk.state().anyRunning) requestNotifications(fromUser = false)
         scope.launch {
             runCatching { desk.tick() }.getOrNull()?.let { onDeskReport(it) }
             screens[current]?.render()
@@ -301,5 +334,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         private val TOAST = Any()
         private const val TICK_MS = 30_000L
+        const val EXTRA_TAB = "net.solardepin.solarchik.TAB"
     }
 }

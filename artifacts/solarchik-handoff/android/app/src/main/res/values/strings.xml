@@ -204,7 +204,7 @@
     <string name="note_window_title">Fee-free window</string>
     <string name="note_window_body">The fee-free window ends in about 3 hours.</string>
     <string name="note_report_title">Sol</string>
-    <string name="note_report_body">Today\'s note is ready. Open the yard. No numbers are invented here.</string>
+    <string name="note_report_body">Today\'s note from Sol is ready. Only your real numbers.</string>
     <string name="note_streak_toggle">Streak reminder</string>
     <string name="note_reward_toggle">Reward reminder</string>
     <string name="note_window_toggle">Window ending</string>
@@ -270,4 +270,8 @@
     <string name="fees_nothing">Nothing owed</string>
     <string name="desk_log">Activity</string>
     <string name="desk_log_empty">Start a strategy to see each decision here.</string>
+    <string name="notes_how">Local reminders, checked about once an hour: streak at risk (3 h before the UTC day ends), reward ready, window ending, and the evening note.</string>
+    <string name="notes_allowed">Notifications allowed</string>
+    <string name="notes_blocked">Notifications are off for Solarchik.</string>
+    <string name="notes_allow">Allow notifications</string>
 </resources>

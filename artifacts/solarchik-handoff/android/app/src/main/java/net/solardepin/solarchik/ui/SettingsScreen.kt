@@ -26,6 +26,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     private var devnetSwitch: Switch? = null
     private var balance: Double? = null
     private var airdropping = false
+    private lateinit var notesState: LinearLayout
 
     override fun build(): View = page {
         addView(Ui.display(ctx, ctx.getString(R.string.settings_title), 26f))
@@ -64,13 +65,18 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         })
 
         addView(section(R.string.settings_notes, R.drawable.ic_timer, Ui.PURPLE).apply {
+            notesState = Ui.column(ctx)
+            addView(Ui.top(notesState, 8))
             listOf(
                 "noteStreak" to R.string.note_streak_toggle,
                 "noteReward" to R.string.note_reward_toggle,
                 "noteWindow" to R.string.note_window_toggle,
                 "noteReport" to R.string.note_report_toggle,
             ).forEach { (key, label) ->
-                addView(Ui.top(switchRow(ctx.getString(label), host.save.noteOn(key)) { _, on -> host.save.setNote(key, on) }, 8))
+                addView(Ui.top(switchRow(ctx.getString(label), host.save.noteOn(key)) { _, on ->
+                    host.save.setNote(key, on)
+                    if (on) host.requestNotifications(fromUser = false)
+                }, 8))
             }
         })
 
@@ -129,6 +135,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
 
     override fun render() {
         if (!this::walletBox.isInitialized) return
+        renderNotes()
         val w = host.wallet
         networkBody.text = (if (w.mainnet) ctx.getString(R.string.network_mainnet) else ctx.getString(R.string.network_devnet)) + " · " +
             ctx.getString(if (w.isSeeker) R.string.settings_network_seeker else R.string.settings_network_other)
@@ -167,6 +174,20 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             host.renderAll()
         }))
         walletBox.addView(Ui.top(actions, 10))
+    }
+
+    private fun renderNotes() {
+        notesState.removeAllViews()
+        val ok = net.solardepin.solarchik.notify.Notes.allowed(ctx)
+        notesState.addView(Ui.muted(ctx, ctx.getString(R.string.notes_how), 12f))
+        if (ok) {
+            notesState.addView(Ui.top(Ui.pill(ctx, ctx.getString(R.string.notes_allowed), Ui.GREEN, R.drawable.ic_check), 8))
+        } else {
+            notesState.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.notes_blocked), 13f, Ui.AMBER, 700), 8))
+            notesState.addView(Ui.top(Ui.button(ctx, ctx.getString(R.string.notes_allow), Ui.Btn.SECONDARY, R.drawable.ic_timer) {
+                host.requestNotifications(fromUser = true)
+            }, 10))
+        }
     }
 
     private fun connect() {
