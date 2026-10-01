@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createPrivateKey, sign as edSign } from "node:crypto";
 import {
   AddressLookupTableAccount,
@@ -9,7 +9,7 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import { ARB_TREASURY } from "@/lib/game/pay";
-import { decodeBase58 } from "./base58";
+import { backpackFromFile, backpackFromText, envFirst, keypairFromText } from "./secret-key.server";
 import { readMainnetBalanceOnServer, readMainnetUsdcOnServer } from "./mainnet.server";
 import { bookTop, findSpot, floorToStep, loadSpots, stepDp, USDC_MINT } from "./arb-markets.server";
 
@@ -23,44 +23,40 @@ export type ArbHouse = {
 };
 
 const LIVE_MAX = 0.005;
-const KEY_URL = new URL("../../../server/arb-house.key", import.meta.url);
-const BP_URL = new URL("../../../server/backpack.secret", import.meta.url);
-
-function houseKeypair(): Keypair | null {
-  if (!existsSync(KEY_URL)) return null;
-  let text = "";
+/**
+ * Secrets come from env vars on deploys. The old files under server/ are a
+ * local-dev fallback only (vite dev); a production build never reads them.
+ * Mainnet use is still gated by ARB_MAINNET_ENABLED in arb-guard.server.
+ */
+function devFile(which: "house" | "backpack" | "titan"): string {
+  if (!import.meta.env.DEV) return "";
   try {
-    text = readFileSync(KEY_URL, "utf8").trim();
+    const url =
+      which === "house"
+        ? new URL("../../../server/arb-house.key", import.meta.url)
+        : which === "backpack"
+          ? new URL("../../../server/backpack.secret", import.meta.url)
+          : new URL("../../../server/titan.secret", import.meta.url);
+    return readFileSync(url, "utf8").trim();
   } catch {
-    return null;
-  }
-  if (!text) return null;
-  try {
-    const secret = text.startsWith("[")
-      ? Uint8Array.from(JSON.parse(text) as number[])
-      : decodeBase58(text);
-    const kp = secret.length === 32 ? Keypair.fromSeed(secret) : Keypair.fromSecretKey(secret);
-    return kp.publicKey.toBase58() === ARB_TREASURY ? kp : null;
-  } catch {
-    return null;
+    return "";
   }
 }
 
+function houseKeypair(): Keypair | null {
+  const kp = keypairFromText(envFirst("ARB_HOUSE_KEY") || devFile("house"));
+  return kp && kp.publicKey.toBase58() === ARB_TREASURY ? kp : null;
+}
+
 function backpackSeed(): { apiKey: string; seed: Buffer } | null {
-  try {
-    const lines = readFileSync(BP_URL, "utf8")
-      .split(/\r?\n/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const apiKey = lines[0];
-    const secret = lines[1];
-    if (!apiKey || !secret) return null;
-    const seed = Buffer.from(secret, "base64");
-    if (seed.length !== 32) return null;
-    return { apiKey, seed };
-  } catch {
-    return null;
-  }
+  const fromEnv = backpackFromText(envFirst("BACKPACK_API_KEY"), envFirst("BACKPACK_SECRET"));
+  if (fromEnv) return fromEnv;
+  const file = devFile("backpack");
+  return file ? backpackFromFile(file) : null;
+}
+
+function titanSecret(): string {
+  return envFirst("TITAN_SECRET", "TITAN_API_KEY") || devFile("titan");
 }
 
 function bpSign(seed: Buffer, msg: string): string {
@@ -171,12 +167,7 @@ async function rpc(method: string, params: unknown[]): Promise<unknown> {
 }
 
 async function titanTx(inputMint: string, outputMint: string, amount: string, payer: Keypair): Promise<VersionedTransaction | null> {
-  let key = "";
-  try {
-    key = readFileSync(new URL("../../../server/titan.secret", import.meta.url), "utf8").trim();
-  } catch {
-    return null;
-  }
+  const key = titanSecret();
   if (!key) return null;
   const url = new URL("https://portal.api.titan.exchange/api/v1/quote/swap");
   url.searchParams.set("inputMint", inputMint);

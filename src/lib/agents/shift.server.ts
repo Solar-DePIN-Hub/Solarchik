@@ -287,8 +287,9 @@ async function jupiterOut(inputMint: string, outputMint: string, amount: string)
 }
 
 function titanKeyFromEnv(): string {
-  const fromEnv = (process.env.TITAN_API_KEY || process.env.TITAN_JWT || "").trim();
+  const fromEnv = (process.env.TITAN_SECRET || process.env.TITAN_API_KEY || process.env.TITAN_JWT || "").trim();
   if (fromEnv) return fromEnv;
+  if (!import.meta.env.DEV) return "";
   try {
     return readFileSync(new URL("../../../server/titan.secret", import.meta.url), "utf8").trim().slice(0, 256);
   } catch {
