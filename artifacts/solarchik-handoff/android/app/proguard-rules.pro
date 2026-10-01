@@ -4,3 +4,13 @@
 -dontwarn com.solana.**
 -dontwarn javax.annotation.**
 -dontwarn kotlinx.coroutines.**
+-keep class org.sol4k.** { *; }
+-dontwarn org.sol4k.**
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.conscrypt.**
+-dontwarn org.openjsse.**
+-keepattributes *Annotation*, InnerClasses, Signature
+-keepclassmembers class kotlinx.serialization.json.** { *** Companion; }
+-keepclasseswithmembers class ** { kotlinx.serialization.KSerializer serializer(...); }
