@@ -28,6 +28,11 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
         isFakeBoldText = true
     }
 
+    private val hudLine = context.getString(net.solardepin.solarchik.R.string.run_hud)
+    private val doneLine = context.getString(net.solardepin.solarchik.R.string.run_done, GameSave.GOAL_M)
+    private val retryLine = context.getString(net.solardepin.solarchik.R.string.run_retry)
+    private val tapLine = context.getString(net.solardepin.solarchik.R.string.run_tap)
+
     private var thread: Thread? = null
     private var running = false
     private var finished = false
@@ -218,9 +223,9 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
         }
 
         c.drawText("${meters.toInt()} / ${GameSave.GOAL_M} m", 32f, 64f, hud)
-        c.drawText("очки $score   серця $lives", 32f, 110f, text)
-        if (finished) c.drawText(if (meters >= GameSave.GOAL_M) "1200 м" else "ще раз", 32f, 164f, hud)
-        else c.drawText("тап — стрибок", 32f, h - 36f, text)
+        c.drawText(hudLine.format(score, lives), 32f, 110f, text)
+        if (finished) c.drawText(if (meters >= GameSave.GOAL_M) doneLine else retryLine, 32f, 164f, hud)
+        else c.drawText(tapLine, 32f, h - 36f, text)
     }
 
     private fun paintGhost(c: Canvas) {

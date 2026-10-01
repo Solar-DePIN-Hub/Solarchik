@@ -1,4 +1,212 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Solarchik CLOCK IN</string>
+    <string name="brand">Solarchik</string>
+
+    <!-- Navigation -->
+    <string name="nav_yard">Yard</string>
+    <string name="nav_run">Run</string>
+    <string name="nav_agents">Agents</string>
+    <string name="nav_sol">Sol</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Common -->
+    <string name="sol_unit">%1$s SOL</string>
+    <string name="network_devnet">Devnet</string>
+    <string name="network_mainnet">Mainnet</string>
+    <string name="wallet_connect">Connect wallet</string>
+    <string name="wallet_none">No wallet</string>
+    <string name="copied">Copied</string>
+    <string name="open_explorer">Explorer</string>
+    <string name="share">Share</string>
+    <string name="share_title">Share your day</string>
+    <string name="refresh">Refresh</string>
+    <string name="soon">Soon</string>
+
+    <!-- Yard -->
+    <string name="yard_tagline">Clock in daily. Grow your solar crew.</string>
+    <string name="yard_streak_label">day streak</string>
+    <string name="yard_today_title">Today\'s shift</string>
+    <string name="yard_run_progress">%1$d / %2$d m</string>
+    <string name="yard_best">Best %1$d m</string>
+    <string name="yard_score">Score %1$d</string>
+    <string name="yard_go_run">Run %1$d m</string>
+    <string name="yard_clock_in">CLOCK IN</string>
+    <string name="yard_signing">Waiting for wallet…</string>
+    <string name="yard_signed">Signed today</string>
+    <string name="yard_status_need_run">Run %1$d m on the roofs. Then CLOCK IN opens your wallet.</string>
+    <string name="yard_status_first_roof">The first roof got you. Once more.</string>
+    <string name="yard_status_ready">Run counted. Sign the day to keep the streak.</string>
+    <string name="yard_status_tx">Signed on %1$s · transaction</string>
+    <string name="yard_status_msg">Signed message · %1$s</string>
+    <string name="yard_proof_tx">%1$s · explorer</string>
+    <string name="yard_proof_msg">%1$s · signature</string>
+    <string name="yard_reset_in">New UTC day in %1$s</string>
+    <string name="yard_week_title">This week</string>
+    <string name="yard_week_sub">%1$d signed days in a row</string>
+    <string name="yard_fee_title">Fee-free rewards</string>
+    <string name="yard_fee_wait_48">%1$d more days to 48h fee-free</string>
+    <string name="yard_fee_wait_7d">%1$d more days to 7 days fee-free</string>
+    <string name="yard_fee_ready">Reward ready: %1$s fee-free</string>
+    <string name="yard_fee_ready_more">%1$d rewards waiting. They start only when you tap.</string>
+    <string name="yard_fee_ready_one">It starts only when you tap. Use it when your agents trade.</string>
+    <string name="yard_fee_active">Fee-free window active</string>
+    <string name="yard_fee_active_sub">Positions opened now pay 0% performance fee, even if they close later.</string>
+    <string name="yard_fee_activate">Activate fee-free window</string>
+    <string name="yard_fee_rules">Every 7 signed days: 48h fee-free. Every 30: 7 days fee-free.</string>
+    <string name="window_48h">48h</string>
+    <string name="window_7d">7-day</string>
+    <string name="yard_crew_title">Your crew</string>
+    <string name="yard_crew_empty">No agents yet. Mint a free strategy NFT to start.</string>
+    <string name="yard_crew_line">%1$d agents · P&amp;L %2$s SOL · fees saved %3$s SOL</string>
+    <string name="yard_sol_title">Sol says</string>
+    <string name="yard_granted">New reward: %1$s fee-free window!</string>
+    <string name="yard_activated">Fee-free window started</string>
+    <string name="mod_calm">Calm day</string>
+    <string name="mod_wind">Windy: higher jumps feel floaty</string>
+    <string name="mod_gold">Golden: fewer foes on the roofs</string>
+    <string name="mod_drones">Drones in the air</string>
+    <string name="mod_wire">Wires: watch the air lane</string>
+    <string name="mod_chip">Today: %1$s</string>
+    <string name="weekday_short">M,T,W,T,F,S,S</string>
+
+    <!-- Run -->
+    <string name="run_title">Roof run</string>
+    <string name="run_sub">Tap to jump. Dodge mites and drones. %1$d m unlocks today\'s CLOCK IN.</string>
+    <string name="run_start">Start run</string>
+    <string name="run_again">Run again</string>
+    <string name="run_last">Last run</string>
+    <string name="run_best">Best</string>
+    <string name="run_best_score">Best score</string>
+    <string name="run_today_mod">Today\'s roofs</string>
+    <string name="run_ghost_on">Your ghost from %1$s (%2$d m) runs with you.</string>
+    <string name="run_ghost_off">Finish 400 m to leave a ghost for tomorrow.</string>
+    <string name="run_unlocked">Today is unlocked. Go sign it in the Yard.</string>
+    <string name="run_hud">score %1$d   lives %2$d</string>
+    <string name="run_done">%1$d m</string>
+    <string name="run_retry">once more</string>
+    <string name="run_tap">tap to jump</string>
+    <string name="meters">%1$d m</string>
+
+    <!-- Agents -->
+    <string name="agents_title">Strategy agents</string>
+    <string name="agents_sub">Each agent is a Metaplex Core NFT you own. It trades with your limits.</string>
+    <string name="tier_free">Free</string>
+    <string name="tier_pro">Pro</string>
+    <string name="tier_free_line">Free mint · one per wallet · 5% fee on realized profit only</string>
+    <string name="tier_pro_line">%1$s SOL · 0%% performance fee · forever</string>
+    <string name="tier_royalty">Both tiers: 5% royalty on resale.</string>
+    <string name="mint_free">Mint free</string>
+    <string name="mint_pro">Mint Pro · %1$s SOL</string>
+    <string name="mint_busy">Minting…</string>
+    <string name="mint_free_used">Free agent already claimed</string>
+    <string name="mint_pro_off">Pro on mainnet soon</string>
+    <string name="mint_ok">Minted %1$s. Verifying on chain…</string>
+    <string name="mint_verified">%1$s is on chain and yours.</string>
+    <string name="mint_err_free">This wallet already has its free agent. Go Pro for 0% fee.</string>
+    <string name="mint_err_pro_off">Paid Pro mint is off on mainnet for now. Switch to devnet in Settings.</string>
+    <string name="mint_err_big">Transaction too big. Nothing was sent.</string>
+    <string name="mint_lanes">Lanes: %1$s</string>
+    <string name="lane_c">BTC 15m</string>
+    <string name="lane_e">Events</string>
+    <string name="lane_w">Weather</string>
+    <string name="lane_dex">DEX arb</string>
+    <string name="agents_mine">My agents</string>
+    <string name="agents_mine_empty">Nothing minted on %1$s yet.</string>
+    <string name="agents_connect_hint">Connect a wallet to see agents you own.</string>
+    <string name="agent_verified">On chain ✓</string>
+    <string name="agent_pending">Confirming…</string>
+    <string name="agent_missing">Not found</string>
+    <string name="agent_fee_line">Performance fee %1$s</string>
+    <string name="ledger_title">Fee ledger</string>
+    <string name="ledger_empty">No closed positions yet. Agents start trading in the next update; every close lands here with its fee decision.</string>
+    <string name="ledger_summary">%1$d positions · P&amp;L %2$s SOL</string>
+    <string name="ledger_fees">Charged %1$s · owed %2$s · waived %3$s SOL</string>
+    <string name="reason_pro">Pro · 0% fee</string>
+    <string name="reason_window">Fee-free window · waived</string>
+    <string name="reason_loss">Loss · no fee</string>
+    <string name="reason_paper">Paper · not sent</string>
+    <string name="reason_charged">Fee charged</string>
+    <string name="reason_unsent">Fee owed</string>
+    <string name="ledger_row_time">opened %1$s · closed %2$s</string>
+
+    <!-- Classes (web classes.ts) -->
+    <string name="class_pred_title">Prediction Agent</string>
+    <string name="class_pred_short">Predictions</string>
+    <string name="class_pred_blurb">Bitcoin Up/Down windows on Polymarket. Events: finds the favorite by itself.</string>
+    <string name="class_dex_title">Titan × Backpack</string>
+    <string name="class_dex_short">Arbitrage</string>
+    <string name="class_dex_blurb">Every Solana pair on Backpack against USDC. Fires only when there is an edge and cash.</string>
+    <string name="class_combo_title">Combo Agent</string>
+    <string name="class_combo_short">Combo</string>
+    <string name="class_combo_blurb">One NFT: crypto 15m, events and weather. No DEX here.</string>
+
+    <!-- SKUs (web catalog.ts) -->
+    <string name="sku_alpha_blurb">Bitcoin Up/Down, 15-minute windows only. Grok bets from 65% confidence.</string>
+    <string name="sku_events_blurb">Events that are not Bitcoin or sports. Up to 2 days out. Grok from 65%.</string>
+    <string name="sku_weather_blurb">Daily high from the station in the rules only. No recorded high, no order.</string>
+    <string name="sku_combo_blurb">Three lanes in one NFT: crypto 15m, events, weather. No DEX.</string>
+    <string name="sku_arb_blurb">Titan × Backpack. Every Solana pair against USDC. Fires only with an edge and cash.</string>
+
+    <!-- Sol -->
+    <string name="sol_title">Sol</string>
+    <string name="sol_sub">Your pocket solar friend.</string>
+    <string name="sol_report_title">Daily report</string>
+    <string name="sol_report_streak">Streak: %1$d days.</string>
+    <string name="sol_report_signed">Today is signed. Nice shift.</string>
+    <string name="sol_report_unsigned">Today is not signed yet.</string>
+    <string name="sol_report_agents">Agents: %1$d. Closed positions: %2$d.</string>
+    <string name="sol_report_window">Fee-free window: %1$s left.</string>
+    <string name="sol_chat_soon">Chat and voice with Sol arrive in the next update.</string>
+    <string name="sol_tip_1">Run first, then sign. The streak only counts signed days.</string>
+    <string name="sol_tip_2">Save a fee-free window for the days your agents trade the most.</string>
+    <string name="sol_tip_3">Pro agents never pay a performance fee. Free agents pay 5% only on profit.</string>
+    <string name="sol_tip_4">Your ghost from yesterday runs with you. Beat it.</string>
+    <string name="sol_tip_5">Losses never pay a fee. Only realized profit does.</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_wallet">Wallet</string>
+    <string name="settings_wallet_none">Not connected. Uses Mobile Wallet Adapter (Seed Vault on Seeker, Phantom or Solflare elsewhere).</string>
+    <string name="settings_balance">Balance</string>
+    <string name="settings_disconnect">Forget</string>
+    <string name="settings_airdrop">Airdrop %1$s devnet SOL</string>
+    <string name="settings_airdrop_busy">Requesting airdrop…</string>
+    <string name="settings_airdrop_ok">Airdrop sent. Balance updates in a few seconds.</string>
+    <string name="settings_airdrop_fail">Devnet faucet said no (often rate-limited). Try again later or use faucet.solana.com.</string>
+    <string name="settings_network">Network</string>
+    <string name="settings_network_seeker">Seeker detected. Clock-ins go to mainnet unless you force devnet.</string>
+    <string name="settings_network_other">Not a Seeker: everything runs on devnet.</string>
+    <string name="settings_force_devnet">Force devnet</string>
+    <string name="settings_fees">Fees &amp; tiers</string>
+    <string name="settings_fees_body">Pro mint: %1$s SOL to the treasury, 0%% performance fee.\nFree mint: one per wallet, %2$s%% fee on realized profit only.\nRoyalty: %3$s%% on both tiers.\nStreak: every %4$d signed days = %5$dh fee-free; every %6$d = %7$d days fee-free.\nFees are decided by the position\'s open time.</string>
+    <string name="settings_treasury">Treasury</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_language_body">Solarchik follows your phone language (English, Українська).</string>
+    <string name="settings_language_open">Change app language</string>
+    <string name="settings_notes">Reminders</string>
+    <string name="settings_about">About</string>
+    <string name="settings_about_body">Version %1$s · Solana Mobile Stack · MWA 2.0 · Metaplex Core</string>
+
+    <!-- Wallet errors -->
+    <string name="err_no_wallet">No wallet app found. Install or open Seed Vault, Phantom or Solflare, then try again.</string>
+    <string name="err_declined">The wallet did not sign. Nothing was sent.</string>
+    <string name="err_network">Network problem. Check the connection and try again.</string>
+    <string name="err_failed">Wallet error: %1$s</string>
+
+    <!-- Notifications (copy from the Grok export, scheduling lands in milestone B) -->
+    <string name="fee_activate">Activate fee-free window</string>
+    <string name="note_channel">Solarchik</string>
+    <string name="note_streak_title">Streak</string>
+    <string name="note_streak_body">Sign today or the streak ends in about 3 hours.</string>
+    <string name="note_reward_title">Fee-free window</string>
+    <string name="note_reward_body">A fee-free window is ready. It starts only when you tap.</string>
+    <string name="note_window_title">Fee-free window</string>
+    <string name="note_window_body">The fee-free window ends in about 3 hours.</string>
+    <string name="note_report_title">Sol</string>
+    <string name="note_report_body">Today\'s note is ready. Open the yard. No numbers are invented here.</string>
+    <string name="note_streak_toggle">Streak reminder</string>
+    <string name="note_reward_toggle">Reward reminder</string>
+    <string name="note_window_toggle">Window ending</string>
+    <string name="note_report_toggle">Daily note</string>
 </resources>
