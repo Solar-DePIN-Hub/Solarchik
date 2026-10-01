@@ -1,4 +1,5 @@
 import { TRAIN_GOAL_DAYS } from "./classes";
+import { offerFor } from "./fees.config";
 import type { AgentNft, LiveSku, PredLane, PredictionFocus } from "./types";
 
 const VAULT = "MarketVault111111111111111111111111111";
@@ -35,10 +36,10 @@ function pred(focus: PredictionFocus, market: string, lanes: PredLane[], edgeBps
   };
 }
 
-/** Path 1: ready-to-run agents. Taking one mints a copy. The chain fee is the only charge. */
+/** Path 1: ready-to-run agents. Free is one per wallet. Pro is paid and fee-free. */
 export function liveCatalog(): LiveSku[] {
   const now = Date.now();
-  return [
+  const base: LiveSku[] = [
     {
       id: "sku-pred-alpha",
       priceSol: 0,
@@ -113,4 +114,28 @@ export function liveCatalog(): LiveSku[] {
       }),
     },
   ];
+  return withTiers(base);
+}
+
+function withTiers(rows: LiveSku[]): LiveSku[] {
+  const free = rows.map((sku) => {
+    const offer = offerFor(sku.id);
+    return { ...sku, priceSol: offer.priceSol, nft: { ...sku.nft, tier: offer.tier } };
+  });
+  const pro = rows.map((sku) => {
+    const id = `${sku.id}-pro`;
+    const offer = offerFor(id);
+    return {
+      ...sku,
+      id,
+      priceSol: offer.priceSol,
+      nft: {
+        ...sku.nft,
+        tier: offer.tier,
+        name: `${sku.nft.name} Pro`.slice(0, 32),
+        asset: `${sku.nft.asset}p`,
+      },
+    };
+  });
+  return [...free, ...pro];
 }

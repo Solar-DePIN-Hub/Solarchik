@@ -118,6 +118,8 @@ export type NftMetrics = {
   aprPct: number | null;
 };
 
+export type NftTier = "pro" | "free";
+
 export type AgentNft = {
   /** Metaplex Core asset address. */
   asset: string;
@@ -130,6 +132,8 @@ export type AgentNft = {
   mintedAt: number;
   updatedAt: number;
   track: Track;
+  /** Missing on old mints. Treat as pro so they are not taxed. */
+  tier?: NftTier;
   /** Simulated academy days. 90 = 3 months. */
   trainedDays: number;
   graduated: boolean;

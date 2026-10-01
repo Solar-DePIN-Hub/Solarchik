@@ -51,6 +51,16 @@ export type MissionId = "clock" | "suns" | "combo";
 
 export type PayPending = { ref: string; usd: PayUsd; at: number };
 
+export type FeeWindow = {
+  id: string;
+  kind: "h48" | "d7";
+  milestone: number;
+  status: "available" | "active" | "spent";
+  grantedAt: number;
+  startedAt: number;
+  endsAt: number;
+};
+
 export type SaveData = {
   version: number;
   streak: number;
@@ -90,6 +100,15 @@ export type SaveData = {
   playerWallet: string;
   secPending: PayPending[];
   secCredit: number;
+  /** UTC days that were actually signed. */
+  clockDays: string[];
+  /** Signed days toward the next 48h window. Restarts after that reward. */
+  seven: number;
+  /** Signed days toward 30/60/90. Does not restart when a reward is granted. */
+  thirty: number;
+  feeWindows: FeeWindow[];
+  /** UTC day the Sol report was shown. */
+  reportDay: string;
 };
 
 const emptyMissions = (): Record<MissionId, boolean> => ({
@@ -143,6 +162,11 @@ export const defaultSave = (): SaveData => ({
   playerWallet: "",
   secPending: [],
   secCredit: 0,
+  clockDays: [],
+  seven: 0,
+  thirty: 0,
+  feeWindows: [],
+  reportDay: "",
 });
 
 export function todayKey(d = new Date()): string {
@@ -246,6 +270,11 @@ function migrate(raw: SaveData): SaveData {
     clockKind: (raw as SaveData).clockKind === "tx" || (raw as SaveData).clockKind === "message" ? (raw as SaveData).clockKind : "",
     secPending: readPending((raw as SaveData).secPending),
     secCredit: Math.max(0, Number((raw as SaveData).secCredit) || 0),
+    clockDays: readClockDays((raw as SaveData).clockDays, String((raw as SaveData).signedDay || ""), Number(raw.streak) || 0),
+    seven: readCounter((raw as SaveData).seven, (Number(raw.streak) || 0) % 7),
+    thirty: readCounter((raw as SaveData).thirty, Number(raw.streak) || 0),
+    feeWindows: readWindows((raw as SaveData).feeWindows),
+    reportDay: /^\d{4}-\d{2}-\d{2}$/.test(String((raw as SaveData).reportDay || "")) ? String((raw as SaveData).reportDay) : "",
     missions: { ...emptyMissions(), ...(raw.missions ?? {}) },
     unlockedSkins: raw.unlockedSkins?.length ? raw.unlockedSkins.filter(isPlatSkin) : ["flag"],
     skin: isPlatSkin(String(raw.skin)) ? (raw.skin as PlatSkin) : "flag",
@@ -275,6 +304,8 @@ export function loadSave(): SaveData {
     }
     if (!save.signedDay || (save.signedDay !== today && save.signedDay !== yesterdayKey())) {
       save.streak = 0;
+      save.seven = 0;
+      save.thirty = 0;
     }
     if (save.runs === 0 && save.totalSuns === 0 && save.suns === 0 && !hasHouse(save.farm) && !save.pet.hatched) {
       save.suns = 120;
@@ -602,16 +633,138 @@ export function stampClock(
 ): SaveData {
   const today = todayKey();
   if (save.signedDay === today) return save;
+  const now = Date.now();
+  const continued = save.signedDay === yesterdayKey();
+  let seven = continued ? save.seven + 1 : 1;
+  let thirty = continued ? save.thirty + 1 : 1;
+  let feeWindows = expireWindows(save.feeWindows, now);
+  if (seven >= 7) {
+    const n = feeWindows.filter((w) => w.kind === "h48").length + 1;
+    feeWindows = grantWindow(feeWindows, { id: `h48-${n}`, kind: "h48", milestone: n * 7, now });
+    seven = 0;
+  }
+  if (thirty > 0 && thirty % 30 === 0) {
+    feeWindows = grantWindow(feeWindows, { id: `d7-${thirty}`, kind: "d7", milestone: thirty, now });
+  }
   const address = proof.address.replace(/\s/g, "").slice(0, 48);
+  const clockDays = (continued ? save.clockDays : []).filter((d) => d !== today);
+  clockDays.push(today);
   return {
     ...save,
-    streak: save.signedDay === yesterdayKey() ? save.streak + 1 : 1,
+    streak: continued ? save.streak + 1 : 1,
     signedDay: today,
+    seven,
+    thirty,
+    feeWindows,
+    clockDays: clockDays.slice(-120),
     playerWallet: address.length >= 32 ? address : save.playerWallet,
     clockSig: proof.signature.replace(/\s/g, "").slice(0, 100),
     clockCluster: proof.cluster,
     clockKind: proof.kind,
   };
+}
+
+const H48_MS = 48 * 60 * 60 * 1000;
+const D7_MS = 7 * 24 * 60 * 60 * 1000;
+
+function grantWindow(rows: FeeWindow[], input: { id: string; kind: FeeWindow["kind"]; milestone: number; now: number }): FeeWindow[] {
+  if (rows.some((w) => w.id === input.id)) return rows;
+  return [
+    ...rows,
+    {
+      id: input.id,
+      kind: input.kind,
+      milestone: input.milestone,
+      status: "available",
+      grantedAt: input.now,
+      startedAt: 0,
+      endsAt: 0,
+    },
+  ];
+}
+
+function expireWindows(rows: FeeWindow[], now: number): FeeWindow[] {
+  return rows.map((w) => (w.status === "active" && w.endsAt > 0 && w.endsAt <= now ? { ...w, status: "spent" } : w));
+}
+
+export function feeWindowCovers(save: SaveData, openedAt: number): boolean {
+  if (!(openedAt > 0)) return false;
+  return save.feeWindows.some((w) => w.status === "active" && openedAt >= w.startedAt && openedAt < w.endsAt);
+}
+
+export function activateFeeWindow(save: SaveData, now = Date.now()): SaveData {
+  const rows = expireWindows(save.feeWindows, now);
+  if (rows.some((w) => w.status === "active" && w.endsAt > now)) return { ...save, feeWindows: rows };
+  const next = rows.find((w) => w.status === "available");
+  if (!next) return { ...save, feeWindows: rows };
+  const dur = next.kind === "h48" ? H48_MS : D7_MS;
+  return {
+    ...save,
+    feeWindows: rows.map((w) => (w.id === next.id ? { ...w, status: "active", startedAt: now, endsAt: now + dur } : w)),
+  };
+}
+
+export function feeProgress(save: SaveData, now = Date.now()):
+  | { kind: "active"; leftMs: number }
+  | { kind: "ready" }
+  | { kind: "wait"; days48: number; days30: number } {
+  const rows = expireWindows(save.feeWindows, now);
+  const active = rows.find((w) => w.status === "active" && w.endsAt > now);
+  if (active) return { kind: "active", leftMs: active.endsAt - now };
+  if (rows.some((w) => w.status === "available")) return { kind: "ready" };
+  const next30 = (Math.floor(save.thirty / 30) + 1) * 30;
+  return { kind: "wait", days48: Math.max(0, 7 - save.seven), days30: Math.max(0, next30 - save.thirty) };
+}
+
+function readCounter(raw: unknown, fallback: number): number {
+  const n = typeof raw === "number" && Number.isFinite(raw) ? Math.floor(raw) : fallback;
+  return Math.max(0, Math.min(4000, n));
+}
+
+function readClockDays(raw: unknown, signedDay: string, streak: number): string[] {
+  const out: string[] = [];
+  if (Array.isArray(raw)) {
+    for (const row of raw) {
+      const key = String(row || "");
+      if (/^\d{4}-\d{2}-\d{2}$/.test(key) && !out.includes(key)) out.push(key);
+      if (out.length >= 120) break;
+    }
+  }
+  if (out.length || streak <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(signedDay)) return out;
+  const seeded: string[] = [];
+  let cursor = signedDay;
+  for (let i = 0; i < Math.min(streak, 120); i++) {
+    seeded.unshift(cursor);
+    const prev = new Date(`${cursor}T00:00:00Z`).getTime() - 86_400_000;
+    cursor = todayKey(new Date(prev));
+  }
+  return seeded;
+}
+
+function readWindows(raw: unknown): FeeWindow[] {
+  if (!Array.isArray(raw)) return [];
+  const out: FeeWindow[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const o = row as Record<string, unknown>;
+    const id = String(o.id || "").slice(0, 24);
+    if (!id) continue;
+    const kind = o.kind === "d7" ? "d7" : o.kind === "h48" ? "h48" : null;
+    if (!kind) continue;
+    const status = o.status === "active" || o.status === "spent" || o.status === "available" ? o.status : "available";
+    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    out.push({
+      id,
+      kind,
+      milestone: Math.max(0, Math.floor(num(o.milestone))),
+      status,
+      grantedAt: num(o.grantedAt),
+      startedAt: num(o.startedAt),
+      endsAt: num(o.endsAt),
+    });
+    if (out.length >= 24) break;
+  }
+  return out;
 }
 
 function readPending(raw: unknown): PayPending[] {

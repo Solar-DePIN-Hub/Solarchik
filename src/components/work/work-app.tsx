@@ -14,6 +14,8 @@ import { cn, formatSol, shortKey } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { AgentBay } from "./agent-bay";
 import { AgentConsole } from "./agent-console";
+import { FeeNote } from "./fee-note";
+import { RiskPanel } from "./risk-panel";
 import { IconCopy, IconPlay, IconStop, IconWallet } from "./icons";
 import { useWorkLoop } from "./use-work-loop";
 
@@ -1357,6 +1359,8 @@ function WorkPanel() {
 					})]
 				})
 			}),
+			/* @__PURE__ */ jsx(RiskPanel, {}),
+			/* @__PURE__ */ jsx(FeeNote, {}),
 			owned.length > 0 ? /* @__PURE__ */ jsx(AgentConsole, { owned }) : null,
 			/* @__PURE__ */ jsx("div", {
 				className: "grid gap-3 md:grid-cols-2",
@@ -1540,10 +1544,10 @@ function StorePanel() {
 								className: "text-right text-sm",
 								children: [/* @__PURE__ */ jsx("div", {
 									className: "font-medium",
-									children: "безкоштовно"
+									children: sku.priceSol > 0 ? `${sku.priceSol} SOL` : "Free · 5% прибутку"
 								}), /* @__PURE__ */ jsx("div", {
 									className: "text-xs text-muted",
-									children: "лише комісія мережі"
+									children: sku.nft.tier === "pro" ? "Pro · 0% комісії" : "один безкоштовний на гаманець"
 								})]
 							})]
 						}),

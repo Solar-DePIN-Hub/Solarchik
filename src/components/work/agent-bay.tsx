@@ -3,6 +3,7 @@ import { useAgents } from "@/lib/agents/store";
 import { arbNets, type ArbHouseView, type ArbQuote } from "@/lib/agents/engine";
 import type { AgentKind, AgentNft, AgentRuntime, StrategyBundle } from "@/lib/agents/types";
 import { cn } from "@/lib/utils";
+import { TierBadge } from "./tier-badge";
 import { IconPulse, IconSwap } from "./icons";
 
 const ICONS: Record<AgentKind, typeof IconPulse> = {
@@ -42,6 +43,7 @@ export function AgentBay({ runtime, nft }: { runtime: AgentRuntime; nft: AgentNf
                 ? `${nft.name} · ${CLASS_META[nft.classId].short}${runtime.brain ? ` · ${runtime.brain}` : ""}`
                 : "NFT не підключено"}
             </p>
+            {nft ? <TierBadge tier={nft.tier} /> : null}
           </div>
         </div>
         <StatusChip status={runtime.status} />

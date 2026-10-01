@@ -29,6 +29,10 @@ import { encodeBase58 } from "./base58";
 import { confirmMainnetTx, peekMainnetSig, prepareMainnetSend, prepareMainnetSweep, readMainnetBalance, readMainnetUsdc, sendMainnetTx } from "./mainnet";
 import { addArbCredit, readArbCredit, takeArbCredit } from "./arb-credit";
 import { fireArb, readArbHouse, type ArbHouse } from "./arb-house";
+import { planFee, type FeeRow } from "./fee-ledger";
+import { paySkuFromPlayer } from "./tier-pay";
+import { readCaps, userTradeBlock } from "./user-limits";
+import { feeWindowCovers, loadSave } from "@/lib/game/save";
 import { ARB_TREASURY } from "@/lib/game/pay";
 import { GROK_MODEL } from "./grok-model";
 import { decideBet } from "./decide";
@@ -96,6 +100,7 @@ type AgentsState = {
   listings: MarketListing[];
   log: LogEntry[];
   fills: AgentFill[];
+  feeLedger: FeeRow[];
   focusAsset: string | null;
   agents: Record<AgentKind, AgentRuntime>;
   working: boolean;
@@ -494,7 +499,74 @@ function readLimits(): { dayKey: string; daySpent: number; lossStreak: number } 
 
 function writeLimits(dayKey: string, daySpent: number, lossStreak: number) {
   if (typeof localStorage === "undefined") return;
-  localStorage.setItem(LIMITS_KEY, JSON.stringify({ dayKey, daySpent, lossStreak }));
+  let prev: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LIMITS_KEY) ?? "");
+    if (parsed && typeof parsed === "object") prev = parsed as Record<string, unknown>;
+  } catch {
+    prev = {};
+  }
+  localStorage.setItem(LIMITS_KEY, JSON.stringify({ ...prev, dayKey, daySpent, lossStreak }));
+}
+
+function dayLossSol(): number {
+  const day = todayKey();
+  return useAgents.getState().feeLedger.reduce((sum, row) => {
+    if (row.pnl >= 0) return sum;
+    const key = new Date(row.closedAt).toISOString().slice(0, 10);
+    return key === day ? sum + -row.pnl : sum;
+  }, 0);
+}
+
+function noteSettledFees(patches: FillPatch[], track: Track) {
+  const settled = patches.filter((p) => p.status === "settled");
+  if (!settled.length) return;
+  const state = useAgents.getState();
+  const known = new Set(state.feeLedger.map((r) => r.id));
+  const save = loadSave();
+  const rows: FeeRow[] = [];
+  for (const patch of settled) {
+    if (known.has(patch.id)) continue;
+    const fill = state.fills.find((f) => f.id === patch.id);
+    const nft = state.nfts.find((n) => n.asset === fill?.asset);
+    rows.push(
+      planFee({
+        id: patch.id,
+        agent: fill?.asset ?? "",
+        tier: nft?.tier,
+        openedAt: fill?.at ?? 0,
+        closedAt: Date.now(),
+        pnl: patch.pnl,
+        paper: track === "paper" || nft?.track === "paper",
+        covered: feeWindowCovers(save, fill?.at ?? 0),
+      }),
+    );
+  }
+  if (!rows.length) return;
+  useAgents.setState((s) => ({ feeLedger: [...s.feeLedger, ...rows].slice(-200) }));
+  useAgents.getState().persist();
+  const due = rows.filter((r) => r.reason === "unsent");
+  if (due.length) void sendDueFees(due);
+}
+
+async function sendDueFees(due: FeeRow[]) {
+  const kp = await loadKeypair();
+  if (!kp) {
+    useAgents.setState({ notice: "Комісію не відправлено. Немає ключа." });
+    return;
+  }
+  const chain = await loadChain();
+  for (const row of due) {
+    try {
+      const sig = await chain.payTreasury(kp, row.fee);
+      useAgents.setState((s) => ({
+        feeLedger: s.feeLedger.map((r) => (r.id === row.id ? { ...r, charged: true, reason: "charged", sig } : r)),
+      }));
+    } catch {
+      useAgents.setState({ notice: "Комісію не відправлено. Підпис не вигадую." });
+    }
+  }
+  useAgents.getState().persist();
 }
 
 type HeldTrade = PendingTrade & { job: ChainJob };
@@ -1222,6 +1294,15 @@ async function fireAutoDex(amount: number) {
   if (!state.autoRun || !state.wallet) return;
   if (!ownedKinds(state).has("dex")) return;
   const size = Number(amount.toFixed(4));
+  const blocked = userTradeBlock(size, state.liveLossStreak, state.liveDayKey === todayKey() ? state.liveDaySpent : 0, dayLossSol());
+  if (blocked) {
+    useAgents.setState((s) => ({
+      notice: blocked,
+      haltReason: blocked,
+      log: pushLog(s.log, { id: `skip-${Date.now()}`, at: Date.now(), kind: "system", text: blocked }),
+    }));
+    return;
+  }
   if (!(size > 0) || size > LIVE_MAX_SOL) {
     useAgents.setState({ notice: "Макс. на угоду 0.005 SOL. Угоду не відправляю.", haltReason: "Макс. на угоду 0.005 SOL. Угоду не відправляю." });
     return;
@@ -1535,12 +1616,21 @@ function enqueueChain(job: ChainJob) {
   }
   const refuse = (reason: string) => {
     if (job.kind === "prediction" && job.phase === "lock") revertLock(job.fillId, job.asset);
-    useAgents.setState({ notice: reason, haltReason: reason });
+    useAgents.setState((s) => ({
+      notice: reason,
+      haltReason: reason,
+      log: pushLog(s.log, { id: `skip-${Date.now()}`, at: Date.now(), kind: "system", text: reason }),
+    }));
   };
   const from = state.wallet?.pubkey ?? peekStoredPubkey("room") ?? "ключ кімнати";
   const to = peekStoredPubkey("market") ?? "ринок кімнати";
   const described = describeJob(job, from, to);
   const daySpent = state.dayKey === todayKey() ? state.daySpent : 0;
+  const userBlock = userTradeBlock(described.amount, state.lossStreak, daySpent, dayLossSol());
+  if (userBlock) {
+    refuse(userBlock);
+    return;
+  }
   if (described.amount > 0) {
     if (!state.solKnown || state.sol < MIN_WORK_SOL) {
       refuse("Поповни гаманець. Боти стоять.");
@@ -1735,6 +1825,10 @@ export function bindPhantomSigner(signer: PhantomSigner | null) {
   phantomSigner = signer;
 }
 
+export function currentPhantomSigner(): PhantomSigner | null {
+  return phantomSigner;
+}
+
 async function sendLiveSwap(amount: number, user: string) {
   liveSending = true;
   let sentSig = "";
@@ -1858,6 +1952,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
   listings: [],
   log: [],
   fills: [],
+  feeLedger: [],
   focusAsset: null,
   agents: idleRuntimes(),
   working: false,
@@ -2623,7 +2718,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
   },
 
   persist() {
-    const { sol, paperSol, nfts, listings, log, fills, lastLiveSig, lastLiveSigCounted, lastLiveAmount, lastLiveAt, liveDayKey, liveDaySpent, liveSessionSpent, liveLossStreak, polyDayKey, polyDaySpent, polyOpenId, polyHold, polyBooks, lastGrok, laneNotes, lastEventsGrokAt, liveArmed, liveAck, autoRun } =
+    const { sol, paperSol, nfts, listings, log, fills, feeLedger, lastLiveSig, lastLiveSigCounted, lastLiveAmount, lastLiveAt, liveDayKey, liveDaySpent, liveSessionSpent, liveLossStreak, polyDayKey, polyDaySpent, polyOpenId, polyHold, polyBooks, lastGrok, laneNotes, lastEventsGrokAt, liveArmed, liveAck, autoRun } =
       get();
     saveState({
       version: SAVE_VERSION,
@@ -2633,6 +2728,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
       listings,
       log,
       fills,
+      feeLedger,
       lastLiveSig,
       lastLiveSigCounted,
       lastLiveAmount,
@@ -2686,6 +2782,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
       listings: saved.listings,
       log: saved.log,
       fills: saved.fills,
+      feeLedger: saved.feeLedger,
       lastLiveSig: saved.lastLiveSig,
       lastLiveSigCounted: saved.lastLiveSigCounted,
       lastLiveAmount: saved.lastLiveAmount,
@@ -3334,6 +3431,11 @@ export const useAgents = create<AgentsState>((set, get) => ({
     const wallet = await get().ensureWallet();
     const sku = liveCatalog().find((s) => s.id === id);
     if (!sku) return false;
+    const tier = sku.nft.tier === "free" ? "free" : "pro";
+    if (tier === "free" && get().nfts.some((n) => n.owner === wallet.pubkey && n.tier === "free")) {
+      set({ notice: "Безкоштовний агент уже є. Pro без комісії з прибутку." });
+      return false;
+    }
     const kp = await loadKeypair();
     if (!kp) {
       set({ notice: "Немає ключа" });
@@ -3346,19 +3448,23 @@ export const useAgents = create<AgentsState>((set, get) => ({
     }
     set({ sol: solNow, solKnown: true, solMiss: false });
     const feeReserve = 0.02;
-    if (solNow < sku.priceSol + feeReserve) {
-      set({
-        notice:
-          solNow < feeReserve
-            ? "Поповни Devnet краном. Для мінту треба 0.02 SOL."
-            : needSolNotice(solNow, sku.priceSol, wallet.pubkey),
-      });
+    if (solNow < feeReserve) {
+      set({ notice: "Поповни Devnet краном. Для мінту треба 0.02 SOL." });
       get().persist();
       return false;
     }
+    let paySig = "";
+    if (sku.priceSol > 0) {
+      set({ chainBusy: true, notice: "Оплата з твого гаманця на казну…" });
+      const paid = await paySkuFromPlayer(sku.priceSol, get().externalWallet, currentPhantomSigner());
+      if (!paid.ok) {
+        set({ chainBusy: false, notice: paid.reason });
+        return false;
+      }
+      paySig = paid.sig;
+    }
     set({ chainBusy: true, notice: sku.priceSol > 0 ? "Мінчу агента в Core…" : "Мінчу агента. Списується лише комісія мережі…" });
     try {
-      const paySig = sku.priceSol > 0 ? await (await loadChain()).payTreasury(kp, sku.priceSol) : "";
       const now = Date.now();
       const draft: AgentNft = {
         ...sku.nft,
@@ -3392,7 +3498,10 @@ export const useAgents = create<AgentsState>((set, get) => ({
       get().persist();
       return true;
     } catch (e) {
-      set({ chainBusy: false, notice: errText(e) });
+      set({
+        chainBusy: false,
+        notice: paySig ? `Оплату ${paySig.slice(0, 8)}… прийнято. Мінт не пройшов. ${errText(e)}` : errText(e),
+      });
       return false;
     }
   },
@@ -3445,6 +3554,10 @@ export const useAgents = create<AgentsState>((set, get) => ({
   },
 
   async pressWork() {
+    if (readCaps().paused) {
+      set({ notice: "Агент на паузі. Угоду не відправляю." });
+      return;
+    }
     const wallet = await get().ensureWallet();
     const track = get().track;
     let localOwned = get().nfts.filter((x) => x.owner === wallet.pubkey && x.track === track);
@@ -3602,6 +3715,10 @@ export const useAgents = create<AgentsState>((set, get) => ({
 
   tick(now) {
     rollBetWindow(now);
+    if (readCaps().paused) {
+      if (get().working) get().stopWork();
+      return;
+    }
     const { working, wallet, agents, nfts, track, quote, chainBusy, sol, solKnown } = get();
     if (!working || !wallet || chainBusy) return;
     const free = solKnown ? sol : 0;
@@ -3843,6 +3960,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
         log: logs.reduce((acc, e) => pushLog(acc, e), s.log),
       };
     });
+    noteSettledFees(patches, track);
     tickCount += 1;
     const chainDue = stamped.checkpoint;
     if (dirty.length || chainDue) {

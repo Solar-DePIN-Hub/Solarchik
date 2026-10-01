@@ -13,6 +13,8 @@ import { WEEK_LABELS, type Locale, type TFunc } from "@/lib/game/i18n";
 import type { MsgKey } from "@/lib/game/i18n";
 import { LOCALE_META } from "@/lib/game/i18n";
 import { LangModal } from "./LangModal";
+import { FeeWindowCard } from "./FeeWindowCard";
+import { DailyReport } from "./DailyReport";
 import { isMuted, setMuted, startMusic, stopMusic, unlockAudio } from "@/lib/game/audio";
 import { isNativeApp } from "@/lib/game/buddyNet";
 import { DayCard } from "./DayCard";
@@ -25,6 +27,9 @@ export function Yard({
   onFarm,
   onShop,
   onLocale,
+  onActivateFee,
+  onReportSeen,
+  reportReady,
   signBusy = false,
   signError = "",
 }: {
@@ -35,6 +40,9 @@ export function Yard({
   onFarm: () => void;
   onShop: () => void;
   onLocale: (id: Locale) => void;
+  onActivateFee: () => void;
+  onReportSeen: (day: string) => void;
+  reportReady: boolean;
   signBusy?: boolean;
   signError?: string;
 }) {
@@ -84,6 +92,7 @@ export function Yard({
       </div>
 
       <div className="yard-grid-desk relative flex flex-col px-4 pb-6 pt-[max(0.5rem,env(safe-area-inset-top))] lg:px-5 lg:py-4 [&>*]:shrink-0">
+          <DailyReport save={save} ready={reportReady} t={t} onSeen={onReportSeen} />
           <header className="mb-4 flex flex-wrap items-end justify-between gap-x-3 gap-y-2">
             <div className="min-w-48 flex-1">
               <p className="text-sm font-semibold tracking-widest text-primary">{t("yard.kicker")}</p>
@@ -157,6 +166,8 @@ export function Yard({
               <p className="mt-2 text-xs font-semibold tracking-wide text-primary">{t("yard.gate")}</p>
             )}
           </section>
+
+          <FeeWindowCard save={save} t={t} onActivate={onActivateFee} />
 
           <div className="mt-3 grid grid-cols-3 gap-2">
             <Stat icon={<Flame className="size-4" />} label={t("yard.streak")} value={`${save.streak}${streakUnit}`} />

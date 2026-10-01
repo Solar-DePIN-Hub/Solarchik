@@ -1,12 +1,23 @@
 /**
- * Forwards /solana-rpc to QuickNode Devnet so the browser never sees the token.
- * Dev uses the Vite proxy; this runs on the production server.
+ * Forwards /solana-rpc. Devnet by default (the desk). ?cluster=mainnet uses mainnet.
+ * URLs come from SOLANA_RPC_DEVNET / SOLANA_RPC_MAINNET. Public nodes if unset.
+ * Never put a token in source.
  */
-import { QUICKNODE_HTTP } from "../quicknode.mjs";
-
 interface RpcEvent {
   url: URL;
   req: { method?: string; text?: () => Promise<string>; headers?: Headers };
+}
+
+const PUBLIC_MAINNET = "https://api.mainnet-beta.solana.com";
+const PUBLIC_DEVNET = "https://api.devnet.solana.com";
+
+function rpcUrl(cluster: string | null): string {
+  if (cluster === "mainnet") {
+    const fromEnv = (process.env.SOLANA_RPC_MAINNET || "").trim();
+    return fromEnv || PUBLIC_MAINNET;
+  }
+  const fromEnv = (process.env.SOLANA_RPC_DEVNET || "").trim();
+  return fromEnv || PUBLIC_DEVNET;
 }
 
 export default async function solanaRpcMiddleware(
@@ -17,7 +28,7 @@ export default async function solanaRpcMiddleware(
   if (path !== "/solana-rpc" && path !== "/solana-rpc/") return next();
   const method = (event.req.method ?? "POST").toUpperCase();
   const body = method === "GET" || method === "HEAD" ? undefined : await event.req.text?.();
-  const upstream = await fetch(QUICKNODE_HTTP, {
+  const upstream = await fetch(rpcUrl(event.url.searchParams.get("cluster")), {
     method,
     headers: { "content-type": "application/json" },
     body,

@@ -1,5 +1,6 @@
-import { Connection, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { encodeBase58 } from "@/lib/agents/base58";
+import { PAY_WALLET } from "@/lib/game/pay";
 import { dayMod, todayKey } from "./save";
 
 const MEMO = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
@@ -106,6 +107,52 @@ export async function signClockInMwa(meters: number, _score: number, streak: num
     const sig = encodeBase58(signed[0]?.signature ?? new Uint8Array());
     if (sig.length < 32) return { ok: false, error: "Wallet sent no signature" };
     return { ok: true, address: account.address, signature: sig, cluster, kind: "message" };
+  } catch (error) {
+    if (stopped(error)) return { ok: false, error: error instanceof Error ? error.message : "Wallet did not sign" };
+    return { ok: false, error: "wallet" };
+  }
+}
+
+/** Devnet SOL to the game treasury. Refuses a mainnet-only wallet instead of charging it. */
+export async function payTreasuryMwa(sol: number): Promise<{ ok: true; sig: string } | { ok: false; error: string }> {
+  if (!androidPhone()) return { ok: false, error: "no-wallet" };
+  if (!(sol > 0)) return { ok: false, error: "amount" };
+  try {
+    await ensureWallet();
+    const [{ getWallets }, mwa] = await Promise.all([
+      import("@wallet-standard/app"),
+      import("@solana-mobile/wallet-standard-mobile"),
+    ]);
+    const wallet = getWallets()
+      .get()
+      .find((item) => item.name === mwa.SolanaMobileWalletAdapterWalletName) as MwaWallet | undefined;
+    if (!wallet?.features["standard:connect"] || !wallet.features["solana:signAndSendTransaction"]) {
+      return { ok: false, error: "wallet" };
+    }
+    const { accounts } = await wallet.features["standard:connect"].connect();
+    const account = accounts[0];
+    if (!account?.publicKey) return { ok: false, error: "wallet" };
+    if (!account.chains.includes("solana:devnet")) return { ok: false, error: "mainnet-only" };
+    const payer = new PublicKey(account.publicKey);
+    const connection = new Connection("https://api.devnet.solana.com", "confirmed");
+    const { blockhash } = await connection.getLatestBlockhash("confirmed");
+    const tx = new Transaction({ feePayer: payer, recentBlockhash: blockhash });
+    tx.add(
+      SystemProgram.transfer({
+        fromPubkey: payer,
+        toPubkey: new PublicKey(PAY_WALLET),
+        lamports: Math.round(sol * 1_000_000_000),
+      }),
+    );
+    const raw = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
+    const out = await wallet.features["solana:signAndSendTransaction"].signAndSendTransaction({
+      account,
+      transaction: raw,
+      chain: "solana:devnet",
+    });
+    const sig = encodeBase58(out[0]?.signature ?? new Uint8Array());
+    if (sig.length < 32) return { ok: false, error: "Wallet sent no signature" };
+    return { ok: true, sig };
   } catch (error) {
     if (stopped(error)) return { ok: false, error: error instanceof Error ? error.message : "Wallet did not sign" };
     return { ok: false, error: "wallet" };

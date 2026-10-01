@@ -30,6 +30,7 @@ import {
   pickRobot,
   setLocale,
   stampClock,
+  activateFeeWindow,
   tickSavePet,
   todayKey,
   writeSave,
@@ -329,6 +330,9 @@ export function GameApp() {
             onFarm={() => setScreen("pet")}
             onShop={() => setScreen("shop")}
             onLocale={onLocale}
+            onActivateFee={() => setSave((prev) => (prev ? activateFeeWindow(prev) : prev))}
+            reportReady={save != null}
+            onReportSeen={(day) => setSave((prev) => (prev && prev.reportDay !== day ? { ...prev, reportDay: day } : prev))}
           />
         </div>
       )}

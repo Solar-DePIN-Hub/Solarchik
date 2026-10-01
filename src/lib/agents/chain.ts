@@ -30,6 +30,7 @@ import {
 } from "@metaplex-foundation/mpl-core";
 import { COLLECTION_NAME, type AgentNft, type NftClassId, type StrategyBundle, type Track } from "./types";
 import { WORK_GOAL_SEC, listEligible, workedSecOf } from "./classes";
+import { ROYALTY_BPS } from "./fees.config";
 import { publicDevnet, rpcUrl } from "./rpc-heal";
 
 /** Fee receiver from the school wallet. Test SOL only. */
@@ -318,7 +319,7 @@ async function ensureCollection(payer: Keypair): Promise<string> {
   return rememberCollection(collection.publicKey.toString());
 }
 
-function attrList(nft: Pick<AgentNft, "classId" | "track" | "trainedDays" | "graduated" | "strategy" | "metrics">) {
+function attrList(nft: Pick<AgentNft, "classId" | "track" | "trainedDays" | "graduated" | "strategy" | "metrics" | "tier">) {
   const p = nft.strategy.prediction;
   const d = nft.strategy.dex;
   const role = nft.classId === 3 ? "combo" : nft.classId === 2 ? "dex" : "pred";
@@ -328,6 +329,7 @@ function attrList(nft: Pick<AgentNft, "classId" | "track" | "trainedDays" | "gra
   const pf = p.focus === "events" ? "evt" : p.focus === "weather" ? "wx" : lanes.length > 1 ? "mix" : "btc";
   const rows: Array<[string, string]> = [
     ["class", String(nft.classId)],
+    ["tr", nft.tier === "free" ? "free" : "pro"],
     ["role", role],
     ["track", nft.track],
     ["days", String(Math.round(nft.trainedDays))],
@@ -439,6 +441,7 @@ export function nftFromAsset(
     track,
     trainedDays: num(map, "days", track === "live" ? 90 : 0),
     graduated: workedSec >= WORK_GOAL_SEC,
+    tier: map.get("tr") === "free" ? "free" : "pro",
     strategy,
     metrics: {
       xp: num(map, "xp", 0),
@@ -514,7 +517,7 @@ export async function fetchOwnedAgents(owner: string): Promise<AgentNft[]> {
 
 export async function mintCore(
   payer: Keypair,
-  draft: Pick<AgentNft, "name" | "classId" | "track" | "trainedDays" | "graduated" | "strategy" | "metrics">,
+  draft: Pick<AgentNft, "name" | "classId" | "track" | "trainedDays" | "graduated" | "strategy" | "metrics" | "tier">,
 ): Promise<{ asset: string; signature: string; coreCollection: string }> {
   const coreCollection = await ensureCollection(payer);
   const umi = umiFor(payer);
@@ -528,6 +531,12 @@ export async function mintCore(
       uri: "urn:solarchik:agent",
       plugins: [
         { type: "Attributes", attributeList: attrList(draft) },
+        {
+          type: "Royalties",
+          basisPoints: ROYALTY_BPS,
+          creators: [{ address: publicKey(TREASURY), percentage: 100 }],
+          ruleSet: { type: "None" },
+        },
         { type: "FreezeDelegate", frozen: true },
       ],
     }),

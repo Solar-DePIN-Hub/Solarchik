@@ -9,7 +9,8 @@ const MEMO_PROGRAM = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
 const PUBLIC_MAINNET = "https://api.mainnet-beta.solana.com";
 
 async function postMainnet(body: unknown, ms = 8000): Promise<Record<string, unknown> | null> {
-  const urls = [MAINNET_HTTP, PUBLIC_MAINNET];
+  const fromEnv = (process.env.SOLANA_RPC_MAINNET || "").trim();
+  const urls = [fromEnv, MAINNET_HTTP, PUBLIC_MAINNET].filter((url, i, all) => url && all.indexOf(url) === i);
   let last: Record<string, unknown> | null = null;
   for (const url of urls) {
     try {

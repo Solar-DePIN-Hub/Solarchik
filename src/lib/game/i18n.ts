@@ -358,6 +358,18 @@ const EN = {
   "banter.signNow": "Run counts. Sign the day.",
   "banter.signed": "Day is signed.",
   "yard.share": "Share",
+  "yard.feeLeft": "{n} more days to 48h fee-free",
+  "yard.feeLeft30": "{n} more days to 7-day fee-free",
+  "yard.feeActive": "Fee-free · {left}",
+  "yard.feeReady": "Fee-free window is ready",
+  "yard.feeActivate": "Activate fee-free window",
+  "yard.reportTitle": "Sol's note",
+  "yard.reportClose": "Close",
+  "yard.reportEmpty": "No settled trades yesterday.",
+  "yard.reportPnl": "Yesterday PnL {n} SOL.",
+  "yard.reportFees": "Fees charged {charged} SOL. Waived {waived} SOL.",
+  "yard.reportStreak": "Streak {n}.",
+  "yard.reportPlan": "Today: {text}",
 } as const;
 
 type Key = keyof typeof EN;
@@ -702,6 +714,18 @@ const UK: Record<Key, string> = {
   "banter.signNow": "Забіг зараховано. Підпиши день.",
   "banter.signed": "День підписано.",
   "yard.share": "Поділитись",
+  "yard.feeLeft": "Ще {n} дн. до 48 год без комісії",
+  "yard.feeLeft30": "Ще {n} дн. до 7 днів без комісії",
+  "yard.feeActive": "Без комісії · {left}",
+  "yard.feeReady": "Вікно без комісії готове",
+  "yard.feeActivate": "Увімкнути вікно без комісії",
+  "yard.reportTitle": "Записка Сола",
+  "yard.reportClose": "Закрити",
+  "yard.reportEmpty": "Учора закритих угод немає.",
+  "yard.reportPnl": "Учора PnL {n} SOL.",
+  "yard.reportFees": "Комісія {charged} SOL. Знято {waived} SOL.",
+  "yard.reportStreak": "Стрік {n}.",
+  "yard.reportPlan": "Сьогодні: {text}",
 };
 
 const ES: Record<Key, string> = {
@@ -1043,6 +1067,18 @@ const ES: Record<Key, string> = {
   "banter.signNow": "La carrera cuenta. Firma el día.",
   "banter.signed": "El día está firmado.",
   "yard.share": "Compartir",
+  "yard.feeLeft": "Faltan {n} días para 48 h sin comisión",
+  "yard.feeLeft30": "Faltan {n} días para 7 días sin comisión",
+  "yard.feeActive": "Sin comisión · {left}",
+  "yard.feeReady": "La ventana sin comisión está lista",
+  "yard.feeActivate": "Activar ventana sin comisión",
+  "yard.reportTitle": "Nota de Sol",
+  "yard.reportClose": "Cerrar",
+  "yard.reportEmpty": "Ayer no hubo cierres.",
+  "yard.reportPnl": "PnL de ayer {n} SOL.",
+  "yard.reportFees": "Comisión cobrada {charged} SOL. Exenta {waived} SOL.",
+  "yard.reportStreak": "Racha {n}.",
+  "yard.reportPlan": "Hoy: {text}",
 };
 
 const PT: Record<Key, string> = {
@@ -1384,6 +1420,18 @@ const PT: Record<Key, string> = {
   "banter.signNow": "A corrida conta. Assina o dia.",
   "banter.signed": "O dia está assinado.",
   "yard.share": "Compartilhar",
+  "yard.feeLeft": "Faltam {n} dias para 48 h sem taxa",
+  "yard.feeLeft30": "Faltam {n} dias para 7 dias sem taxa",
+  "yard.feeActive": "Sem taxa · {left}",
+  "yard.feeReady": "A janela sem taxa está pronta",
+  "yard.feeActivate": "Ativar janela sem taxa",
+  "yard.reportTitle": "Nota do Sol",
+  "yard.reportClose": "Fechar",
+  "yard.reportEmpty": "Ontem não houve fechamentos.",
+  "yard.reportPnl": "PnL de ontem {n} SOL.",
+  "yard.reportFees": "Taxa cobrada {charged} SOL. Isenta {waived} SOL.",
+  "yard.reportStreak": "Sequência {n}.",
+  "yard.reportPlan": "Hoje: {text}",
 };
 
 const DE: Record<Key, string> = {
@@ -1725,6 +1773,18 @@ const DE: Record<Key, string> = {
   "banter.signNow": "Lauf zählt. Tag signieren.",
   "banter.signed": "Tag ist signiert.",
   "yard.share": "Teilen",
+  "yard.feeLeft": "Noch {n} Tage bis 48 h ohne Gebühr",
+  "yard.feeLeft30": "Noch {n} Tage bis 7 Tage ohne Gebühr",
+  "yard.feeActive": "Ohne Gebühr · {left}",
+  "yard.feeReady": "Gebührenfreies Fenster ist bereit",
+  "yard.feeActivate": "Gebührenfreies Fenster starten",
+  "yard.reportTitle": "Sols Notiz",
+  "yard.reportClose": "Schließen",
+  "yard.reportEmpty": "Gestern keine Abschlüsse.",
+  "yard.reportPnl": "PnL gestern {n} SOL.",
+  "yard.reportFees": "Gebühr {charged} SOL. Erlassen {waived} SOL.",
+  "yard.reportStreak": "Serie {n}.",
+  "yard.reportPlan": "Heute: {text}",
 };
 
 const JA: Record<Key, string> = {
@@ -2066,6 +2126,18 @@ const JA: Record<Key, string> = {
   "banter.signNow": "走は数えられた。日に署名して。",
   "banter.signed": "日は署名済み。",
   "yard.share": "共有",
+  "yard.feeLeft": "48時間の手数料なしまであと{n}日",
+  "yard.feeLeft30": "7日間の手数料なしまであと{n}日",
+  "yard.feeActive": "手数料なし · {left}",
+  "yard.feeReady": "手数料なしの期間が使えます",
+  "yard.feeActivate": "手数料なしを開始",
+  "yard.reportTitle": "ソルのメモ",
+  "yard.reportClose": "閉じる",
+  "yard.reportEmpty": "きのうの決済はありません。",
+  "yard.reportPnl": "きのうの損益 {n} SOL。",
+  "yard.reportFees": "手数料 {charged} SOL。免除 {waived} SOL。",
+  "yard.reportStreak": "連続 {n}。",
+  "yard.reportPlan": "今日: {text}",
 };
 
 const DICT: Record<Locale, Record<Key, string>> = {

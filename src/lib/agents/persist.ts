@@ -1,5 +1,6 @@
 import { SAVE_VERSION, type AgentFill, type AgentNft, type LogEntry, type MarketListing, type PredLane } from "./types";
 import { TRAIN_GOAL_DAYS, WORK_GOAL_SEC, clampStrategy, defaultStrategy } from "./classes";
+import { readFeeRows, type FeeRow } from "./fee-ledger";
 
 const STATE_KEY = "solarchik.agent-state.v1";
 const BACKUP_KEY = "solarchik.agent-state.bak";
@@ -70,6 +71,7 @@ export type PersistedState = {
   liveArmed: boolean;
   liveAck: boolean;
   autoRun: boolean;
+  feeLedger: FeeRow[];
 };
 
 export const START_SOL = 0;
@@ -101,6 +103,7 @@ const defaults = (): PersistedState => ({
   liveArmed: false,
   liveAck: false,
   autoRun: false,
+  feeLedger: [],
 });
 
 function migrateNft(n: AgentNft, version: number): AgentNft | null {
@@ -139,6 +142,7 @@ function migrateNft(n: AgentNft, version: number): AgentNft | null {
       workedSec,
       aprPct,
     },
+    tier: n.tier === "free" ? "free" : "pro",
   };
 }
 
@@ -260,6 +264,7 @@ function migrate(raw: PersistedState): PersistedState {
       liveArmed: false,
       liveAck: false,
       autoRun: false,
+      feeLedger: [],
     };
   }
   const paperSol = 0;
@@ -351,6 +356,7 @@ function migrate(raw: PersistedState): PersistedState {
     liveArmed: (s as { liveArmed?: unknown }).liveArmed === true,
     liveAck: (s as { liveAck?: unknown }).liveAck === true && (s as { liveArmed?: unknown }).liveArmed === true,
     autoRun: (s as { autoRun?: unknown }).autoRun === true,
+    feeLedger: readFeeRows((s as { feeLedger?: unknown }).feeLedger),
   };
 }
 
