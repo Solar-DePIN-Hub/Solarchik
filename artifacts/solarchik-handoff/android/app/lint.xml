@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Reviewed in the 0.20.2 audit. Each ignore is deliberate. -->
+<lint>
+    <!-- Dependency bumps are done separately (AGP/MWA/sol4k upgrades are risky mid-release). -->
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="NewerVersionAvailable" severity="ignore" />
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+    <!-- Reviewed: the flagged strings are used only with counts > 1, constants, or "label N" forms. -->
+    <issue id="PluralsCandidate" severity="ignore" />
+    <!-- Settings gear path; cosmetic only. -->
+    <issue id="VectorPath" severity="ignore" />
+</lint>

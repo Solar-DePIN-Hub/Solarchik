@@ -41,11 +41,15 @@ class AgentStore(context: Context) {
     fun agentsFor(owner: String, cluster: String): List<OwnedAgent> =
         agents().filter { it.owner == owner && it.cluster == cluster }
 
+    // commit(): Minter saves the pending record right before the wallet opens; it must be on disk
+    // if the app is killed while the wallet sends.
+    @android.annotation.SuppressLint("ApplySharedPref")
     fun upsert(agent: OwnedAgent) {
         val all = agents().filter { it.asset != agent.asset } + agent
         prefs.edit().putString(KEY_AGENTS, json.encodeToString(ListSerializer(OwnedAgent.serializer()), all.takeLast(200))).commit()
     }
 
+    @android.annotation.SuppressLint("ApplySharedPref")
     fun remove(asset: String) {
         val all = agents().filter { it.asset != asset }
         prefs.edit().putString(KEY_AGENTS, json.encodeToString(ListSerializer(OwnedAgent.serializer()), all)).commit()

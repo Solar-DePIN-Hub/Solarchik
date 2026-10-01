@@ -133,6 +133,8 @@ class SolScreen(host: MainActivity) : Screen(host) {
 
     override fun onHide() {
         ears?.stop()
+        // a stopped recognizer sends no callback: clear the "listening" line ourselves
+        if (listening && this::status.isInitialized && !sending) status.visibility = View.GONE
         listening = false
         voice?.stop()
     }

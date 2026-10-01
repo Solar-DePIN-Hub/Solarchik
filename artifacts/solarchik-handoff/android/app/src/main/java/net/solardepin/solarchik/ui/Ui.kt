@@ -332,7 +332,8 @@ class CenteredIconSpan(private val d: Drawable, private val gap: Int) : android.
     }
 }
 
-/** Rounded progress bar with a solar gradient fill. */
+/** Rounded progress bar with a solar gradient fill. Built in code only, never inflated from XML. */
+@android.annotation.SuppressLint("ViewConstructor")
 class SolarProgress(ctx: Context, private val from: Int = Ui.GOLD, private val to: Int = Ui.AMBER) : View(ctx) {
     var fraction: Float = 0f
         set(value) {
@@ -342,6 +343,8 @@ class SolarProgress(ctx: Context, private val from: Int = Ui.GOLD, private val t
     private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Ui.withAlpha(Color.WHITE, 0x14) }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
+    private var shader: Shader? = null
+    private var shaderW = -1f
 
     init {
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (8 * ctx.resources.displayMetrics.density).toInt())
@@ -353,7 +356,11 @@ class SolarProgress(ctx: Context, private val from: Int = Ui.GOLD, private val t
         canvas.drawRoundRect(rect, r, r, track)
         if (fraction <= 0f) return
         val w = maxOf(height.toFloat(), width * fraction)
-        fill.shader = LinearGradient(0f, 0f, w, 0f, from, to, Shader.TileMode.CLAMP)
+        if (w != shaderW) {
+            shaderW = w
+            shader = LinearGradient(0f, 0f, w, 0f, from, to, Shader.TileMode.CLAMP)
+        }
+        fill.shader = shader
         rect.set(0f, 0f, w, height.toFloat())
         canvas.drawRoundRect(rect, r, r, fill)
     }

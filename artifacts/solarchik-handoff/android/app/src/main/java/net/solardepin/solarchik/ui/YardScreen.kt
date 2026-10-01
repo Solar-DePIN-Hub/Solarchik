@@ -207,7 +207,7 @@ class YardScreen(host: MainActivity) : Screen(host) {
         val goal = GameSave.GOAL_M
         renderedDay = save.today()
         val state = save.liveStreak()
-        streakNum.text = state.streak.toString()
+        streakNum.text = Fmt.count(state.streak)
         netPill.text = ctx.getString(if (host.wallet.mainnet) R.string.network_mainnet else R.string.network_devnet)
         modPill.text = modName(save.dayMod())
 

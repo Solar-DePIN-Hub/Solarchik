@@ -148,5 +148,83 @@ All numbers live in `core/SolarchikConfig.kt`.
 - The friend worker gives generic answers and cuts Ukrainian replies short. Server-side fix: add game facts to its system prompt and raise `max_tokens`. The app answers rule questions locally.
 - Positions are simulated on real market data. On devnet only fees move.
 - Global loss brake: 2 losses in a row stop the whole desk for the UTC day (web rule).
-- Events picks the highest-priced favourite, which tends to be a long-dated market. Over its 30-minute window the price barely moves, so most Events/Combo paper closes settle at 0 P&L. Consider preferring markets that end within days.
+- Events picks the highest-priced favourite, which tends to be a long-dated market. Over its 30-minute window the price barely moves, so most Events/Combo paper closes settle at 0 P&L. **Fixed in 0.20.2** (see below).
 - Screens: `/workspace/apk-test/screens-B` (box). They come from a 4.5 h real-time session on live data (14 closes). Rows are booked as paper.
+
+## 0.20.2 (versionCode 62): bug audit + Events pick
+
+**Events / Combo pick** (`GammaPick` in `MarketFeed.kt`)
+- Same honest base rule: not Bitcoin, not sports, favourite between the 65% entry floor and 94%, open, at least 2 h left.
+- New preference, first non-empty tier wins:
+  1. resolves within 7 days, 24 h volume ≥ $20k, and moving (|1-day change| ≥ 1 pt or |1-hour change| ≥ 0.5 pt)
+  2. resolves within 7 days, 24 h volume ≥ $20k
+  3. resolves within 30 days, 24 h volume ≥ $20k
+  4. the old rule (strongest favourite, then total volume)
+- Inside a tier: most 24 h volume first. Gamma `volume24hr`, `oneDayPriceChange`, `oneHourPriceChange` are parsed; the feed reads the top 100 markets by 24 h volume (was 60).
+- Wider sports filter (esports, handicaps, spreads, O/U, "win on <date>", draws), with a word guard so "FCC" does not count as "fc".
+- On live data at 12:35 Kyiv this picked a market ending in 3.8 days that had moved 3.5 points in a day. P&L is still whatever the market does in 30 minutes. Nothing is forced.
+
+**Bugs found and fixed**
+1. Desk: the devnet balance never refreshed while the app was open. The refresh was gated on `lastTickAt`, which moves every 30 s. It now has its own `balanceAt` (every 5 min), and a failed read keeps the last value.
+2. Desk: a stored position whose source this build does not know (`Source.valueOf`) threw on every tick and froze the desk. It now closes flat after the no-data grace.
+3. Desk: fee payment could be paid twice if the app died, or the wallet timed out, after sending. The attempt is saved first (`pendingPay`), and the memo carries `ref=<hash of row ids>`. `reconcile()` finds the tx on chain and marks the rows charged. A second payment is refused (`PAYMENT_PENDING`, new localized message) until the attempt is found or expires (3 min after a successful chain lookup; 24 h when offline). Declines and a missing wallet clear the attempt at once.
+4. Desk: prefs commits ran on the main thread. start/stop/caps/tick now run on `Dispatchers.IO`.
+5. Desk store: an unreadable desk blob was silently replaced by an empty desk on the next write. It is now kept aside as `desk.v1.unreadable` first.
+6. Rpc: an HTML or non-JSON reply and a missing blockhash or balance caused NPE / `!!` crashes. They now raise a typed `RpcException`.
+7. MWA: errors are classified by JSON-RPC code and message. Declines (−1/−3, "User did not authorize signing") are never retried. Timeouts and IO errors no longer trigger the sign-only fallback, which only runs for wallet-side send failures (−4 or other remote codes). The fallback reuses the same blockhash, so a first attempt that did land cannot be paid twice. A rejected auth token is cleared. `CancellationException` is no longer swallowed.
+8. Wallet migration from 0.19.51: a phone with only the MWA token now shows the account from its last signed CLOCK IN instead of looking disconnected.
+9. Mint: if the app was killed while the wallet sent, the free mint was forgotten (and could be minted again). The record is now saved as pending before the wallet opens. It is removed only when nothing can have been sent (decline, no wallet, our own build error). The sign-only rebuild no longer trips the one-free-mint check on its own asset.
+10. CLOCK IN across UTC midnight: a wallet prompt answered after 00:00 stamped the new day and the wrong metres. The day and metres are now captured before the wallet opens. The Yard re-renders when the UTC day changes.
+11. Notes: sent keys were kept in an unordered set and trimmed with `takeLast(60)`, which could drop today's key and repeat a note an hour later. They are now an ordered list (120 kept), migrated from the old set. Posting re-checks permission and catches a revoke race (`SecurityException`).
+12. Call screening: without READ_CONTACTS, every caller looked unknown and was rejected. Such calls now go through. `Call.Details.getCallDirection()` (API 29+) crashed on Android 8–9 and is now guarded.
+13. Sol tab: TTS and the recognizer leaked when the activity was destroyed (`Screen.onDestroy`). A failed send could leave the input locked (`sending` reset in `finally`, same for the retell). Leaving the tab mid-listen left "listening…" on screen. Old `conv.*` ids piled up in prefs.
+14. Activity: on recreation, the saved tab now wins over the launch intent, and an unknown name falls through. `onNewIntent` calls `setIntent`.
+15. Agents tab: the wallet pill could show one wallet's or cluster's balance for another. The balance is now keyed by address+cluster. A pending fee payment is reconciled when the tab opens.
+16. Strings / locale:
+    - "Streak: N days" is a real plural (EN one/other; UK one/few/many/other).
+    - "1 positions"-style lines became "Label: N" in EN and UK.
+    - Hard-coded share text, cluster label and mic description moved to resources.
+    - Bare `%` strings got `formatted="false"`.
+    - UK airdrop label fixed.
+    - Concatenated UI text now goes through format strings, and counts are locale-formatted.
+17. Accessibility:
+    - Risk steppers are 48 dp with "Lower/Raise: <limit>" descriptions and a real disabled state.
+    - The wallet and share chips have a 44 dp minimum.
+    - Segmented controls are 44 dp.
+    - Switch rows: the whole row toggles and the switch is labelled.
+    - The run view jumps on `performClick` (TalkBack / switch access).
+18. Lint / release:
+    - `data_extraction_rules` (nothing goes to cloud backup or device transfer, matching `allowBackup=false`).
+    - API-guarded theme and manifest attributes.
+    - Unused resources removed (2 webp, 9 colours, 14 strings).
+    - `SolarProgress` no longer allocates a shader on every draw.
+    - Intentional `commit()` calls documented.
+    - `lint.xml` records the few deliberate ignores (dependency bumps, plural candidates reviewed, one long vector path).
+    - `./gradlew lint`: **0 issues**.
+    - R8: the app keep rules already cover the kotlinx-serialization classes. No `getIdentifier` or reflection, so resource shrinking is safe.
+
+**Tests**
+- `./gradlew testDebugUnitTest -Plive=… -Pchat=…`: **113 tests, 111 pass, 0 fail, 2 skipped** (opt-in `DevnetMintIT`).
+- New:
+  - `AuditFixesTest` (22): Events tiers, floor and ceiling, sports/BTC filter, Gamma parsing, RPC parsers, MWA classification, fallback rules, sticky blockhash, 0.19.51 wallet migration, mint pending record (saved before send / dropped on decline / kept on timeout / sign-only rebuild), CLOCK IN across midnight, notes order and migration, Sol cancellation and conversation cleanup, tab restore, call-screening rule, EN/UK plurals and strings
+  - `DeskTest` +10: 5-minute balance refresh, balance read failure, unknown source, reconcile via memo ref, failed tx not counted, offline reconcile, payRef stable and locale-proof, memo ref in the tx, unreadable blob kept
+  - `FakeRpc` test helper (no network in unit tests)
+- `-Pdevnet=1`: the simulation of all 10 Core mints passes. The live mint was retried at 12:35 Kyiv; the faucet still returns **429**, so it was skipped.
+
+**APKs (box, `/workspace/apk-test/`)**
+- `solarchik-0.20.2-debug.apk`: 6,921,154 B, sha256 `44353cd7e3f4d75b1b36420fb87725148a543e000ff3d5a5a710e77161eac980`, Android debug key.
+- `solarchik-0.20.2-release-boxkey.apk`: 3,196,544 B, sha256 `d9250e51d645dd0d14d22f4926b5a52f436750bf85504e75c242866ba9bd7b68`, R8, signed with the box test key (CN=Solarchik BOX TEST KEY, not production).
+
+**Still open / check on a real phone**
+- Everything in the milestone B list above, plus:
+  - MWA decline and expired auth paths, and the sign-only fallback on Seed Vault
+  - fee payment, then kill the app mid-payment, reopen Agents: it should reconcile, not pay twice
+  - mint, then kill the app mid-send: the agent should show as pending, then verified or missing
+- Upgrading a 0.19.51 install needs the 0.19.51 signing key. The box key APK cannot update a store build.
+- On a Seeker the CLOCK IN memo defaults to mainnet (product design, unchanged); devnet can be forced in Settings.
+- Not changed (low risk):
+  - RunView reads touch and game state from two threads without a lock
+  - the daily report note triggers at 20:00 local time but counts activity by UTC day
+  - `DeskHooks.afterTick` is never set, so background ticks raise no close notifications (hourly notes still run)
+  - `AgentStore` drops unreadable JSON like the desk used to (agents can be re-found via DAS refresh)
+- Dependency upgrades (AGP, MWA, etc.) are deliberately not done in this release.

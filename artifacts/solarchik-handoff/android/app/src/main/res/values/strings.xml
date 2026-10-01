@@ -305,4 +305,6 @@
         <item quantity="one">Streak: %1$d day.</item>
         <item quantity="other">Streak: %1$d days.</item>
     </plurals>
+    <string name="join_lines" translatable="false">%1$s\n%2$s</string>
+    <string name="join_dot" translatable="false">%1$s · %2$s</string>
 </resources>

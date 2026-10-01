@@ -61,6 +61,9 @@ object Fmt {
         return if (s == "-0") "0" else s
     }
 
+    /** Whole numbers shown alone in a TextView (score, streak). */
+    fun count(n: Int): String = String.format(Locale.getDefault(), "%d", n)
+
     fun signedSol(v: Double, max: Int = 4): String = (if (v > 0) "+" else "") + sol(v, max)
 
     fun short(addr: String): String = if (addr.length < 12) addr else addr.take(4) + "…" + addr.takeLast(4)

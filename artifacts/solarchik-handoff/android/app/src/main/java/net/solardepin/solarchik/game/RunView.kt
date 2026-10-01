@@ -14,6 +14,8 @@ import android.view.SurfaceView
 import kotlin.math.max
 import kotlin.random.Random
 
+/* Built in code by RunActivity only, never inflated from XML. */
+@SuppressLint("ViewConstructor")
 class RunView(context: Context, private val onDone: (meters: Int, score: Int) -> Unit) :
     SurfaceView(context), SurfaceHolder.Callback, Runnable {
 

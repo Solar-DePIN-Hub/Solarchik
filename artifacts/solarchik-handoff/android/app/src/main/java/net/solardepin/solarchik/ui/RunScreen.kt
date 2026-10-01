@@ -81,12 +81,15 @@ class RunScreen(host: MainActivity) : Screen(host) {
         val save = host.save
         lastV.text = ctx.getString(R.string.meters, save.todayDistance())
         bestV.text = ctx.getString(R.string.meters, save.bestDistance)
-        scoreV.text = save.bestScore.toString()
+        scoreV.text = Fmt.count(save.bestScore)
         val mod = save.dayMod()
         modV.text = ctx.getString(R.string.mod_chip, YardScreen.modLong(ctx, mod).substringBefore(":"))
         val ghost = save.readGhost()?.takeIf { it.day != save.today() }
         val modLine = YardScreen.modLong(ctx, mod)
-        ghostV.text = modLine + "\n" + if (ghost != null) ctx.getString(R.string.run_ghost_on, ghost.day, ghost.meters) else ctx.getString(R.string.run_ghost_off)
+        ghostV.text = ctx.getString(
+            R.string.join_lines, modLine,
+            if (ghost != null) ctx.getString(R.string.run_ghost_on, ghost.day, ghost.meters) else ctx.getString(R.string.run_ghost_off),
+        )
         unlocked.visibility = if (save.clockedToday() && !save.signedToday()) View.VISIBLE else View.GONE
         start.text = ctx.getString(if (save.todayDistance() > 0) R.string.run_again else R.string.run_start)
         Ui.setIcon(start, R.drawable.ic_nav_run, Ui.INK)

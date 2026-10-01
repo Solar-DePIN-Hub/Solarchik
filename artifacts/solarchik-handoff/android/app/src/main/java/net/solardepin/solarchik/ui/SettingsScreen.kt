@@ -137,8 +137,11 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         if (!this::walletBox.isInitialized) return
         renderNotes()
         val w = host.wallet
-        networkBody.text = (if (w.mainnet) ctx.getString(R.string.network_mainnet) else ctx.getString(R.string.network_devnet)) + " · " +
-            ctx.getString(if (w.isSeeker) R.string.settings_network_seeker else R.string.settings_network_other)
+        networkBody.text = ctx.getString(
+            R.string.join_dot,
+            ctx.getString(if (w.mainnet) R.string.network_mainnet else R.string.network_devnet),
+            ctx.getString(if (w.isSeeker) R.string.settings_network_seeker else R.string.settings_network_other),
+        )
 
         walletBox.removeAllViews()
         val head = Ui.row(ctx, gap = 12)
