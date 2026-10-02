@@ -531,3 +531,7 @@ Everything stays native Kotlin (Canvas + SoundPool/MediaPlayer). No engine was a
   - RunShotsTest gains `effects()` (40–49) and UK pops/milestone frames.
 - **Web spec.** `web-city-rules.diff` gains `MILESTONE_M`, `cityMilestone()`, `cityMusicTrack()`, the shatter/overheat events and note 16.
 - **Review exports** (box only): `/workspace/apk-test/audio-0.21.6/` holds the four tracks, all clips, an SFX montage with cue sheet (WAV + OGG) and a golden→night→storm→boss crossfade demo.
+
+- **Checks (merge build on native-full, 0.21.6 / versionCode 71).** `testDebugUnitTest`: 242 tests, 7 skipped (opt-in tools: run shots/video, live route checks), 0 failures. `lintDebug`: 1 warning (the existing IconMissingDensityFolder baseline). `assembleDebug` and `assembleRelease` OK.
+- **APKs (box test key, not production).** `solarchik-0.21.6-release-boxkey.apk` 6,568,728 bytes, sha256 `92f9f30257173325b9fe2294b21eae3821bce612858a5ea139078cb156e5e12f`, signer `CN=Solarchik BOX TEST KEY (not production)`. `solarchik-0.21.6-debug.apk` 10,606,659 bytes, sha256 `eb736b165b38d387042bd4167b40adbf69a8730ea2164f98664514120bb76089`.
+- **Not verified on a device.** No emulator: frames are Robolectric renders and the audio was checked by loudness/spectrogram/loop-seam numbers, not by ear. Haptics, 60 fps pacing and MediaPlayer loop gaps still need a phone.
