@@ -16,7 +16,7 @@ export const CLASS_META: Record<
 > = {
   1: {
     id: 1,
-    title: "Prediction Agent",
+    title: "Агент прогнозів",
     short: "Прогнози",
     kind: "prediction",
     blurb: "RIG. Біткоїн — вікна Up/Down з Polymarket. Події — сам шукає фаворита.",
@@ -30,7 +30,7 @@ export const CLASS_META: Record<
   },
   3: {
     id: 3,
-    title: "Combo Agent",
+    title: "Комбо-агент",
     short: "Комбо",
     kind: "combo",
     blurb: "Один NFT: крипто 15 хв, події і погода. DEX тут немає.",

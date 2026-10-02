@@ -89,3 +89,11 @@ test("native API answers English reasons when the client sends lang=en", async (
   assert.doesNotMatch(JSON.stringify({ ...out, name: "" }), CYR);
   assert.equal(out.name, "Назва не чіпається");
 });
+
+test("strategy market summary line has no Ukrainian left in English (live audit: 'правила:')", () => {
+  const line = "Крипто+Події · вікна 15/60 хв · збалансований · ставка ≤ 0.01 SOL · коридор 0.1–0.4 · стоп 35% · тейк 150% · правила: allow if price <= 0.35";
+  const out = translateText(line);
+  assert.doesNotMatch(out, CYR, out);
+  assert.match(out, / · rules: allow if price <= 0\.35$/);
+  assert.equal(translateText("ШІ ще відповідає. Нову не ставлю."), "The AI is still answering. Not placing a new one.");
+});

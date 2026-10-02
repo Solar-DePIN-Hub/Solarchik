@@ -484,7 +484,7 @@ function WalletDesk() {
 					grokFlight ? /* @__PURE__ */ jsx("p", {
 						className: "mt-1 text-xs leading-normal",
 						"data-testid": "grok-flight",
-						children: "Grok ще відповідає. Нову не ставлю."
+						children: "ШІ ще відповідає. Нову не ставлю."
 					}) : null,
 					lastPolyOrder ? /* @__PURE__ */ jsxs("p", {
 						className: "mt-1 break-all font-mono text-xs",

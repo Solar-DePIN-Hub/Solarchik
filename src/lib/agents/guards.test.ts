@@ -556,3 +556,14 @@ describe("prediction decision lines name the model (live audit, Oct 2026)", () =
     assert.match(fn, /return reset\(why \? said\(why\) :/);
   });
 });
+
+describe("class titles are Ukrainian source text with English swaps (UK audit, Oct 2026)", () => {
+  it("has no English class title left in the Ukrainian UI", () => {
+    const src = readFileSync(new URL("./classes.ts", import.meta.url), "utf8");
+    assert.match(src, /title: "Агент прогнозів"/);
+    assert.match(src, /title: "Комбо-агент"/);
+    const phrases = readFileSync(new URL("../../components/game/work-phrases.ts", import.meta.url), "utf8");
+    assert.match(phrases, /"Агент прогнозів": "Prediction Agent"/);
+    assert.match(phrases, /"Комбо-агент": "Combo Agent"/);
+  });
+});

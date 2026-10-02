@@ -283,7 +283,7 @@ const CRYPTO_NOTICE = new Set([
   "Немає свіжого Chainlink TWAP. Ордера немає.",
   "Край після ціни замалий. Ордера немає.",
   "Прогноз проти дельти. Ордера немає.",
-  "Grok ще відповідає. Нову не ставлю.",
+  "ШІ ще відповідає. Нову не ставлю.",
   CRYPTO_SLOT,
 ]);
 
@@ -1690,7 +1690,7 @@ async function fireAutoPoly() {
   const start = useAgents.getState();
   if (!start.autoRun || !start.wallet) return;
   if (start.grokFlight && reviewLive()) {
-    useAgents.setState({ notice: "Grok ще відповідає. Нову не ставлю." });
+    useAgents.setState({ notice: "ШІ ще відповідає. Нову не ставлю." });
     return;
   }
   if (start.polyHold && start.polyHold.lane !== "events" && start.polyHold.lane !== "weather" && cryptoCloseDue(start.polyHold)) {
@@ -1823,7 +1823,7 @@ async function fireAutoPoly() {
       useAgents.setState({
         grokFlight: false,
         polyBusy: false,
-        ...(live.notice === "Grok ще відповідає. Нову не ставлю." ? { notice: null } : {}),
+        ...(live.notice === "ШІ ще відповідає. Нову не ставлю." ? { notice: null } : {}),
         ...(slotFree
           ? {
               agents: {
@@ -1838,7 +1838,7 @@ async function fireAutoPoly() {
 }
 
 const SIDE_BLOCK = "Спочатку закрити відкриту ставку. Нову не ставлю.";
-const SIDE_FLIGHT = "Grok ще відповідає. Нову не ставлю.";
+const SIDE_FLIGHT = "ШІ ще відповідає. Нову не ставлю.";
 const SIDE_FUNDS = "Поповни pUSD. Агент стоїть.";
 
 function sideBlock(s: { polyRedeem: unknown; polyHold: PolyHold | null; polyOpenId: string | null; grokFlight: boolean; polyBusy: boolean; polyTicket: unknown; polyCancel: unknown; polyPusd: number | null }): "crypto" | "flight" | "card" | "funds" | null {
@@ -2709,7 +2709,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
     }
     const stuck = get().grokFlight && !reviewLive();
     if (get().grokFlight && reviewLive()) {
-      set({ notice: "Grok ще відповідає. Нову не ставлю." });
+      set({ notice: "ШІ ще відповідає. Нову не ставлю." });
       return;
     }
     if (lane === "events" || lane === "weather") {
@@ -2966,7 +2966,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
         set({
           polyBusy: false,
           grokFlight: false,
-          ...(n === "Grok ще відповідає. Нову не ставлю." ? { notice: null } : {}),
+          ...(n === "ШІ ще відповідає. Нову не ставлю." ? { notice: null } : {}),
         });
       }
     }
