@@ -37,6 +37,18 @@ class WalletError(val kind: Kind, detail: String = "", val signOnlyMayHelp: Bool
     enum class Kind { NO_WALLET, DECLINED, NETWORK, FAILED }
 
     companion object {
+        /** User-facing text for a wallet / network failure (shared by the tabs and the run). */
+        fun text(ctx: android.content.Context, t: Throwable?): String = when (t) {
+            is WalletError -> when (t.kind) {
+                Kind.NO_WALLET -> ctx.getString(net.solardepin.solarchik.R.string.err_no_wallet)
+                Kind.DECLINED -> ctx.getString(net.solardepin.solarchik.R.string.err_declined)
+                Kind.NETWORK -> ctx.getString(net.solardepin.solarchik.R.string.err_network)
+                Kind.FAILED -> ctx.getString(net.solardepin.solarchik.R.string.err_failed, (t.message ?: "").take(120))
+            }
+            is java.io.IOException -> ctx.getString(net.solardepin.solarchik.R.string.err_network)
+            else -> ctx.getString(net.solardepin.solarchik.R.string.err_failed, (t?.message ?: "").take(120))
+        }
+
         /**
          * Maps an MWA failure to a kind. The clientlib's own message ("User did not authorize
          * signing") and the wallet's JSON-RPC error code both count, so a decline is never retried.

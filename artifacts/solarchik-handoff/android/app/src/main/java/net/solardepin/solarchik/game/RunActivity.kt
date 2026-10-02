@@ -17,19 +17,24 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import net.solardepin.solarchik.R
 import net.solardepin.solarchik.game.run.DayMod
 import net.solardepin.solarchik.game.run.Ev
-import net.solardepin.solarchik.game.run.GhostSample
 import net.solardepin.solarchik.game.run.Phase
 import net.solardepin.solarchik.game.run.RunAudio
 import net.solardepin.solarchik.game.run.RunSim
+import net.solardepin.solarchik.wallet.SolanaWallet
+import net.solardepin.solarchik.wallet.WalletError
 
 /**
  * Full-screen immersive roof run (landscape, like the web runner). Hosts the RunView surface and
- * the RunOverlay HUD; records the result (best distance / score, today's CLOCK IN unlock at
- * GameSave.GOAL_M, the ghost) as soon as the run ends, exactly when the web commits it.
+ * the RunOverlay HUD. Crossing GameSave.GOAL_M opens today's CLOCK IN at once without stopping
+ * the run (banner + HUD Sign badge; signing uses the shared [ClockIn] flow). The last heart
+ * records the run, pays its suns, daily quests and milestones, and reveals the rewards.
  */
 class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
     private lateinit var save: GameSave
@@ -37,13 +42,20 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
     private lateinit var overlay: RunOverlay
     private lateinit var audio: RunAudio
     private lateinit var radio: RunRadio
+    private lateinit var garage: RunGarage
+    private lateinit var quests: RunQuests
+    private lateinit var wallet: SolanaWallet
+    private lateinit var sender: ActivityResultSender
     private val scope = MainScope()
     private var hud: RunHud? = null
     private var paused = false
     private var ended = false
+    private var signing = false
+    private var signError = ""
+    private val announced = HashSet<String>()
 
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        if (ok) radio.startListen() else overlay.setCaption(getString(net.solardepin.solarchik.R.string.run_mic_denied))
+        if (ok) radio.startListen() else overlay.setCaption(getString(R.string.run_mic_denied))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,6 +72,10 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
         save = GameSave(this)
+        garage = RunGarage(this)
+        quests = RunQuests(this, garage)
+        wallet = SolanaWallet(this)
+        sender = ActivityResultSender(this)
         audio = RunAudio(this).also { it.prepare() }
         game = RunView(this, this).also { it.audio = audio }
         overlay = RunOverlay(this, this)
@@ -89,13 +105,15 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
 
     private fun setup(): RunSetup {
         val today = save.today()
-        val ghost = save.readGhost()?.takeIf { it.day != today }?.samples?.map { GhostSample(it.x.toDouble(), it.y.toDouble(), it.grounded) }.orEmpty()
         return RunSetup(
             seed = RunSim.daySeed(today),
             mod = DayMod.of(save.dayMod()),
             offerBonus = save.offerBonus(),
             goalMeters = GameSave.GOAL_M,
-            ghost = ghost,
+            // native daily care: a live CLOCK IN streak starts the run with a shield (web pet care)
+            careBoost = save.streak > 0,
+            skin = garage.skin,
+            robot = garage.robot,
         )
     }
 
@@ -103,7 +121,10 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
         ended = false
         paused = false
         hud = null
+        signError = ""
+        announced.clear()
         overlay.setPaused(false)
+        refreshClock()
         overlay.setCaption("")
         game.start(setup())
         audio.play("start")
@@ -117,12 +138,26 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
 
     override fun onHud(hud: RunHud) {
         this.hud = hud
-        overlay.bind(hud, save.signedToday())
+        overlay.bind(hud)
         radio.onHud(hud)
+        if (hud.phase == Phase.RUNNING) {
+            for (q in quests.liveDone(stats(hud))) {
+                if (!announced.add(q.id)) continue
+                overlay.questDone(getString(R.string.quest_done_toast, getString(GearNames.quest(q.id))) + "  " + getString(R.string.run_reward_plus, q.reward))
+            }
+        }
     }
+
+    private fun stats(h: RunHud) = RunStats(h.meters, h.suns, h.maxCombo, h.stomps, h.grinds, h.unders)
 
     override fun onEvents(events: List<Ev>, hud: RunHud) {
         radio.push(events, hud)
+        if (Ev.CLOCK in events) {
+            // CLOCK IN unlocked mid-run: save it now, celebrate, keep running
+            save.unlockClock(hud.meters, hud.score)
+            refreshClock()
+            overlay.celebrateClock()
+        }
         // web buzz(): jump 18 ms, hurt 40 ms, clock 55 ms
         when {
             Ev.CLOCK in events || Ev.HURT in events -> game.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
@@ -134,13 +169,30 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
         if (ended) return
         ended = true
         val h = result.hud
-        val meters = h.meters.coerceIn(0, GameSave.GOAL_M)
-        save.recordRun(meters, h.score)
-        if (meters >= 400) save.writeGhost(meters, result.ghost)
+        val best = save.bestDistance
+        save.recordRun(h.meters, h.score)
+        garage.addSuns(h.suns)
+        val rewards = quests.commit(stats(h))
         setResult(RESULT_OK)
         radio.live = false
-        if (h.phase == Phase.DEAD) audio.stopMusic()
-        overlay.bind(h, save.signedToday())
+        audio.stopMusic()
+        overlay.bind(h)
+        overlay.showRewards(h.suns, rewards.map { GearNames.reward(this, it) to it.suns }, h.meters > best && best > 0)
+        refreshClock()
+    }
+
+    private fun refreshClock() {
+        overlay.setClock(
+            RunOverlay.ClockUi(
+                open = save.clockedToday() || save.signedToday() && hud?.clockOpen == true,
+                signed = save.signedToday(),
+                busy = signing,
+                wallet = wallet.connected,
+                dayLine = ClockIn.dayLine(this, save),
+                proofLine = ClockIn.proofLine(this, save),
+                error = signError,
+            ),
+        )
     }
 
     // ---- RunOverlay.Actions ----
@@ -149,6 +201,7 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
 
     private fun setPaused(p: Boolean) {
         if (ended && p) return
+        if (!p && signing) return // the wallet is open; resume after it answers
         paused = p
         game.paused = p
         game.releaseAll()
@@ -170,7 +223,35 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
     }
 
     override fun sign() {
-        // Same as the web onClock: sign the day now. The Yard owns the wallet flow.
+        // web onClock -> doSign: the same CLOCK IN flow the Yard uses, right here.
+        if (signing || !ClockIn.ready(save)) return
+        if (!wallet.connected) { yardSign(); return }
+        signing = true
+        signError = ""
+        refreshClock()
+        scope.launch {
+            val result = ClockIn.sign(wallet, sender, save)
+            signing = false
+            result.onSuccess {
+                quests.milestones().takeIf { it.isNotEmpty() }?.let { ms ->
+                    overlay.questDone(ms.joinToString("  ") { GearNames.reward(this@RunActivity, it) + " +" + it.suns })
+                }
+                game.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            }.onFailure { signError = WalletError.text(this@RunActivity, it) }
+            refreshClock()
+        }
+    }
+
+    override fun signBadge() {
+        // the badge pauses the run only now, for the wallet; Resume continues the same run
+        setPaused(true)
+        sign()
+    }
+
+    override fun share() = ClockIn.share(this, save)
+
+    override fun yardSign() {
+        // No wallet connected here: the Yard connects and signs (its CLOCK IN flow).
         setResult(RESULT_OK, Intent().putExtra(EXTRA_SIGN, true))
         audio.stopMusic()
         finish()

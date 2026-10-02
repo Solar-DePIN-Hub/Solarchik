@@ -105,6 +105,32 @@ class ScreensTest {
         assertEquals(MainActivity.Tab.SETTINGS, a.current)
     }
 
+    /** Lobby with a lived-in garage: balance, owned gear, quests half done, then the skins shelf. */
+    @Test fun rendersRunShop() {
+        seed(streakDays = 5, activeWindow = false)
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val day = net.solardepin.solarchik.core.StreakRules.dayKey(System.currentTimeMillis())
+        ctx.getSharedPreferences("solarchik-game", Context.MODE_PRIVATE).edit()
+            .putInt("suns", 860).putInt("totalSuns", 640)
+            .putString("unlockedRobots", "stock,sunflower,hetman").putString("robot", "hetman")
+            .putString("unlockedSkins", "flag,gold,cherry,frost").putString("skin", "frost")
+            .putString("questDay", day).putString("questDone", "suns").putBoolean("questChest", false)
+            .putInt("quest_suns", 25).putInt("quest_combo", 5).putInt("quest_clock", 1200)
+            .putInt("quest_b_stomp", 3).putInt("quest_b_grind", 2).putInt("quest_b_under", 1).putInt("quest_b_suns", 41)
+            .commit()
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().visible().get()
+        a.select(MainActivity.Tab.RUN); shot(a, "10-run-shop")
+        val skins = findText(a.window.decorView, a.getString(R.string.shop_roofs))
+        requireNotNull(skins).performClick()
+        shot(a, "11-run-shop-skins")
+    }
+
+    private fun findText(v: View, text: String): View? {
+        if (v is android.widget.TextView && v.text.toString() == text) return v
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) findText(v.getChildAt(i), text)?.let { return it }
+        return null
+    }
+
     @Test fun rendersActiveWindowAndProTier() {
         seed(streakDays = 8, activeWindow = true)
         val a = Robolectric.buildActivity(MainActivity::class.java).setup().visible().get()

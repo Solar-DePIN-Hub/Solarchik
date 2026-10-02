@@ -10,14 +10,8 @@ import net.solardepin.solarchik.core.FeeWindow
 import net.solardepin.solarchik.core.SolarchikConfig
 import net.solardepin.solarchik.core.StreakRules
 import net.solardepin.solarchik.core.StreakState
-import org.json.JSONArray
-import org.json.JSONObject
 import java.time.LocalDate
 import java.time.ZoneOffset
-
-data class GhostPt(val x: Float, val y: Float, val grounded: Boolean)
-
-class GhostTape(val day: String, val meters: Int, val samples: List<GhostPt>)
 
 /** One signed day, kept for the yard history (native extra; web keeps only clockDays). */
 @Serializable
@@ -112,6 +106,25 @@ class GameSave(context: Context, private val clock: () -> Long = { System.curren
         lastClockDay = today
     }
 
+    /**
+     * The run crossed [GOAL_M]: today's CLOCK IN opens right away (the run keeps going, so the
+     * unlock must not wait for the last heart). The final distance is still recorded by [recordRun].
+     */
+    fun unlockClock(meters: Int, score: Int) {
+        val today = today()
+        if (prefs.getString("runDay", "") != today) {
+            lastDistance = 0
+            lastScore = 0
+            prefs.edit().putString("runDay", today).apply()
+        }
+        if (meters >= lastDistance) {
+            lastDistance = meters
+            lastScore = score
+        }
+        if (meters > bestDistance) bestDistance = meters
+        if (meters >= GOAL_M) lastClockDay = today
+    }
+
     // ---- Streak + fee-free windows (rules in core/StreakRules.kt, same as web save.ts) ----
 
     fun streakState(): StreakState {
@@ -204,49 +217,6 @@ class GameSave(context: Context, private val clock: () -> Long = { System.curren
     fun noteOn(key: String): Boolean = prefs.getBoolean(key, true)
     fun setNote(key: String, on: Boolean) { prefs.edit().putBoolean(key, on).apply() }
 
-    /**
-     * Ghost of the best run of a day: world-unit samples (x, y, grounded) every
-     * RunSim.GHOST_DT seconds of running time ("v": 2). Tapes of the old minigame (screen
-     * pixels, no "v") do not fit the new world and read as no ghost.
-     */
-    fun readGhost(): GhostTape? {
-        val raw = prefs.getString("ghost", null) ?: return null
-        return try {
-            val obj = JSONObject(raw)
-            if (obj.optInt("v") != GHOST_V) return null
-            val day = obj.optString("day")
-            if (day.isBlank()) return null
-            val arr = obj.optJSONArray("samples") ?: return null
-            val samples = ArrayList<GhostPt>(arr.length())
-            for (i in 0 until arr.length()) {
-                val row = arr.optJSONObject(i) ?: continue
-                samples += GhostPt(
-                    row.optDouble("x").toFloat(),
-                    row.optDouble("y").toFloat(),
-                    row.optBoolean("grounded"),
-                )
-                if (samples.size >= GHOST_CAP) break
-            }
-            if (samples.size < 2) null else GhostTape(day, obj.optInt("meters"), samples)
-        } catch (_: Throwable) {
-            null
-        }
-    }
-
-    fun writeGhost(meters: Int, samples: List<GhostPt>) {
-        if (meters < 400 || samples.size < 2) return
-        val today = today()
-        val prev = readGhost()
-        if (prev != null && prev.day == today && meters < prev.meters) return
-        val arr = JSONArray()
-        for (s in samples.take(GHOST_CAP)) {
-            arr.put(JSONObject().put("x", Math.round(s.x * 10) / 10.0).put("y", Math.round(s.y * 10) / 10.0).put("grounded", s.grounded))
-        }
-        val obj = JSONObject().put("v", GHOST_V).put("day", today).put("meters", meters).put("samples", arr)
-        prefs.edit().putString("ghost", obj.toString()).apply()
-    }
-
-    /** Finished runs (death or the goal), for the web's every-15th-run fly gate. */
     var runs: Int
         get() = prefs.getInt("runs", 0)
         set(value) { prefs.edit().putInt("runs", value).apply() }
@@ -256,8 +226,6 @@ class GameSave(context: Context, private val clock: () -> Long = { System.curren
 
     companion object {
         const val GOAL_M = SolarchikConfig.RUN_GOAL_M
-        const val GHOST_V = 2
-        const val GHOST_CAP = 480
         private val DAY = Regex("^\\d{4}-\\d{2}-\\d{2}$")
         private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 

@@ -9,6 +9,7 @@ import androidx.core.content.res.ResourcesCompat
 import androidx.test.core.app.ApplicationProvider
 import net.solardepin.solarchik.game.RunHud
 import net.solardepin.solarchik.game.RunOverlay
+import net.solardepin.solarchik.game.RunPreview
 import net.solardepin.solarchik.game.run.DayMod
 import net.solardepin.solarchik.game.run.EnemyKind
 import net.solardepin.solarchik.game.run.Ev
@@ -17,8 +18,10 @@ import net.solardepin.solarchik.game.run.Phase
 import net.solardepin.solarchik.game.run.PlatKind
 import net.solardepin.solarchik.game.run.RunRenderer
 import net.solardepin.solarchik.game.run.RunSim
+import net.solardepin.solarchik.game.run.RunSkin
 import net.solardepin.solarchik.game.run.RunSprites
 import net.solardepin.solarchik.game.run.RunState
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -51,6 +54,9 @@ class RunShotsTest {
         override fun yard() {}
         override fun again() {}
         override fun sign() {}
+        override fun signBadge() {}
+        override fun share() {}
+        override fun yardSign() {}
         override fun musicToggle() {}
         override fun mic() {}
         override fun slideDown() {}
@@ -59,9 +65,13 @@ class RunShotsTest {
         it.buddy.setImageBitmap(ctx.assets.open("sprites/pet/buddy-talk-3.png").use { s -> BitmapFactory.decodeStream(s) })
         it.setMuted(false)
         it.setMicAvailable(true)
+        it.animations = false
     }
 
-    private fun shot(name: String, s: RunState, at: Double = s.runTime + 1.3, hud: Boolean = true, scale: Int = 1, prep: (RunOverlay) -> Unit = {}): Bitmap {
+    private fun shot(
+        name: String, s: RunState, at: Double = s.runTime + 1.3, hud: Boolean = true, scale: Int = 1,
+        skin: String = "flag", robot: String = "stock", moment: Boolean = false, prep: (RunOverlay) -> Unit = {},
+    ): Bitmap {
         // the hero blinks while invulnerable (16 Hz); show a frame where it is drawn
         val clock = if (Math.floor(at * 16).toInt() % 2 == 0) at + 1.0 / 16 else at
         val dm = ctx.resources.displayMetrics
@@ -69,7 +79,11 @@ class RunShotsTest {
         val h = dm.heightPixels / scale
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
-        renderer().draw(c, w, h, s, clock)
+        val r = renderer().also { it.skin = RunSkin.of(skin); it.robot = robot }
+        // a live renderer has been drawing for a while (one-shot effects already played),
+        // unless the shot is about that moment
+        if (!moment) r.draw(c, w, h, s, clock - 3.0)
+        r.draw(c, w, h, s, clock)
         if (hud) {
             val o = overlay()
             o.bind(RunHud.of(s))
@@ -259,11 +273,62 @@ class RunShotsTest {
         shot("22-game-over", s)
     }
 
-    @Test fun clockInAtGoal() {
+    private val clockOpen = RunOverlay.ClockUi(open = true, wallet = true)
+    private val clockSigned = RunOverlay.ClockUi(
+        open = true, signed = true, wallet = true, dayLine = "CLOCK IN 1386m · streak 6", proofLine = "devnet 5Qm7…Hc2P · explorer",
+    )
+
+    @Test fun clockInAtGoalKeepsRunning() {
         val s = RunSim.create(seed)
         assertTrue(stepUntil(s, max = 60 * 300) { it.clockOpen })
-        repeat(10) { RunSim.step(s, RunSim.TICK, Input()) }
-        shot("23-clock-in", s)
+        val x = s.x
+        repeat(20) { RunSim.step(s, RunSim.TICK, Autopilot.input(s)) }
+        assertEquals(Phase.RUNNING, s.phase)
+        assertTrue("the run keeps going", s.x > x)
+        // celebratory banner + shockwave, badge appears; no card, no freeze
+        shot("23-clock-unlocked-banner", s, moment = true) { it.setClock(clockOpen); it.celebrateClock() }
+        // a few seconds on: only the Sign badge stays in the HUD
+        assertTrue(stepUntil(s) { it.meters > 1300 && it.grounded })
+        shot("23b-clock-sign-badge", s) { it.setClock(clockOpen) }
+        // tapping the badge pauses into the sign sheet
+        shot("23c-clock-sign-sheet", s) { it.setClock(clockOpen); it.setPaused(true) }
+        // signed in place: the web day card replaces the button, Resume continues the run
+        shot("23d-clock-signed-day-card", s) { it.setClock(clockSigned); it.setPaused(true) }
+    }
+
+    @Test fun gameOverAfterTheGoalWithRewards() {
+        val s = RunSim.create(seed)
+        assertTrue(stepUntil(s, max = 60 * 300) { it.clockOpen })
+        assertTrue(stepUntil(s, max = 60 * 300) { it.meters > 1350 && it.grounded })
+        s.hearts = 1; s.invuln = 0.0
+        assertTrue(stepUntil(s, bot = false) { it.phase == Phase.DEAD })
+        repeat(40) { RunSim.step(s, RunSim.TICK, Input()) }
+        val rewards = listOf(
+            ctx.getString(R.string.quest_suns) to 20,
+            ctx.getString(R.string.quest_b_stomp) to 20,
+            ctx.getString(R.string.milestones_title) + " · " + ctx.getString(R.string.ms_distance, 1200) to 60,
+        )
+        shot("23e-game-over-rewards-sign", s) { it.setClock(clockOpen); it.showRewards(s.suns, rewards, newBest = true) }
+        shot("23f-game-over-signed", s) { it.setClock(clockSigned); it.showRewards(s.suns, rewards.take(1), newBest = false) }
+    }
+
+    @Test fun questToastMidRun() {
+        val s = RunSim.create(seed)
+        stepUntil(s) { it.meters > 420 && it.grounded }
+        shot("23g-quest-toast", s) { it.questDone(ctx.getString(R.string.quest_done_toast, ctx.getString(R.string.quest_suns)) + "  +20") }
+    }
+
+    @Test fun robotsAndSkinsInTheRun() {
+        // every bought robot runs on its own strip; roofs take the skin palette
+        val combos = listOf("sunflower" to "gold", "midnight" to "night", "hetman" to "prism", "frostkit" to "frost", "emberkit" to "magma", "carbonkit" to "polar")
+        for ((robot, skin) in combos) {
+            val s = RunSim.create(seed)
+            assertTrue(stepUntil(s) { it.meters > 220 && it.grounded })
+            shot("30-gear-$robot-$skin", s, skin = skin, robot = robot)
+        }
+        val air = RunSim.create(seed)
+        assertTrue(stepUntil(air) { it.meters > 260 && !it.grounded && it.vy < 0 })
+        shot("30-gear-mosskit-cherry-jump", air, skin = "cherry", robot = "mosskit")
     }
 
     @Test fun solCaption() {
@@ -273,27 +338,21 @@ class RunShotsTest {
         shot("25-mic-listening", s) { it.setListening(true); it.setCaption(ctx.getString(R.string.run_listening)) }
     }
 
-    /** The Run tab lobby card image: a real frame, no HUD, at the card's aspect. */
+    /** The Run tab lobby card: a live frame with the equipped gear (RunPreview). */
     @Test fun lobbyPreview() {
-        val s = RunSim.create(seed)
-        assertTrue(stepUntil(s) { st ->
-            st.meters in 40..600 && !st.grounded && st.vy < -100 && st.invuln == 0.0 &&
-                st.enemies.any { !it.dead && it.kind == EnemyKind.MITE && inView(st, it.x, 40.0, 420.0) } &&
-                st.picks.count { !it.taken && inView(st, it.x, 0.0, 420.0) } >= 2
-        })
-        s.pops.clear() // no floating score text on the lobby card
-        val w = 1200
-        val h = 870
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        renderer().also { it.logicalH = 560.0 }.draw(Canvas(bmp), w, h, s, s.runTime + 1.3)
-        File(outDir, "lobby-preview.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        for ((robot, skin) in listOf("stock" to "flag", "hetman" to "gold", "prismkit" to "violet")) {
+            val bmp = RunPreview.render(ctx, skin, robot, 1080, 780)
+            File(outDir, "lobby-preview-$robot-$skin.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
     }
 
     @Test @Config(qualifiers = "uk-w914dp-h411dp-land-xxhdpi") fun ukrainian() {
         val s = RunSim.create(seed)
         assertTrue(stepUntil(s, bot = false) { it.phase == Phase.DEAD })
         repeat(40) { RunSim.step(s, RunSim.TICK, Input()) }
-        shot("26-uk-game-over", s)
+        shot("26-uk-game-over", s) {
+            it.showRewards(s.suns, listOf(ctx.getString(R.string.quest_combo) to 25, ctx.getString(R.string.quest_chest_name) to 50), newBest = true)
+        }
         val p = RunSim.create(seed)
         stepUntil(p) { it.meters > 140 && it.grounded }
         shot("27-uk-pause", p) { it.setPaused(true) }
@@ -302,6 +361,9 @@ class RunShotsTest {
         shot("28-uk-village-banner", v)
         val c = RunSim.create(seed)
         assertTrue(stepUntil(c, max = 60 * 300) { it.clockOpen })
-        shot("29-uk-clock-in", c)
+        repeat(20) { RunSim.step(c, RunSim.TICK, Autopilot.input(c)) }
+        shot("29-uk-clock-unlocked", c, moment = true) { it.setClock(clockOpen); it.celebrateClock() }
+        shot("29b-uk-sign-sheet", c) { it.setClock(clockOpen); it.setPaused(true) }
+        shot("29c-uk-signed-day-card", c) { it.setClock(clockSigned.copy(dayLine = "CLOCK IN 1386m · streak 6")); it.setPaused(true) }
     }
 }

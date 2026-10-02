@@ -16,12 +16,12 @@ import net.solardepin.solarchik.game.run.ChapterId
 import net.solardepin.solarchik.game.run.DayMod
 import net.solardepin.solarchik.game.run.DeathKind
 import net.solardepin.solarchik.game.run.Ev
-import net.solardepin.solarchik.game.run.GhostSample
 import net.solardepin.solarchik.game.run.Input
 import net.solardepin.solarchik.game.run.Phase
 import net.solardepin.solarchik.game.run.RunAudio
 import net.solardepin.solarchik.game.run.RunRenderer
 import net.solardepin.solarchik.game.run.RunSim
+import net.solardepin.solarchik.game.run.RunSkin
 import net.solardepin.solarchik.game.run.RunSprites
 import net.solardepin.solarchik.game.run.RunState
 import net.solardepin.solarchik.game.run.RunSynth
@@ -35,8 +35,10 @@ class RunSetup(
     val mod: DayMod,
     val offerBonus: Boolean,
     val goalMeters: Int,
-    val ghost: List<GhostSample>,
     val careBoost: Boolean = false,
+    /** Equipped roof skin and robot (RunGarage ids). */
+    val skin: String = "flag",
+    val robot: String = "stock",
 )
 
 /** HUD snapshot (web snapshot()), built on the game thread and posted to the UI thread. */
@@ -59,18 +61,21 @@ data class RunHud(
     val announce: String,
     val announceOn: Boolean,
     val clockOpen: Boolean,
+    val stomps: Int = 0,
+    val grinds: Int = 0,
+    val unders: Int = 0,
 ) {
     companion object {
         fun of(s: RunState) = RunHud(
             s.hearts, s.shield, Math.round(s.score).toInt(), s.meters, s.combo, s.phase, s.countdown, s.death,
             s.suns, s.maxCombo, s.bonus, s.bonusLeft, s.grind, s.didBonus, s.chapter, s.announce,
-            s.announceLife > 0, s.clockOpen,
+            s.announceLife > 0, s.clockOpen, s.stomps, s.grinds, s.unders,
         )
     }
 }
 
-/** End of a run (death or the CLOCK IN goal). [ghost] is a copy, safe on any thread. */
-class RunResult(val hud: RunHud, val ghost: List<GhostPt>)
+/** End of a run (the last heart lost). CLOCK IN at the goal does not end the run. */
+class RunResult(val hud: RunHud)
 
 /**
  * The roof run surface. The game thread owns the [RunState] and the renderer; the UI thread only
@@ -112,7 +117,6 @@ class RunView(context: Context, private val listener: Listener? = null) :
         }
     }
     private var reported = false
-    private var goalReported = false
     private var hudKey = ""
     private var hudAcc = 0.0
 
@@ -246,11 +250,12 @@ class RunView(context: Context, private val listener: Listener? = null) :
 
     private fun newRun(): RunState? {
         val s = setup ?: return null
-        renderer.ghost = s.ghost
         reported = false
-        goalReported = false
         hudKey = ""
         input.take(); input.takeSlide()
+        renderer.skin = RunSkin.of(s.skin)
+        renderer.robot = s.robot
+        renderer.reset()
         return RunSim.create(s.seed, s.mod, s.offerBonus, s.careBoost, s.goalMeters)
     }
 
@@ -319,19 +324,15 @@ class RunView(context: Context, private val listener: Listener? = null) :
             val copy = ArrayList(events)
             post { listener?.onEvents(copy, hud) }
         }
-        val goal = s.clockOpen && !goalReported
-        val dead = s.phase == Phase.DEAD && !reported
-        if (goal || dead) {
-            goalReported = goalReported || goal
+        if (s.phase == Phase.DEAD && !reported) {
             reported = true
             ended = true
             input.take(); input.takeSlide()
             val hud = RunHud.of(s)
             hudKey = ""
-            val ghost = s.ghost.map { GhostPt(it.x.toFloat(), it.y.toFloat(), it.grounded) }
             post {
                 listener?.onHud(hud)
-                listener?.onResult(RunResult(hud, ghost))
+                listener?.onResult(RunResult(hud))
             }
         }
     }
