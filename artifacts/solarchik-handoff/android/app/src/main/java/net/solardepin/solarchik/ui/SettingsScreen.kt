@@ -17,6 +17,7 @@ import kotlinx.coroutines.launch
 import net.solardepin.solarchik.BuildConfig
 import net.solardepin.solarchik.MainActivity
 import net.solardepin.solarchik.R
+import net.solardepin.solarchik.core.AppData
 import net.solardepin.solarchik.core.SolarchikConfig
 import net.solardepin.solarchik.ui.Ui.dp
 
@@ -90,6 +91,16 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
                     }
                 }, 12))
             }
+        })
+
+        addView(section(R.string.settings_privacy, R.drawable.ic_check, Ui.CYAN).apply {
+            addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.settings_privacy_body)).apply { setLineSpacing(0f, 1.3f) }, 8))
+            val r = Ui.row(ctx, gap = 10)
+            r.addView(Ui.weight(Ui.button(ctx, ctx.getString(R.string.settings_privacy_open), Ui.Btn.GHOST) {
+                host.openUrl(AppData.PRIVACY_URL)
+            }))
+            r.addView(Ui.weight(Ui.button(ctx, ctx.getString(R.string.settings_delete_data), Ui.Btn.GHOST) { confirmWipe() }))
+            addView(Ui.top(r, 12))
         })
 
         addView(section(R.string.settings_about, R.drawable.ic_launcher, Ui.GOLD, tint = false).apply {
@@ -218,6 +229,21 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             airdropping = false
             render()
         }
+    }
+
+    /** Publisher Policy: the player can delete everything the app stored about them. */
+    private fun confirmWipe() {
+        android.app.AlertDialog.Builder(host)
+            .setTitle(R.string.settings_delete_title)
+            .setMessage(R.string.settings_delete_body)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.settings_delete_confirm) { _, _ ->
+                host.wallet.forget()
+                AppData.wipe(ctx)
+                host.toast(ctx.getString(R.string.settings_delete_done))
+                host.recreate()
+            }
+            .show()
     }
 
     private fun copy(text: String) {

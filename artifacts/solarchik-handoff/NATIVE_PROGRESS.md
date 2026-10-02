@@ -273,3 +273,19 @@ Seeker CLOCK IN default (mainnet) left as is, as asked.
 - run game feel: taps are applied on the next frame, about 16 ms later
 - a background close notification after about 15 min with the app closed (Doze may delay it)
 - the report note time in the local zone
+
+## 0.20.4 (versionCode 64): CLOCK IN compliance pass (2026-10-02)
+
+**Changes**
+- Manifest: removed the unused READ_CALL_LOG, READ_PHONE_STATE and MODIFY_AUDIO_SETTINGS. Declared permissions are now INTERNET, POST_NOTIFICATIONS, RECORD_AUDIO and READ_CONTACTS. The merged manifest also carries library permissions (WorkManager: WAKE_LOCK, ACCESS_NETWORK_STATE, RECEIVE_BOOT_COMPLETED, FOREGROUND_SERVICE). REORDER_TASKS comes from androidx.test, which MWA clientlib-ktx 2.0.7 leaks into the runtime classpath (follow-up: exclude it).
+- Settings → Privacy & data: a Privacy policy link (`PRIVACY.md`) and "Delete my data". It confirms first, then forgets the wallet auth, cancels the desk/notes workers and notifications, wipes every prefs store (`core/AppData.kt`) and recreates the app.
+- Docs: `PRIVACY.md`, an English hackathon header in the README, `docs/CLOCKIN_COMPLIANCE.md`, `docs/store/LISTING.md`, `docs/store/icon-512.png` (rendered from the launcher vector by ComplianceTest), five 1080×2400 store screenshots, and `docs/evidence/live-agents-2026-10-02.txt`.
+- Build: `-PliveAgents=1 -PliveWaitSec=N` turns on `LiveAgentsIT`. It runs the 5 production desk agents against real market feeds on the paper track. No order is sent.
+
+**Tests**: `testDebugUnitTest` ran 130 tests: 128 passed, 0 failed, 2 skipped (DevnetMintIT, opt-in). `lintDebug` reported no issues. The live agents run (2 Oct 17:18–17:21 Kyiv) used real quotes: BTC 86418.56 (Coinbase), Polymarket 2589812 at 0.835, Kyiv 288.65 K, SOL 121.92 (Backpack). Results: Events Scout and Combo each opened 2 trades and closed 1. Bitcoin Windows, Weather and Titan×Backpack skipped, because confidence stayed below 0.65.
+
+**APKs** (box only, not committed)
+- `solarchik-0.20.4-debug.apk`: 6938462 B, sha256 `129548c47b35e16d80f629a78b5bda370d3725b3385f28b0f547b054899389e0`, Android Debug key, v2 signature.
+- `solarchik-0.20.4-release-boxkey.apk`: 3209230 B, sha256 `7edce19585f743f2aeff20007706c1ec88f1bf2a9f53bf728e99b4646261664f`. Signed v2+v3 with `CN=Solarchik BOX TEST KEY (not production)`, cert SHA-256 `91102f8f…59a01e`. This is not the production key (`CN=Solar DePin`), so it cannot update an install of 0.19.51.
+
+**Still open**: the call secretary is dead code in 0.20.x (screening is never switched on, ROLE_CALL_SCREENING and READ_CONTACTS are never requested, and no reports UI exists). Wire it up or remove it, then drop READ_CONTACTS.

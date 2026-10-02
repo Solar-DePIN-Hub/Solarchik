@@ -1,0 +1,38 @@
+QUOTE 2026-10-02T14:18:04.861931558Z BTC key=BTC-USD label="Bitcoin · Coinbase" px=86418.555
+QUOTE 2026-10-02T14:18:04.959574059Z EVENTS key=2589812 label="Will there be no change in Fed interest rates after the October 2026 meeting?" px=0.835
+QUOTE 2026-10-02T14:18:05.424318160Z WEATHER key=kyiv-t2m label="Kyiv °C · Open-Meteo" px=288.65
+QUOTE 2026-10-02T14:18:06.147559597Z SOL key=SOL-USDC label="SOL/USDC · Backpack" px=121.92
+TICK anchor (desk clock +0 min, real 2026-10-02T14:18:06.505681424Z)
+  Bitcoin Windows #11 watch BTC "Bitcoin · Coinbase" side= conf=0.000 move=0.0bps stake=0.0 pnl=0.0 
+  Events Scout #04 watch EVENTS "Will there be no change in Fed interest rates after the October 2026 m" side= conf=0.000 move=0.0bps stake=0.0 pnl=0.0 
+  Weather Station watch WEATHER "Kyiv °C · Open-Meteo" side= conf=0.000 move=0.0bps stake=0.0 pnl=0.0 
+  Combo Prime watch BTC "Bitcoin · Coinbase" side= conf=0.000 move=0.0bps stake=0.0 pnl=0.0 
+  Titan × Backpack watch SOL "SOL/USDC · Backpack" side= conf=0.000 move=0.0bps stake=0.0 pnl=0.0 
+TICK +16 (desk clock +16 min, real 2026-10-02T14:18:46.843201035Z)
+  Bitcoin Windows #11 skip BTC "Bitcoin · Coinbase" side=up conf=0.632 move=13.2bps stake=0.0 pnl=0.0 
+  Combo Prime skip BTC "Bitcoin · Coinbase" side=up conf=0.632 move=13.2bps stake=0.0 pnl=0.0 
+  Titan × Backpack skip SOL "SOL/USDC · Backpack" side=up conf=0.500 move=0.0bps stake=0.0 pnl=0.0 
+TICK +16 (desk clock +33 min, real 2026-10-02T14:19:27.189209719Z)
+  Bitcoin Windows #11 skip BTC "Bitcoin · Coinbase" side=down conf=0.542 move=-4.2bps stake=0.0 pnl=0.0 
+  Events Scout #04 open EVENTS "Will there be no change in Fed interest rates after the October 2026 m" side=yes conf=0.835 move=0.0bps stake=0.0125 pnl=0.0 
+  Combo Prime open EVENTS "Will there be no change in Fed interest rates after the October 2026 m" side=yes conf=0.835 move=0.0bps stake=0.0125 pnl=0.0 
+  Titan × Backpack skip SOL "SOL/USDC · Backpack" side=up conf=0.500 move=0.0bps stake=0.0 pnl=0.0 
+TICK +30 (desk clock +64 min, real 2026-10-02T14:20:07.511889779Z)
+  Bitcoin Windows #11 skip BTC "Bitcoin · Coinbase" side=up conf=0.525 move=2.5bps stake=0.0 pnl=0.0 
+  Events Scout #04 close EVENTS "Will there be no change in Fed interest rates after the October 2026 m" side=yes conf=0.835 move=0.0bps stake=0.0125 pnl=0.0 
+  Weather Station skip WEATHER "Kyiv °C · Open-Meteo" side=up conf=0.500 move=0.0bps stake=0.0 pnl=0.0 
+  Combo Prime close EVENTS "Will there be no change in Fed interest rates after the October 2026 m" side=yes conf=0.835 move=0.0bps stake=0.0125 pnl=0.0 
+  Titan × Backpack watch SOL "SOL/USDC · Backpack" side= conf=0.000 move=0.0bps stake=0.0 pnl=0.0 
+TICK +31 (desk clock +95 min, real 2026-10-02T14:20:47.852588607Z)
+  Bitcoin Windows #11 skip BTC "Bitcoin · Coinbase" side=up conf=0.503 move=0.3bps stake=0.0 pnl=0.0 
+  Events Scout #04 open EVENTS "Will there be no change in Fed interest rates after the October 2026 m" side=yes conf=0.835 move=0.0bps stake=0.0125 pnl=0.0 
+  Combo Prime open EVENTS "Will there be no change in Fed interest rates after the October 2026 m" side=yes conf=0.835 move=0.0bps stake=0.0125 pnl=0.0 
+  Titan × Backpack watch SOL "SOL/USDC · Backpack" side= conf=0.000 move=0.0bps stake=0.0 pnl=0.0 
+AGENT Bitcoin Windows #11: {watch=1, skip=4}
+AGENT Events Scout #04: {watch=1, open=2, close=1}
+AGENT Weather Station: {watch=1, skip=1}
+AGENT Combo Prime: {watch=1, skip=1, open=2, close=1}
+AGENT Titan × Backpack: {watch=3, skip=2}
+CLOSE Will there be no change in Fed interest  pnl=0.0 fee=0.0 reason=paper
+CLOSE Will there be no change in Fed interest  pnl=0.0 fee=0.0 reason=paper
+PAPER PnL 0.0 SOL (simulated on real prices, no order sent)

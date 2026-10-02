@@ -298,4 +298,13 @@
     <string name="note_desk_title">Пульт</string>
     <string name="note_desk_body">Закрито у фоні: %1$d · P&amp;L %2$s SOL (симуляція на реальних цінах).</string>
     <string name="note_desk_toggle">Закриття на пульті (у фоні)</string>
+    <!-- Приватність і дані (dApp Store Publisher Policy) -->
+    <string name="settings_privacy">Приватність і дані</string>
+    <string name="settings_privacy_body">Стрік, агенти, журнал комісій та історія чату лишаються на цьому телефоні. Повідомлення для Сола йдуть на наш AI-ретранслятор і його постачальників моделей (Featherless, Google Gemini) лише щоб отримати відповідь; ретранслятор їх не зберігає. Публічні записи в мережі (підписи, NFT, перекази комісій) стерти неможливо.</string>
+    <string name="settings_privacy_open">Політика приватності</string>
+    <string name="settings_delete_data">Видалити мої дані</string>
+    <string name="settings_delete_title">Видалити всі дані на цьому телефоні?</string>
+    <string name="settings_delete_body">Буде стерто стрік, вікна без комісій, список агентів, журнал комісій, стіл, історію чату, налаштування сповіщень і збережену сесію гаманця. Сам гаманець і те, що вже в мережі, не зачіпається.</string>
+    <string name="settings_delete_confirm">Видалити</string>
+    <string name="settings_delete_done">Усі дані застосунку на цьому телефоні видалено.</string>
 </resources>

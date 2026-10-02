@@ -23,8 +23,8 @@ android {
         applicationId = "net.solardepin.solarchik"
         minSdk = 26
         targetSdk = 35
-        versionCode = 63
-        versionName = "0.20.3"
+        versionCode = 64
+        versionName = "0.20.4"
         buildConfigField("boolean", "MAINNET_PAID_MINT", "false")
     }
 
@@ -37,6 +37,8 @@ android {
             it.systemProperty("solarchik.devnet", (project.findProperty("devnet") as String?) ?: "0")
             it.systemProperty("solarchik.live", (project.findProperty("live") as String?) ?: "")
             it.systemProperty("solarchik.chat", (project.findProperty("chat") as String?) ?: "")
+            it.systemProperty("solarchik.liveAgents", (project.findProperty("liveAgents") as String?) ?: "0")
+            it.systemProperty("solarchik.liveWaitSec", (project.findProperty("liveWaitSec") as String?) ?: "40")
             it.systemProperty("solarchik.shots", (project.findProperty("shots") as String?) ?: layout.buildDirectory.dir("screens").get().asFile.path)
         }
     }

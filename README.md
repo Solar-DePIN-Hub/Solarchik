@@ -1,3 +1,35 @@
+# Solarchik — CLOCK IN (Solana Mobile hackathon) submission
+
+**Solarchik** is a native Android companion game for Seeker: a small solar robot (Sol) you talk to, a daily roof run that unlocks a signed **CLOCK IN** on Solana, and an agent desk where five strategy NFTs forecast on live public markets.
+
+- **Native Kotlin APK, no WebView**: `artifacts/solarchik-handoff/android` (package `net.solardepin.solarchik`, minSdk 26, targetSdk 35).
+- **Solana Mobile Stack**: Mobile Wallet Adapter (`mobile-wallet-adapter-clientlib-ktx` 2.0.7) for connect, sign-and-send and sign-only fallback; Seed Vault on Seeker.
+- **On Solana**: CLOCK IN memo transaction, Metaplex Core NFT mint (5 strategy SKUs, Free/Pro, royalties + attributes), devnet fee payment (transfer + memo with a de-dup ref), on-chain ownership checks.
+- **Safety**: agents never send exchange orders; paper mode (virtual 1 SOL) and devnet mode only. Paid mainnet mint is compiled off (`MAINNET_PAID_MINT=false`).
+- **Privacy**: [PRIVACY.md](PRIVACY.md); Settings → Privacy & data → Delete my data.
+- Hackathon compliance checklist: [docs/CLOCKIN_COMPLIANCE.md](docs/CLOCKIN_COMPLIANCE.md). Build/test notes and APK hashes: [NATIVE_PROGRESS.md](artifacts/solarchik-handoff/NATIVE_PROGRESS.md).
+
+### Five tabs
+| Tab | What it does |
+| --- | --- |
+| Yard | streak, today's shift (run → CLOCK IN → signed proof), fee-free reward windows, week strip, crew |
+| Run | native SurfaceView roof runner; 1200 m opens the day |
+| Agents | mint strategy NFTs (devnet), run them on paper or devnet, risk caps, fee ledger, pay owed devnet fees in one MWA tx |
+| Sol | chat with Sol (EN/UK), voice in/out, daily report built only from real numbers |
+| Settings | wallet, network (Seeker can force devnet), notifications, language, privacy & data |
+
+### Build and test
+```bash
+cd artifacts/solarchik-handoff/android
+./gradlew :app:testDebugUnitTest          # Robolectric + JVM tests (no device needed)
+./gradlew :app:testDebugUnitTest --tests '*LiveAgentsIT' -PliveAgents=1   # live market data, paper only
+./gradlew :app:lintDebug
+./gradlew :app:assembleDebug              # app/build → /tmp/solarchik-apk-build/outputs/apk
+```
+A signed release needs your own keystore (`app/solarchik-release.jks` + `keystore.properties`, both gitignored). Without it `assembleRelease` produces an unsigned APK.
+
+---
+
 # Solarchik
 
 Сонячний робот на телефоні. Один проєкт, три речі: забіг по даху, щоденний підпис **CLOCK IN** на Solana Mobile, і стіл **Work**, де агент сам читає ринок.
@@ -42,7 +74,7 @@ English summary is at the bottom.
 
 ## APK
 
-Файл для рев’ю: `public/Solarchik-CLOCK-IN-0.19.51.apk`. Release, не debuggable.
+Старий файл `public/Solarchik-CLOCK-IN-0.19.51.apk` — збірка 0.19.51. Актуальна нативна збірка — 0.20.x (див. NATIVE_PROGRESS.md).
 
 Нативний проєкт: `artifacts/solarchik-handoff/android`.
 
@@ -124,7 +156,7 @@ Solarchik is a solar robot: a roof runner, a daily Solana Mobile **CLOCK IN** si
 
 The run ends at 1200 m. Tap or Space jumps. S or swipe down slides. Reaching 1200 m opens the day (`lastClockDay`) but does not increase the streak. A live wallet signature sets `signedDay` and the streak. A declined wallet stamps nothing. Desktop does not stamp. Android Chrome uses Mobile Wallet Adapter 2.0.7. Seeker is mainnet. Any other phone is devnet. The signature is shown as a signature, not a transaction link. The memo is the UTC day's modifier word: calm, wind, gold, drones, or wire.
 
-The review APK is `public/Solarchik-CLOCK-IN-0.19.51.apk`. Native yard, no WebView. Release keystore is not in git.
+`public/Solarchik-CLOCK-IN-0.19.51.apk` is the older 0.19.51 build; the current native build is 0.20.x (see the top of this file). The Work desk / arb text below describes the web app, not the APK. Release keystore is not in git.
 
 The arb bot scans every Backpack USDC spot market that withdraws on Solana (24 markets today). It picks the best net edge after 0.15% costs. It fires only when the edge clears the NFT threshold, the player has at least 0.005 SOL of arb credit, both the Backpack account and the on-chain treasury hold that token and USDC, and the treasury key is on the server. The player never pastes a Backpack key. Arb credit is a mainnet transfer to `H7zKmmnMNfnsMtib6mopdT8XsPYAyPBFuaQeWhBYTpQg` with the NFT asset as the memo. That address is not the game pay wallet.
 

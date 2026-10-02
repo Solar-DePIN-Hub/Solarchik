@@ -310,4 +310,13 @@
     <string name="note_desk_title">Desk</string>
     <string name="note_desk_body">Closed while the app was in the background: %1$d · P&amp;L %2$s SOL (simulated on real prices).</string>
     <string name="note_desk_toggle">Desk closes (background)</string>
+    <!-- Privacy & data (dApp Store Publisher Policy) -->
+    <string name="settings_privacy">Privacy &amp; data</string>
+    <string name="settings_privacy_body">Your streak, agents, fee ledger and chat history stay on this phone. Messages you send to Sol go to our AI relay and its model providers (Featherless, Google Gemini) only to get a reply; the relay does not store them. Public chain records (signatures, NFTs, fee transfers) cannot be erased.</string>
+    <string name="settings_privacy_open">Privacy policy</string>
+    <string name="settings_delete_data">Delete my data</string>
+    <string name="settings_delete_title">Delete all data on this phone?</string>
+    <string name="settings_delete_body">This wipes your streak, fee-free windows, agents list, fee ledger, desk, chat history, notification settings and the saved wallet session. Your wallet and anything already on chain are not touched.</string>
+    <string name="settings_delete_confirm">Delete</string>
+    <string name="settings_delete_done">All app data on this phone was deleted.</string>
 </resources>
