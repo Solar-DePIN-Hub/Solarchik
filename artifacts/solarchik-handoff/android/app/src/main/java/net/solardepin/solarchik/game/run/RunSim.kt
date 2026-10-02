@@ -36,13 +36,29 @@ enum class DayMod(val id: String) {
 enum class Ev {
     JUMP, DOUBLE, LAND, COLLECT, GOLD, HURT, NEAR, COMBO, DEAD, TICK, STOMP, SHIELD, SLIDE,
     GRIND, BONUS, THUNDER, BOSS, CHAPTER, CLOCK,
+    // city rules
+    GUST, CRACK, ZAP, CHARGE, BEAM, DOWNED,
 }
 
 enum class ChapterId { SUNRISE, VILLAGE, STORM, NIGHT, SERPENT }
 
 class Chapter(val id: ChapterId, val label: String, val banner: String, val meters: Int)
 
-class Plat(var x: Double, var y: Double, var w: Double, val kind: PlatKind)
+class Plat(
+    var x: Double,
+    var y: Double,
+    var w: Double,
+    val kind: PlatKind,
+    /** City rules: a cracked solar roof that gives way [RunSim.CRACK_TIME] s after it is first stood on. */
+    val crumble: Boolean = false,
+    /** City rules: a sparking cable (live on a fixed cycle, see [RunSim.wireLive]). */
+    val live: Boolean = false,
+    /** Seconds since first contact (crumble roofs), -1 untouched. */
+    var crackT: Double = -1.0,
+    /** Gave way: no longer solid; [fallY] is the presentation drop. */
+    var fallen: Boolean = false,
+    var fallY: Double = 0.0,
+)
 
 class Pick(
     var x: Double,
@@ -63,6 +79,9 @@ class Enemy(
     val boss: Boolean,
     var dead: Boolean = false,
     var near: Boolean = false,
+    /** Hover bob amplitude / rate (city drone waves bob wider, out of phase). */
+    var amp: Double = 0.0,
+    var rate: Double = 0.0,
 )
 
 class Pop(var x: Double, var y: Double, val text: String, var life: Double)
@@ -153,6 +172,30 @@ class RunState(val seed: Int, val mod: DayMod, val goalMeters: Int) {
     var grinds = 0
     var unders = 0
 
+    // ---- city rules (native 0.21.4; off when [classic] for the web-parity golden traces) ----
+    var classic = false
+    /** Wind gust: seconds to the next one, its warning and its blow (headwind + downdraft). */
+    var gustNext = 9.0
+    var gustWarn = 0.0
+    var gustLeft = 0.0
+    /** Mini-boss (a maintenance drone) every [RunSim.BOSS_EVERY] m on its own arena roof. */
+    var bossNextX = RunSim.BOSS_EVERY * 10.0
+    var arenaX0 = -1.0
+    var arenaX1 = -1.0
+    /** 0 none, 1 intro, 2 attacking, 3 overheated (stomp it), 4 leaving. */
+    var bossStage = 0
+    var bossT = 0.0
+    var bossX = 0.0
+    var bossY = 0.0
+    var bossShots = 0
+    /** Current shot: lane 0 low (jump it) / 1 high (slide under it); [bossTele] warning, [bossBeam] firing. */
+    var bossLane = 0
+    var bossTele = 0.0
+    var bossBeam = 0.0
+    var bossRest = 0.0
+    var bossDowned = 0
+    var bossHit = false
+
     /** Whole meters as the web HUD shows them (distance / 10, rounded). */
     val meters: Int get() = Math.round(distance / 10.0).toInt()
 }
@@ -162,12 +205,14 @@ object RunSim {
     const val HEARTS = 3
 
     val CHAPTERS = listOf(
-        Chapter(ChapterId.SUNRISE, "Sunrise", "SUNRISE ROOFS", 0),
-        Chapter(ChapterId.VILLAGE, "Village", "VILLAGE ROOFS", 500),
+        Chapter(ChapterId.SUNRISE, "Golden hour", "GOLDEN HOUR", 0),
+        Chapter(ChapterId.VILLAGE, "Solar district", "SOLAR DISTRICT", 500),
         Chapter(ChapterId.STORM, "Storm", "STORM LINE", 1600),
-        Chapter(ChapterId.NIGHT, "Night", "NIGHT FARM", 2000),
-        Chapter(ChapterId.SERPENT, "Serpent", "THE SERPENT", 2500),
+        Chapter(ChapterId.NIGHT, "Night city", "NIGHT CITY", 2000),
+        Chapter(ChapterId.SERPENT, "Skyline", "THE SKYLINE", 2500),
     )
+
+    const val BOSS_BANNER = "MAINTENANCE DRONE"
 
     const val GRAVITY_UP = 1480.0
     const val GRAVITY_DOWN = 2400.0
@@ -188,6 +233,28 @@ object RunSim {
     const val TICK = 1.0 / 60.0
     const val GHOST_DT = 0.25
     const val GHOST_MAX = 480
+
+    // city rules
+    const val CITY_SPEED0 = 215.0
+    const val CITY_RAMP = 0.021
+    const val CITY_CAP = 410.0
+    const val CRACK_TIME = 0.38
+    const val WIRE_CYCLE = 2.2
+    const val WIRE_WARN = 1.2
+    const val WIRE_LIVE = 1.6
+    const val GUST_WARN = 1.0
+    const val GUST_TIME = 1.4
+    const val GUST_SLOW = 0.75
+    const val BOSS_EVERY = 1000
+    const val ARENA_W = 4200.0
+    const val BOSS_SHOTS = 5
+    const val BOSS_TELE = 0.7
+    const val BOSS_BEAM = 0.26
+    const val BOSS_REST = 0.5
+    const val BOSS_HOT = 1.9
+    /** Beam boxes relative to the arena roof: low = jump it, high = slide under it. */
+    val BEAM_LOW = doubleArrayOf(-26.0, -6.0)
+    val BEAM_HIGH = doubleArrayOf(-70.0, -34.0)
 
     // particle colours (web hex strings as ARGB)
     const val C_DUST = 0xFFE8D9B0.toInt()
@@ -238,10 +305,28 @@ object RunSim {
     fun speedAt(s: RunState): Double {
         val heat = if (s.fever > 0) 10.0 else 0.0
         val grind = if (s.grind) 18.0 else 0.0
+        if (!s.classic) return min(CITY_CAP + 16, CITY_SPEED0 + s.distance * CITY_RAMP + heat + grind)
         return min(SPEED_CAP + 16, SPEED0 + s.distance * 0.018 + heat + grind)
     }
 
-    private fun feetOn(px: Double, p: Plat) = px >= p.x - FEET && px <= p.x + p.w + FEET
+    private fun feetOn(px: Double, p: Plat) = !p.fallen && px >= p.x - FEET && px <= p.x + p.w + FEET
+
+    /** Sparking cable phase: 0 safe, 1 crackling (warning), 2 live (hurts). Fixed cycle per cable. */
+    fun wireLive(s: RunState, p: Plat): Int {
+        if (!p.live) return 0
+        val t = ((s.runTime + p.x * 0.0037) % WIRE_CYCLE + WIRE_CYCLE) % WIRE_CYCLE
+        return if (t >= WIRE_LIVE) 2 else if (t >= WIRE_WARN) 1 else 0
+    }
+
+    /** The boss beam box this step (null when not firing). */
+    fun beamBox(s: RunState): Box? {
+        if (s.bossBeam <= 0) return null
+        val y0 = BANDS[1]
+        val lane = if (s.bossLane == 0) BEAM_LOW else BEAM_HIGH
+        return Box(s.x - 420, s.bossX - 30, y0 + lane[0], y0 + lane[1])
+    }
+
+    fun bossBox(s: RunState): Box = Box(s.bossX - 44, s.bossX + 44, s.bossY - 40, s.bossY + 4)
 
     class Box(val l: Double, val r: Double, val t: Double, val b: Double)
 
@@ -345,6 +430,10 @@ object RunSim {
 
     fun spawnChunk(s: RunState, fromX: Double, count: Int) {
         if (s.bonus) return
+        if (!s.classic) {
+            cityChunk(s, fromX, count)
+            return
+        }
         var x = fromX
         val band = s.lastBand
         for (i in 0 until count) {
@@ -406,6 +495,289 @@ object RunSim {
         s.spawnX = x
     }
 
+    // ---- city rules generator (native 0.21.4) ----
+
+    private enum class CityPiece { CALM, PAIR, MITE, DRONE, WAVE, CRUMBLE, WIRE }
+
+    /** 0 at 120 m, 1 from 900 m on: gaps widen and roofs narrow with it. */
+    fun cityDiff(x: Double) = min(1.0, max(0.0, (x - 1200) / 7800))
+
+    private fun cityPiece(s: RunState, x: Double): CityPiece {
+        if (x < 1700) return CityPiece.CALM
+        val r = rand(s, 0.0, 1.0)
+        if (s.mod == DayMod.WIRE && r < 0.3) return CityPiece.WIRE
+        if (s.mod == DayMod.DRONES && r < 0.3) return if (x > 3000 && r < 0.15) CityPiece.WAVE else CityPiece.DRONE
+        return when {
+            r < 0.19 -> CityPiece.MITE
+            r < 0.32 -> CityPiece.PAIR
+            r < 0.45 && x > 2000 -> CityPiece.DRONE
+            r < 0.59 && x > 3200 -> CityPiece.WAVE
+            r < 0.75 && x > 2600 -> CityPiece.CRUMBLE
+            r < 0.86 && x > 2200 -> CityPiece.WIRE
+            else -> CityPiece.CALM
+        }
+    }
+
+    private fun addDrone(s: RunState, x: Double, y: Double, hover: Double, amp: Double, rate: Double, phase: Double) {
+        val base = y - hover
+        s.enemies.add(Enemy(EnemyKind.DRONE, x, base, base, phase, 0.0, false, amp = amp, rate = rate))
+    }
+
+    private fun cityChunk(s: RunState, fromX: Double, count: Int) {
+        var x = fromX
+        var band = s.lastBand
+        for (i in 0 until count) {
+            val d = cityDiff(x)
+            val gap = 104 + 70 * d + rand(s, 0.0, 30 + 20 * d)
+            if (x >= s.bossNextX - 200) {
+                // the maintenance drone's arena: one long flat roof, suns along it, no other foes
+                addPlat(s, x, BANDS[1], ARENA_W)
+                var sx = x + 260
+                while (sx < x + ARENA_W - 200) {
+                    s.picks.add(Pick(sx, BANDS[1] - 54, gold = false, shield = false))
+                    sx += 210
+                }
+                s.arenaX0 = x
+                s.arenaX1 = x + ARENA_W
+                s.bossNextX += BOSS_EVERY * 10.0
+                band = 1
+                x += ARENA_W + gap
+                continue
+            }
+            if (x > 2400 && chance(s, 0.4)) band = max(0, min(2, band + if (chance(s, 0.5)) -1 else 1))
+            val y = BANDS[band]
+            val w = max(140.0, min(300.0, 230 - 80 * d + rand(s, -20.0, 20.0)))
+            when (cityPiece(s, x)) {
+                CityPiece.PAIR -> {
+                    val a = max(140.0, floor(w * 0.85))
+                    val b = max(140.0, floor(w * 0.8))
+                    val g2 = gap * 0.9
+                    addPlat(s, x, y, a)
+                    dropSuns(s, x, y, a)
+                    addPlat(s, x + a + g2, y, b)
+                    dropSuns(s, x + a + g2, y, b)
+                    x += a + g2 + b + gap
+                }
+                CityPiece.MITE -> {
+                    val ww = max(w, 190.0)
+                    addPlat(s, x, y, ww)
+                    dropSuns(s, x, y, ww)
+                    addEnemy(s, EnemyKind.MITE, x + ww * 0.55, y)
+                    s.enemies.last().vx *= 1.25
+                    x += ww + gap
+                }
+                CityPiece.DRONE -> {
+                    val ww = max(w, 200.0)
+                    addPlat(s, x, y, ww)
+                    // low (slide under) or high (stay down: a jump hits it)
+                    if (chance(s, 0.6)) addDrone(s, x + ww * 0.6, y, 40.0, 6.0, 3.2, rand(s, 0.0, PI * 2))
+                    else addDrone(s, x + ww * 0.6, y, 84.0, 6.0, 3.2, rand(s, 0.0, PI * 2))
+                    s.picks.add(Pick(x + ww * 0.35, y - 54, gold = s.mod == DayMod.GOLD || chance(s, 0.2), shield = false))
+                    x += ww + gap
+                }
+                CityPiece.WAVE -> {
+                    val ww = max(280.0, w + 80)
+                    addPlat(s, x, y, ww)
+                    when ((rand(s, 0.0, 3.0)).toInt()) {
+                        // a low row: hold the slide
+                        0 -> for (k in 0 until 3) addDrone(s, x + 90 + k * 64.0, y, 40.0, 4.0, 3.0, k * 0.6)
+                        // low then high: slide, then stay down
+                        1 -> {
+                            addDrone(s, x + 100, y, 40.0, 5.0, 3.2, 0.0)
+                            addDrone(s, x + 100 + ww * 0.42, y, 84.0, 5.0, 3.2, 1.0)
+                        }
+                        // a bobbing pair, out of phase: read the rhythm
+                        else -> {
+                            addDrone(s, x + ww * 0.36, y, 62.0, 26.0, 2.6, 0.0)
+                            addDrone(s, x + ww * 0.36 + 120, y, 62.0, 26.0, 2.6, PI)
+                        }
+                    }
+                    s.picks.add(Pick(x + ww - 40, y - 54, gold = true, shield = false))
+                    x += ww + gap
+                }
+                CityPiece.CRUMBLE -> {
+                    val ww = max(140.0, min(190.0, w))
+                    s.plats.add(Plat(x, y, ww, PlatKind.ROOF, crumble = true))
+                    dropSuns(s, x, y, ww)
+                    x += ww + gap * 0.85
+                }
+                CityPiece.WIRE -> {
+                    val ww0 = max(170.0, w)
+                    addPlat(s, x, y, ww0)
+                    dropSuns(s, x, y, ww0)
+                    val ww = max(96.0, min(140.0, w * 0.5))
+                    val lead = max(50.0, min(76.0, gap * 0.6))
+                    s.plats.add(Plat(x + ww0 + lead, y, ww, PlatKind.WIRE, live = x > 2000 && chance(s, 0.6)))
+                    x += ww0 + lead + ww + 50
+                }
+                CityPiece.CALM -> {
+                    addPlat(s, x, y, w)
+                    dropSuns(s, x, y, w)
+                    if (x > 6000 && chance(s, if (s.mod == DayMod.GOLD) 0.06 else 0.03)) {
+                        s.picks.add(Pick(x + w * 0.5, y - 58, gold = false, shield = true))
+                    }
+                    x += w + gap
+                }
+            }
+        }
+        s.lastBand = band
+        s.spawnX = x
+    }
+
+    /** City rules each step: gusts, cracking roofs, live cables and the maintenance drone. */
+    private fun cityStep(s: RunState, dt: Double, prevY: Double, events: MutableList<Ev>) {
+        // cracking solar roofs: start on first contact, give way after CRACK_TIME
+        for (p in s.plats) {
+            if (!p.crumble) continue
+            if (p.fallen) {
+                p.fallY += dt * 520
+                continue
+            }
+            if (p.crackT < 0 && s.grounded && s.x >= p.x - FEET && s.x <= p.x + p.w + FEET && abs(s.y - p.y) < 2) {
+                p.crackT = 0.0
+                events.add(Ev.CRACK)
+            } else if (p.crackT >= 0) {
+                p.crackT += dt
+                if (p.crackT >= CRACK_TIME) {
+                    p.fallen = true
+                    emit(s.particles, p.x + p.w * 0.5, p.y, 14, C_LAND, 160.0, 160.0)
+                }
+            }
+        }
+        // live cables
+        if (s.grounded && s.grind && s.invuln <= 0) {
+            val wire = s.plats.firstOrNull { it.kind == PlatKind.WIRE && feetOn(s.x, it) && abs(s.y - it.y) < 2 }
+            if (wire != null && wireLive(s, wire) == 2) {
+                events.add(Ev.ZAP)
+                loseHeart(s, events, DeathKind.HIT)
+            }
+        }
+        // wind gusts: a warning, then a headwind with a downdraft (not during the boss)
+        if (s.gustLeft > 0) {
+            s.gustLeft = max(0.0, s.gustLeft - dt)
+        } else if (s.gustWarn > 0) {
+            s.gustWarn = max(0.0, s.gustWarn - dt)
+            if (s.gustWarn <= 0) s.gustLeft = GUST_TIME
+        } else if (s.x > 4000 && s.bossStage == 0) {
+            s.gustNext -= dt
+            if (s.gustNext <= 0) {
+                s.gustNext = rand(s, 7.0, 12.0)
+                s.gustWarn = GUST_WARN
+                events.add(Ev.GUST)
+                s.pops.add(Pop(s.x + 140, s.y - 120, "GUST", 0.9))
+            }
+        }
+        bossStep(s, dt, prevY, events)
+    }
+
+    private fun bossStep(s: RunState, dt: Double, prevY: Double, events: MutableList<Ev>) {
+        val y0 = BANDS[1]
+        if (s.bossStage == 0) {
+            if (s.arenaX0 >= 0 && s.x >= s.arenaX0 + 60 && s.x < s.arenaX1 - 1200) {
+                s.bossStage = 1
+                s.bossT = 0.0
+                s.bossShots = 0
+                s.bossX = s.x + 620
+                s.bossY = y0 - 150
+                s.bossHit = false
+                s.gustWarn = 0.0
+                s.gustLeft = 0.0
+                events.add(Ev.BOSS)
+                s.announce = BOSS_BANNER
+                s.announceLife = 1.0
+            }
+            return
+        }
+        s.bossT += dt
+        val track = s.x + 330
+        when (s.bossStage) {
+            1 -> {
+                s.bossX += (track - s.bossX) * min(1.0, dt * 3.5)
+                s.bossY = y0 - 150 + sin(s.bossT * 2.4) * 6
+                if (s.bossT > 1.0) {
+                    s.bossStage = 2
+                    nextShot(s, events)
+                }
+            }
+            2 -> {
+                s.bossX = track
+                s.bossY = y0 - 150 + sin(s.bossT * 2.4) * 6
+                if (s.bossTele > 0) {
+                    s.bossTele -= dt
+                    if (s.bossTele <= 0) {
+                        s.bossTele = 0.0
+                        s.bossBeam = BOSS_BEAM
+                        s.shake = min(1.0, s.shake + 0.35)
+                        events.add(Ev.BEAM)
+                    }
+                } else if (s.bossBeam > 0) {
+                    val bb = beamBox(s)
+                    if (bb != null && s.invuln <= 0 && aabb(playerBox(s), bb)) {
+                        s.bossHit = true
+                        loseHeart(s, events, DeathKind.HIT)
+                    }
+                    s.bossBeam -= dt
+                    if (s.bossBeam <= 0) {
+                        s.bossBeam = 0.0
+                        s.bossShots += 1
+                        if (s.bossShots >= BOSS_SHOTS) {
+                            s.bossStage = 3
+                            s.bossT = 0.0
+                            s.pops.add(Pop(s.bossX, y0 - 140, "OVERHEAT", 1.0))
+                        } else {
+                            s.bossRest = if (s.bossShots >= 2 && chance(s, 0.35)) 0.18 else BOSS_REST
+                        }
+                    }
+                } else {
+                    s.bossRest -= dt
+                    if (s.bossRest <= 0) nextShot(s, events)
+                }
+            }
+            3 -> {
+                // overheated: sinks to roof height and stays put, the robot can stomp it
+                s.bossY += ((y0 - 50) - s.bossY) * min(1.0, dt * 6)
+                val pb = playerBox(s)
+                val bb = bossBox(s)
+                if (s.vy > 55 && prevY - 2 <= bb.t + 12 && aabb(pb, bb)) {
+                    s.bossDowned += 1
+                    s.vy = STOMP_V
+                    s.grounded = false
+                    s.airJumps = 1
+                    s.hitstop = 0.08
+                    s.shake = 1.0
+                    s.score += 250
+                    s.stomps += 1
+                    events.add(Ev.DOWNED)
+                    s.pops.add(Pop(s.bossX, s.bossY - 60, "DRONE DOWN", 1.2))
+                    emit(s.particles, s.bossX, s.bossY - 10, 26, C_DRONE, 300.0, 260.0)
+                    emitRing(s.particles, s.bossX, s.bossY - 10, C_RING)
+                    for (k in 0 until 5) s.picks.add(Pick(s.bossX + 60 + k * 34, y0 - 70 - (k % 2) * 20, gold = true, shield = false))
+                    s.bossStage = 4
+                    s.bossT = 0.0
+                } else if (s.bossT > BOSS_HOT || s.x > s.bossX + 90) {
+                    s.bossStage = 4
+                    s.bossT = 0.0
+                }
+            }
+            else -> {
+                s.bossY -= 260 * dt
+                s.bossX += (speedAt(s) + 160) * dt
+                if (s.bossT > 1.6) {
+                    s.bossStage = 0
+                    s.arenaX0 = -1.0
+                    s.arenaX1 = -1.0
+                }
+            }
+        }
+    }
+
+    private fun nextShot(s: RunState, events: MutableList<Ev>) {
+        s.bossLane = if (chance(s, 0.5)) 0 else 1
+        s.bossTele = BOSS_TELE
+        s.bossBeam = 0.0
+        events.add(Ev.CHARGE)
+    }
+
     private fun spawnBoss(s: RunState) {
         val x = max(s.spawnX, s.x + 420)
         addPlat(s, x, BANDS[1], 1100.0)
@@ -442,6 +814,11 @@ object RunSim {
         s.grind = false
         s.grounded = false
         s.plats.removeAll { it.x + it.w >= s.x - 20 }
+        if (!s.classic && s.arenaX0 > s.x) {
+            s.arenaX0 = -1.0
+            s.arenaX1 = -1.0
+            s.bossNextX -= BOSS_EVERY * 10.0
+        }
         s.picks.clear()
         s.enemies.removeAll { it.x >= s.x - 40 }
         s.y = BANDS[0] + 8
@@ -458,7 +835,7 @@ object RunSim {
     private fun exitBonus(s: RunState) {
         s.bonus = false
         s.bonusLeft = 0.0
-        s.shield = 1
+        if (s.classic) s.shield = 1
         s.fever = 1.15
         s.invuln = 1.4
         s.slide = 0.0
@@ -480,8 +857,9 @@ object RunSim {
     }
 
     /** web createRun(seed, { mod, offerBonus, careBoost }) */
-    fun create(seed: Int, mod: DayMod = DayMod.CALM, offerBonus: Boolean = false, careBoost: Boolean = false, goalMeters: Int = 1200): RunState {
+    fun create(seed: Int, mod: DayMod = DayMod.CALM, offerBonus: Boolean = false, careBoost: Boolean = false, goalMeters: Int = 1200, classic: Boolean = false): RunState {
         val s = RunState(seed, mod, goalMeters)
+        s.classic = classic
         if (careBoost) s.shield = 1
         addPlat(s, 0.0, BANDS[1], 420.0)
         addEnemy(s, EnemyKind.MITE, 300.0, BANDS[1])
@@ -579,6 +957,8 @@ object RunSim {
         s.invuln = 1.45
         s.slide = 0.0
         if (why == DeathKind.FALL) {
+            // city rules: cracked roofs ahead of the checkpoint are whole again for the retry
+            if (!s.classic) for (p in s.plats) if (p.crumble && p.x > s.checkX - 60) { p.fallen = false; p.crackT = -1.0; p.fallY = 0.0 }
             s.x = s.checkX + 22
             s.y = s.checkY
             s.vy = 0.0
@@ -649,10 +1029,10 @@ object RunSim {
             if (e.dead) continue
             e.t += dt
             if (e.kind == EnemyKind.DRONE) {
-                val amp = if (e.boss) 14.0 else 10.0
-                e.y = e.baseY + sin(e.t * (if (e.boss) 2.2 else 3.2) + e.x * 0.01) * amp
+                val amp = if (e.amp > 0) e.amp else if (e.boss) 14.0 else 10.0
+                e.y = e.baseY + sin(e.t * (if (e.rate > 0) e.rate else if (e.boss) 2.2 else 3.2) + e.x * 0.01) * amp
             } else if (e.kind == EnemyKind.MITE) {
-                val plat = s.plats.firstOrNull { it.kind != PlatKind.WIRE && e.x >= it.x - 6 && e.x <= it.x + it.w + 6 }
+                val plat = s.plats.firstOrNull { it.kind != PlatKind.WIRE && !it.fallen && e.x >= it.x - 6 && e.x <= it.x + it.w + 6 }
                 if (plat != null) {
                     e.y = plat.y
                     e.baseY = plat.y
@@ -713,7 +1093,7 @@ object RunSim {
         }
 
         val spd = speedAt(s)
-        s.x += spd * dt
+        s.x += spd * dt * (if (s.gustLeft > 0) GUST_SLOW else 1.0)
         if (s.mod == DayMod.WIND) s.x += 18 * dt
         s.distance = s.x
         s.runPhase += dt * (if (s.grounded) 6.4 + spd * 0.006 else 3.0)
@@ -751,7 +1131,7 @@ object RunSim {
             s.particles.add(Particle(s.x - 10, s.y - 8, -20.0, -30 - fx() * 40, 0.18, 2 + fx() * 2, c))
         }
 
-        if (!s.bonus && !s.bossDone && s.x > 25000) {
+        if (s.classic && !s.bonus && !s.bossDone && s.x > 25000) {
             spawnBoss(s)
             events.add(Ev.BOSS)
         }
@@ -764,6 +1144,7 @@ object RunSim {
             }
         }
 
+        val prevYStep = s.y
         if (s.spawnX < s.x + 2800) spawnChunk(s, s.spawnX, 8)
         if (!s.bonus && s.phase == Phase.RUNNING) {
             val roofAhead = s.plats.any { it.x + it.w > s.x + 240 }
@@ -827,8 +1208,10 @@ object RunSim {
                 val stand = standPlat(s)
                 if (stand != null) {
                     s.y = stand.y
-                    s.checkX = stand.x + min(40.0, stand.w * 0.2)
-                    s.checkY = stand.y
+                    if (!stand.crumble) {
+                        s.checkX = stand.x + min(40.0, stand.w * 0.2)
+                        s.checkY = stand.y
+                    }
                     s.grind = stand.kind == PlatKind.WIRE
                 } else {
                     s.grounded = false
@@ -842,6 +1225,7 @@ object RunSim {
                 s.jumpAge += dt
                 var g = if (s.vy < 0) GRAVITY_UP else GRAVITY_DOWN
                 if (s.mod == DayMod.WIND && s.vy < 0) g *= 1.22
+                if (s.gustLeft > 0) g *= 1.25
                 if (s.vy < 0 && !input.jumpHeld && !s.cutJump && s.jumpAge > 0.28) {
                     s.vy *= 0.55
                     s.cutJump = true
@@ -878,8 +1262,10 @@ object RunSim {
                     s.squash = 1.0
                     s.stretch = 0.0
                     s.grind = wire
-                    s.checkX = land.x + min(40.0, land.w * 0.2)
-                    s.checkY = land.y
+                    if (!land.crumble) {
+                        s.checkX = land.x + min(40.0, land.w * 0.2)
+                        s.checkY = land.y
+                    }
                     events.add(if (wire) Ev.GRIND else Ev.LAND)
                     if (wire) s.grinds += 1
                     emit(s.particles, s.x, s.y, 8, if (wire) C_SHIELD else C_LAND, 80.0, 90.0)
@@ -894,6 +1280,8 @@ object RunSim {
                 }
             }
         }
+
+        if (!s.classic && !s.bonus && s.phase == Phase.RUNNING) cityStep(s, dt, prevYStep, events)
 
         if (s.fever > 0) {
             for (pick in s.picks) {
@@ -1009,6 +1397,23 @@ object RunSim {
             t < 2200 -> 1 + (t - 1900) / 300
             t < 2500 -> 2.0
             else -> 2 - ((t - 2500) / 300) * 2
+        }
+    }
+
+    /**
+     * City rules sky (native 0.21.4): golden hour, dusk from 450 m, night from 750 m (the 1200 m
+     * CLOCK IN lands under neon), dawn back to golden hour by 2400 m. Same 0..2 scale as [moodAt].
+     */
+    fun cityMoodAt(distance: Double): Double {
+        val m = distance / 10
+        val cycle = 2400.0
+        val t = ((m % cycle) + cycle) % cycle
+        return when {
+            t < 450 -> 0.0
+            t < 750 -> (t - 450) / 300
+            t < 1050 -> 1 + (t - 750) / 300
+            t < 1900 -> 2.0
+            else -> 2 - ((t - 1900) / 500) * 2
         }
     }
 

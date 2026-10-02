@@ -3,24 +3,30 @@ package net.solardepin.solarchik.game.run
 import android.content.res.AssetManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.Shader
 import org.json.JSONObject
+import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
- * Painted raster art for the run (assets/art): four tileable parallax layers, the rooftop
- * kit (caps + one solar module with a separate glass layer), sun-coin spin frames, clouds
- * and the sun, packed in `props.webp` + `props.json` (rect + logical size per entry).
+ * Painted solarpunk-city art for the run (assets/art):
+ *  - three skyline layers (far / mid / near) as alpha masks plus window-light and neon masks,
+ *    tinted per time of day by the renderer (Alto's-style atmospheric silhouettes);
+ *  - three tileable building facades (+ lit-window masks) drawn with repeating shaders;
+ *  - the parapet strip, rooftop props, solar modules (glass gradient-mapped per skin), the
+ *    maintenance-drone boss, crack decal, sun-coin frames and stratus wisps (`city.webp` atlas).
  *
- * Everything is pre-scaled once to the device scale ([prepare] with world units → pixels), so
- * a frame only blits 1:1 bitmaps. Roof glass is gradient-mapped to the equipped skin once per
- * skin. Mood tints (dusk / night / storm) are cached colour filters, rebuilt only when the
- * quantized mood changes. Nothing here allocates per frame.
+ * Everything is pre-scaled once per device scale ([prepare]); masks become ALPHA_8 bitmaps
+ * that draw in the paint colour, so a time-of-day change never allocates. Mood colour filters
+ * are cached per quantized mood.
  */
 class RunArt(private val assets: AssetManager) {
     /** A pre-scaled bitmap and its size in world units. */
@@ -32,22 +38,35 @@ class RunArt(private val assets: AssetManager) {
     private var scale = -1f
     private var skinKey: RunSkin? = null
 
-    var far: Img? = null; private set
-    var mid: Img? = null; private set
-    var midLights: Img? = null; private set
-    var near: Img? = null; private set
-    var fg: Img? = null; private set
-    var sun: Img? = null; private set
-    val clouds = arrayOfNulls<Img>(3)
+    /** Skyline layers: [0] far, [1] mid, [2] near. Masks (ALPHA_8). */
+    val layer = arrayOfNulls<Img>(3)
+    val layerLit = arrayOfNulls<Img>(3)
+    val layerNeon = arrayOfNulls<Img>(3)
+    val facade = arrayOfNulls<Img>(3)
+    val facadeShader = arrayOfNulls<BitmapShader>(3)
+    val facadeLitShader = arrayOfNulls<BitmapShader>(3)
+    var parapet: Img? = null; private set
+    var parapetShader: BitmapShader? = null; private set
+    var panel: Img? = null; private set
+    var ac: Img? = null; private set
+    var tank: Img? = null; private set
+    var antenna: Img? = null; private set
+    var vent: Img? = null; private set
+    var planter: Img? = null; private set
+    var boss: Img? = null; private set
+    var crack: Img? = null; private set
     val coins = arrayOfNulls<Img>(8)
-    var roofLeft: Img? = null; private set
-    var roofRight: Img? = null; private set
-    /** Roof module with the glass already mapped to [skinKey]. */
-    var roofMid: Img? = null; private set
-    private var roofMidBase: Bitmap? = null
-    private var roofGlass: Bitmap? = null
+    val stratus = arrayOfNulls<Img>(2)
+    /** Procedural masks: a soft radial glow, a vertical 0..1 ramp and film grain. */
+    var glowMask: Bitmap? = null; private set
+    var rampMask: Bitmap? = null; private set
+    var grainShader: BitmapShader? = null; private set
+    private var panelBase: Bitmap? = null
+    private var panelGlass: Bitmap? = null
 
-    val ready: Boolean get() = far != null && roofMid != null
+    val ready: Boolean get() = layer[0] != null && facadeShader[0] != null && panel != null && parapet != null
+    /** Device pixels per world unit of the prepared set. */
+    val pxPerUnit: Float get() = scale
 
     /** Pre-scale everything for [pxPerUnit] (device pixels per world unit) and [skin]. Cheap when unchanged. */
     fun prepare(pxPerUnit: Float, skin: RunSkin) {
@@ -56,67 +75,59 @@ class RunArt(private val assets: AssetManager) {
             scale = k
             try {
                 loadLayers(k)
-                loadProps(k)
+                loadAtlas(k)
+                makeProcedural()
             } catch (_: Throwable) {
-                far = null
+                layer[0] = null
             }
             skinKey = null
         }
         if (skin != skinKey) {
             skinKey = skin
-            roofMid = buildRoof(skin)
+            panel = buildPanel(skin)
         }
     }
 
-    /** Rooftop kit only (shop swatches): no parallax layers. Returns the module mapped to [skin]. */
+    /** Shop swatches: the parapet, a facade and the skin's solar module at [pxPerUnit]. */
     fun roofKit(pxPerUnit: Float, skin: RunSkin): Img? {
-        if (roofLeft == null || propsScale != pxPerUnit) {
-            propsScale = pxPerUnit
-            try { loadProps(pxPerUnit) } catch (_: Throwable) { return null }
+        if (parapet == null || atlasScale != pxPerUnit) {
+            atlasScale = pxPerUnit
+            try { loadAtlas(pxPerUnit); facade[0] = tile("art/facade_a.webp", 128f, pxPerUnit) } catch (_: Throwable) { return null }
         }
-        return buildRoof(skin)
+        return buildPanel(skin)
     }
-    private var propsScale = -1f
+    private var atlasScale = -1f
 
-    // ---- mood tint ----
+    // ---- mood ----
     private val filterCache = HashMap<Int, ColorMatrixColorFilter>()
 
     /**
-     * Colour filter for a layer at [depth] (0 near … 1 far) under the current mood:
-     * dusk warms and darkens, night goes deep blue, storm desaturates; far layers also sink
-     * into the sky haze. Null in plain daylight on near layers.
+     * Colour grade for lit, near-field art (facades, rooftops, props, the hero's world):
+     * golden hour warms, dusk goes rose and dim, night deep blue; storm desaturates.
+     * [mood] is 0 golden … 1 dusk … 2 night. Cached per 1/12 step.
      */
-    fun moodFilter(dusk: Double, night: Double, storm: Boolean, depth: Double): ColorMatrixColorFilter? {
-        val qd = (dusk * 8).roundToInt()
-        val qn = (night * 8).roundToInt()
-        val qz = (depth * 4).roundToInt()
-        if (qd == 0 && qn == 0 && !storm) return null
-        val key = qd or (qn shl 4) or (qz shl 8) or (if (storm) 1 shl 12 else 0)
+    fun cityFilter(mood: Double, storm: Boolean): ColorMatrixColorFilter {
+        val q = (mood * 12).roundToInt().coerceIn(0, 24)
+        val key = q or (if (storm) 1 shl 8 else 0)
         return filterCache.getOrPut(key) {
-            val d = qd / 8f
-            val n = qn / 8f
-            val z = qz / 4f
-            // multiply
-            var r = 1f - 0.04f * d
-            var g = 1f - 0.22f * d
-            var b = 1f - 0.3f * d
-            r *= 1f - 0.68f * n
-            g *= 1f - 0.6f * n
-            b *= 1f - 0.4f * n
-            // haze towards the sky colour for far layers
-            val haze = z * (0.18f * d + 0.32f * n)
-            val hr = 210f * (1 - n) * (1 - d) + 200f * d * (1 - n) + 40f * n
-            val hg = 230f * (1 - n) * (1 - d) + 120f * d * (1 - n) + 52f * n
-            val hb = 245f * (1 - n) * (1 - d) + 110f * d * (1 - n) + 100f * n
+            val m = q / 12f
+            val d = m.coerceAtMost(1f)
+            val n = (m - 1f).coerceAtLeast(0f)
+            // golden-hour warmth fading into dusk rose and night blue
+            var r = 1.04f - 0.16f * d - 0.5f * n
+            var g = 0.96f - 0.26f * d - 0.38f * n
+            var b = 0.88f - 0.18f * d - 0.12f * n
+            val add = floatArrayOf(10f - 4f * d - 2f * n, 4f - 2f * d + 2f * n, 0f + 6f * d + 14f * n)
+            if (storm) { r *= 0.8f; g *= 0.84f; b *= 0.92f }
             val cm = ColorMatrix(
                 floatArrayOf(
-                    r * (1 - haze), 0f, 0f, 0f, hr * haze + 6f * n,
-                    0f, g * (1 - haze), 0f, 0f, hg * haze + 8f * n,
-                    0f, 0f, b * (1 - haze), 0f, hb * haze + 18f * n,
+                    r, 0f, 0f, 0f, add[0],
+                    0f, g, 0f, 0f, add[1],
+                    0f, 0f, b, 0f, add[2],
                     0f, 0f, 0f, 1f, 0f,
                 ),
             )
-            if (storm) cm.postConcat(ColorMatrix().apply { setSaturation(0.55f) })
+            if (storm) cm.postConcat(ColorMatrix().apply { setSaturation(0.6f) }) else cm.postConcat(ColorMatrix().apply { setSaturation(0.9f) })
             ColorMatrixColorFilter(cm)
         }
     }
@@ -127,7 +138,6 @@ class RunArt(private val assets: AssetManager) {
         o.inJustDecodeBounds = true
         assets.open(path).use { BitmapFactory.decodeStream(it, null, o) }
         o.inJustDecodeBounds = false
-        // sources are authored at 2-3 px per unit: subsample when the screen needs far less
         var s = 1
         while (sampleFor > 0 && sampleFor * 2 <= 1f / s) s *= 2
         o.inSampleSize = s
@@ -135,24 +145,58 @@ class RunArt(private val assets: AssetManager) {
         return assets.open(path).use { BitmapFactory.decodeStream(it, null, o) }
     }
 
-    private fun layer(path: String, lw: Float, k: Float): Img? {
+    private fun scaled(src: Bitmap, tw: Int, th: Int): Bitmap {
+        if (src.width == tw && src.height == th) return src
+        // big reductions in halving steps (bilinear alone aliases below 0.5x)
+        var cur = src
+        while (cur.width / 2 >= tw && cur.height / 2 >= th) {
+            val nx = Bitmap.createScaledBitmap(cur, cur.width / 2, cur.height / 2, true)
+            if (cur !== src) cur.recycle()
+            cur = nx
+        }
+        val out = Bitmap.createScaledBitmap(cur, tw, th, true)
+        if (cur !== src && cur !== out) cur.recycle()
+        return out
+    }
+
+    private fun mask(b: Bitmap): Bitmap = b.extractAlpha().also { if (it !== b) b.recycle() }
+
+    private fun maskLayer(path: String, lw: Float, k: Float): Img? {
         val src = decode(path, k * lw / 2560f) ?: return null
-        val tw = max(1, (lw * k).roundToInt())
-        val th = max(1, (lw * k * src.height / src.width).roundToInt())
-        val bmp = if (src.width == tw && src.height == th) src else Bitmap.createScaledBitmap(src, tw, th, true).also { if (it !== src) src.recycle() }
-        return Img(bmp, lw, lw * src.height.toFloat() / src.width)
+        val lh = lw * src.height.toFloat() / src.width
+        val bmp = scaled(src, max(1, (lw * k).roundToInt()), max(1, (lh * k).roundToInt()))
+        if (bmp !== src) src.recycle()
+        return Img(mask(bmp), lw, lh)
+    }
+
+    private fun tile(path: String, lw: Float, k: Float, asMask: Boolean = false): Img? {
+        val src = decode(path, 0f) ?: return null
+        val lh = lw * src.height.toFloat() / src.width
+        var bmp = scaled(src, max(1, (lw * k).roundToInt()), max(1, (lh * k).roundToInt()))
+        if (bmp !== src) src.recycle()
+        if (asMask) bmp = mask(bmp)
+        return Img(bmp, lw, lh)
     }
 
     private fun loadLayers(k: Float) {
-        far = layer("art/bg_far.webp", LAYER_W, k)
-        mid = layer("art/bg_mid.webp", LAYER_W, k)
-        midLights = layer("art/bg_mid_lights.webp", LAYER_W, k)
-        near = layer("art/bg_near.webp", LAYER_W, k)
-        fg = layer("art/bg_fg.webp", LAYER_W, k)
+        val names = arrayOf("far", "mid", "near")
+        for (i in 0 until 3) {
+            layer[i] = maskLayer("art/city_${names[i]}.webp", LAYER_W, k)
+            layerLit[i] = maskLayer("art/city_${names[i]}_lit.webp", LAYER_W, k)
+            layerNeon[i] = maskLayer("art/city_${names[i]}_neon.webp", LAYER_W, k)
+        }
+        val fn = arrayOf("a", "b", "c")
+        for (i in 0 until 3) {
+            val f = tile("art/facade_${fn[i]}.webp", FACADE_W, k)
+            facade[i] = f
+            facadeShader[i] = f?.let { BitmapShader(it.bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT) }
+            val lit = tile("art/facade_${fn[i]}_lit.webp", FACADE_W, k, asMask = true)
+            facadeLitShader[i] = lit?.let { BitmapShader(it.bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT) }
+        }
     }
 
     private fun readSpec(): Map<String, Entry> {
-        val txt = assets.open("art/props.json").use { it.readBytes().toString(Charsets.UTF_8) }
+        val txt = assets.open("art/city.json").use { it.readBytes().toString(Charsets.UTF_8) }
         val o = JSONObject(txt)
         val out = HashMap<String, Entry>()
         for (name in o.keys()) {
@@ -162,39 +206,64 @@ class RunArt(private val assets: AssetManager) {
         return out
     }
 
-    private fun loadProps(k: Float) {
-        val sheet = decode("art/props.webp", 0f) ?: return
+    private fun loadAtlas(k: Float) {
+        val sheet = decode("art/city.webp", 0f) ?: return
         val spec = atlasSpec
-        fun cut(name: String): Img? {
+        fun cut(name: String, asMask: Boolean = false): Img? {
             val e = spec[name] ?: return null
             val tw = max(1, (e.lw * k).roundToInt())
             val th = max(1, (e.lh * k).roundToInt())
-            val out = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888)
-            Canvas(out).drawBitmap(sheet, e.rect, Rect(0, 0, tw, th), cutPaint)
+            val piece = Bitmap.createBitmap(sheet, e.rect.left, e.rect.top, e.rect.width(), e.rect.height())
+            var out = scaled(piece, tw, th)
+            if (out !== piece) piece.recycle()
+            if (asMask) out = mask(out)
             return Img(out, e.lw, e.lh)
         }
         for (i in 0 until 8) coins[i] = cut("coin_$i")
-        for (i in 0 until 3) clouds[i] = cut("cloud_${i + 1}")
-        sun = cut("sun")
-        roofLeft = cut("roof_left")
-        roofRight = cut("roof_right")
-        roofMidBase = cut("roof_mid")?.bmp
-        roofGlass = cut("roof_mid_glass")?.bmp
+        for (i in 0 until 2) stratus[i] = cut("stratus_${i + 1}", asMask = true)
+        val p = cut("parapet")
+        parapet = p
+        parapetShader = p?.let { BitmapShader(it.bmp, Shader.TileMode.REPEAT, Shader.TileMode.CLAMP) }
+        panelBase = cut("panel")?.bmp
+        panelGlass = cut("panel_glass")?.bmp
+        ac = cut("ac"); tank = cut("tank"); antenna = cut("antenna"); vent = cut("vent"); planter = cut("planter")
+        boss = cut("boss"); crack = cut("crack")
         sheet.recycle()
+    }
+
+    private fun makeProcedural() {
+        if (glowMask == null) {
+            val n = 128
+            val px = IntArray(n * n)
+            for (y in 0 until n) for (x in 0 until n) {
+                val dx = (x - n / 2 + 0.5f) / (n / 2f)
+                val dy = (y - n / 2 + 0.5f) / (n / 2f)
+                val d = sqrt(dx * dx + dy * dy)
+                val a = if (d >= 1f) 0f else exp(-d * d * 4.2f) * (1f - d)
+                px[y * n + x] = ((a * 255).roundToInt().coerceIn(0, 255) shl 24) or 0xFFFFFF
+            }
+            glowMask = mask(Bitmap.createBitmap(px, n, n, Bitmap.Config.ARGB_8888))
+            val ramp = IntArray(256) { ((it * 255 / 255) shl 24) or 0xFFFFFF }
+            rampMask = mask(Bitmap.createBitmap(ramp, 1, 256, Bitmap.Config.ARGB_8888))
+            val g = 160
+            val rnd = java.util.Random(7)
+            val gp = IntArray(g * g) { (rnd.nextInt(256) shl 24) or 0xFFFFFF }
+            grainShader = BitmapShader(mask(Bitmap.createBitmap(gp, g, g, Bitmap.Config.ARGB_8888)), Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+        }
     }
 
     private val cutPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
-    /** Base module + glass gradient-mapped (luminance → skin deep / cell / highlight). */
-    private fun buildRoof(skin: RunSkin): Img? {
-        val base = roofMidBase ?: return null
-        val glass = roofGlass ?: return Img(base, 64f, 80f)
+    /** Panel base + glass gradient-mapped (luminance → skin deep / cell / highlight). */
+    private fun buildPanel(skin: RunSkin): Img? {
+        val base = panelBase ?: return null
+        val glass = panelGlass ?: return Img(base, 56f, 34f)
         val out = base.copy(Bitmap.Config.ARGB_8888, true)
         val flag = skin == RunSkin.FLAG
-        val cell = if (flag) 0xFF5AA6E0.toInt() else skin.cell
-        val deep = if (flag) 0xFF2A5FA8.toInt() else skin.deep
-        val hi = mixRgb(if (flag) 0xFFCFEFFF.toInt() else skin.hi, 0xFFFFFFFF.toInt(), 0.35f)
-        val lo = mixRgb(deep, 0xFF0A1020.toInt(), 0.35f)
+        val cell = if (flag) 0xFF3A6FA8.toInt() else skin.cell
+        val deep = if (flag) 0xFF1C3A68.toInt() else skin.deep
+        val hi = mixRgb(if (flag) 0xFFB8D8F0.toInt() else skin.hi, 0xFFFFFFFF.toInt(), 0.25f)
+        val lo = mixRgb(deep, 0xFF0A1020.toInt(), 0.45f)
         val px = IntArray(glass.width * glass.height)
         glass.getPixels(px, 0, glass.width, 0, 0, glass.width, glass.height)
         for (i in px.indices) {
@@ -202,13 +271,13 @@ class RunArt(private val assets: AssetManager) {
             val a = c ushr 24
             if (a == 0) continue
             val l = ((c shr 16) and 0xFF) / 255f
-            val rgb = if (l < 0.45f) mixRgb(lo, deep, l / 0.45f) else if (l < 0.75f) mixRgb(deep, cell, (l - 0.45f) / 0.3f) else mixRgb(cell, hi, (l - 0.75f) / 0.25f)
+            val rgb = if (l < 0.3f) mixRgb(lo, deep, l / 0.3f) else if (l < 0.7f) mixRgb(deep, cell, (l - 0.3f) / 0.4f) else mixRgb(cell, hi, (l - 0.7f) / 0.3f)
             px[i] = (a shl 24) or (rgb and 0xFFFFFF)
         }
         val tinted = Bitmap.createBitmap(px, glass.width, glass.height, Bitmap.Config.ARGB_8888)
         Canvas(out).drawBitmap(tinted, 0f, 0f, cutPaint)
         tinted.recycle()
-        return Img(out, 64f, 80f)
+        return Img(out, 56f, 34f)
     }
 
     private fun mixRgb(a: Int, b: Int, t: Float): Int {
@@ -218,9 +287,11 @@ class RunArt(private val assets: AssetManager) {
     }
 
     companion object {
-        /** Width of one tile of every parallax layer, in world units. */
+        /** Width of one tile of every skyline layer, in world units. */
         const val LAYER_W = 1280f
-        /** Rooftop art: the walk surface sits this far below the bitmap top. */
-        const val ROOF_TOP = 6f
+        /** Facade tile size in world units. */
+        const val FACADE_W = 128f
+        /** The parapet's walk line sits this far below its top. */
+        const val ROOF_TOP = 4f
     }
 }

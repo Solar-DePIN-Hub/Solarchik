@@ -3,46 +3,148 @@ package net.solardepin.solarchik.game.run
 import android.content.res.AssetManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
- * The web runner sprites (public/sprites on the web build), loaded from app assets. Big
- * sources (the 800 px foes) are subsampled on decode: they are drawn about 60 px tall.
+ * Runner sprites. The hero frames are the project's own painted web frames (public/sprites/
+ * hero-run-1..8, hero-jump-1..4), pre-upscaled offline 3x with premultiplied Lanczos, a
+ * smoothed alpha edge and a light unsharp mask (tools/run-art/hero.py -> assets/art/hero).
+ *
+ * [prepareHero] scales every frame once to the exact on-screen pixel height (halving steps,
+ * then one bilinear pass) and bakes a dark ink outline at device resolution, plus an
+ * ALPHA_8 silhouette for the rim light. A frame then blits 1:1; nothing allocates per frame.
+ * Bought robots run on their own 4-frame strips (assets/sprites/robots/<id>-run-N.webp).
  */
 class RunSprites(private val assets: AssetManager) {
-    val run: List<Bitmap> = (1..8).mapNotNull { load("sprites/hero-run-$it.png") }
-    val jump: List<Bitmap> = (1..4).mapNotNull { load("sprites/hero-jump-$it.png") }
+    /** A frame ready to blit: [bmp] with the ink ring baked in, [pad] px of ring on each side, [rim] its silhouette. */
+    class Frame(val bmp: Bitmap, val pad: Int, val rim: Bitmap)
+
+    private val runSrc: List<Bitmap> by lazy { (1..8).mapNotNull { load("art/hero/run-$it.webp") } }
+    private val jumpSrc: List<Bitmap> by lazy { (1..4).mapNotNull { load("art/hero/jump-$it.webp") } }
+    private val slideSrc: Bitmap? by lazy { load("art/hero/slide.webp") }
     val mite: Bitmap? = load("sprites/foe-mite.png", maxH = 220)
     val drone: Bitmap? = load("sprites/foe-drone.png", maxH = 240)
-    val cottage: Bitmap? = load("sprites/farm/cottage.png", maxH = 200)
-    val greenhouse: Bitmap? = load("sprites/farm/greenhouse.png", maxH = 200)
     val buddy: Bitmap? = load("sprites/pet/buddy-talk-3.png", maxH = 160)
 
-    /** Painted world art (layers, rooftops, coins, clouds, sun). */
+    /** Painted city art (skyline layers, facades, roof props, coins, boss). */
     val art = RunArt(assets)
 
-    private val robots = HashMap<String, List<Bitmap>>()
+    var run: List<Frame> = emptyList(); private set
+    var jump: List<Frame> = emptyList(); private set
+    var slide: Frame? = null; private set
+    /** On-screen pixel height the frames are prepared for (0 = not yet). */
+    var heroPx = 0; private set
 
-    /** web SPR.robotRun(id): the bought robot's 4-frame run strip (empty if missing). */
-    fun robotRun(id: String): List<Bitmap> = robots.getOrPut(id) {
-        if (!ROBOT_ID.matches(id)) emptyList() else (1..4).mapNotNull { load("sprites/robots/$id-run-$it.png") }
+    private val robotSrc = HashMap<String, List<Bitmap>>()
+    private val robotFrames = HashMap<String, List<Frame>>()
+    private val robotSlide = HashMap<String, Frame?>()
+
+    /** Scale and ink every hero frame for an on-screen body height of [px] device pixels. */
+    fun prepareHero(px: Int) {
+        if (px <= 0 || px == heroPx) return
+        heroPx = px
+        run = runSrc.map { frame(it, px) }
+        jump = jumpSrc.map { frame(it, px) }
+        slide = slideSrc?.let { frame(it, (px * SLIDE_H).roundToInt()) }
+        robotFrames.clear()
+        robotSlide.clear()
     }
 
-    /** web heroFrame(grounded, vy, runPhase, squash) */
-    fun heroFrame(grounded: Boolean, vy: Double, runPhase: Double, squash: Double): Bitmap? {
+    /** web SPR.robotRun(id): the bought robot's 4-frame run strip, prepared (empty if missing). */
+    fun robotRun(id: String): List<Frame> {
+        if (heroPx <= 0) return emptyList()
+        return robotFrames.getOrPut(id) { robotSources(id).map { frame(it, heroPx) } }
+    }
+
+    /** A bought robot's slide pose: its first run frame leaned back, prepared. */
+    fun robotSlide(id: String): Frame? {
+        if (heroPx <= 0) return null
+        return robotSlide.getOrPut(id) {
+            val src = robotSources(id).firstOrNull() ?: return@getOrPut null
+            val lean = leaned(src, 55f)
+            frame(lean, (heroPx * SLIDE_H).roundToInt()).also { lean.recycle() }
+        }
+    }
+
+    private fun robotSources(id: String): List<Bitmap> = robotSrc.getOrPut(id) {
+        if (!ROBOT_ID.matches(id)) emptyList() else (1..4).mapNotNull { load("sprites/robots/$id-run-$it.webp") }
+    }
+
+    /**
+     * web heroFrame: jump frames for take-off / rise / apex / fall, the crouch for a landing,
+     * the 8-frame cycle on the ground (advanced [RUN_RATE]x the sim's runPhase so the stride
+     * matches the faster city speeds).
+     */
+    fun heroFrame(grounded: Boolean, vy: Double, runPhase: Double, squash: Double, landing: Boolean = false): Frame? {
         if (!grounded && jump.size == 4) {
             if (squash > 0.4 && vy >= 0) return jump[0]
             if (vy < -220) return jump[1]
             if (vy < 80) return jump[2]
             return jump[3]
         }
+        if (landing && jump.size == 4) return jump[0]
         if (run.isEmpty()) return null
         val n = run.size
-        val i = ((Math.floor(runPhase).toInt() % n) + n) % n
+        val i = ((Math.floor(runPhase * RUN_RATE).toInt() % n) + n) % n
         return run[i]
+    }
+
+    private val ink = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+        colorFilter = PorterDuffColorFilter(INK, PorterDuff.Mode.SRC_IN)
+    }
+    private val plain = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+    private fun frame(src: Bitmap, bodyPx: Int): Frame {
+        val h = max(8, bodyPx)
+        val w = max(4, (src.width.toFloat() * h / src.height).roundToInt())
+        var cur = src
+        while (cur.height / 2 >= h) {
+            val nx = Bitmap.createScaledBitmap(cur, cur.width / 2, cur.height / 2, true)
+            if (cur !== src) cur.recycle()
+            cur = nx
+        }
+        val body = Bitmap.createScaledBitmap(cur, w, h, true)
+        if (cur !== src && cur !== body) cur.recycle()
+        val p = max(2, (h * OUTLINE).roundToInt())
+        val out = Bitmap.createBitmap(w + 2 * p, h + 2 * p, Bitmap.Config.ARGB_8888)
+        val cv = Canvas(out)
+        for (k in 0 until 16) {
+            val a = k * PI / 8
+            cv.drawBitmap(body, (p + cos(a) * p).toFloat(), (p + sin(a) * p).toFloat(), ink)
+        }
+        cv.drawBitmap(body, p.toFloat(), p.toFloat(), plain)
+        if (body !== src) body.recycle()
+        return Frame(out, p, out.extractAlpha())
+    }
+
+    private fun leaned(src: Bitmap, deg: Float): Bitmap {
+        val r = Math.toRadians(deg.toDouble())
+        val c = kotlin.math.abs(cos(r)); val s = kotlin.math.abs(sin(r))
+        val w = (src.width * c + src.height * s).roundToInt()
+        val h = (src.width * s + src.height * c).roundToInt()
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val cv = Canvas(out)
+        cv.translate(w / 2f, h / 2f)
+        cv.rotate(-deg)
+        cv.drawBitmap(src, -src.width / 2f, -src.height / 2f, plain)
+        return out
     }
 
     private companion object {
         val ROBOT_ID = Regex("^[a-z]+$")
+        /** Slide pose height as a fraction of the standing body. */
+        const val SLIDE_H = 0.5f
+        const val RUN_RATE = 1.5
+        const val OUTLINE = 0.022f
+        const val INK = 0xFF1A1418.toInt()
     }
 
     private fun load(path: String, maxH: Int = 0): Bitmap? = try {
