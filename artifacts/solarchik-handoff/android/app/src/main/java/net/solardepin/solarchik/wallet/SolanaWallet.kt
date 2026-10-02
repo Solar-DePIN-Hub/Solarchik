@@ -332,6 +332,46 @@ class SolanaWallet(context: Context) {
         }
     }
 
+    /**
+     * Strategy NFTs: the server built and co-signed [txs] with this wallet as owner/payer.
+     * One wallet prompt signs them all (sign-only); they are then sent in order through our RPC,
+     * each confirmed before the next (the second strategy tx needs the first on chain).
+     */
+    suspend fun signServerTxs(sender: ActivityResultSender, txs: List<ByteArray>): Result<String> {
+        if (txs.isEmpty()) return Result.failure(WalletError(WalletError.Kind.FAILED, "Server sent no transaction"))
+        adapter.rpcCluster = rpcCluster()
+        val result = try {
+            adapter.transact(sender) { _ ->
+                @Suppress("DEPRECATION")
+                signTransactions(txs.toTypedArray())
+            }
+        } catch (t: Throwable) {
+            if (t is kotlinx.coroutines.CancellationException) throw t
+            return Result.failure(WalletError.classify(t.message, t))
+        }
+        return when (result) {
+            is TransactionResult.Success -> runCatching {
+                val signed = result.payload.signedPayloads
+                check(signed.size == txs.size) { "Wallet returned ${signed.size} of ${txs.size} transactions" }
+                var last = ""
+                for (raw in signed) {
+                    last = rpc.sendTransaction(raw)
+                    var seen: String? = null
+                    for (i in 0 until 30) {
+                        seen = rpc.signatureStatus(last)
+                        if (seen == "confirmed" || seen == "finalized") break
+                        if (seen == "failed") error("Transaction failed on chain: $last")
+                        kotlinx.coroutines.delay(1000)
+                    }
+                    check(seen == "confirmed" || seen == "finalized") { "Not confirmed yet: $last" }
+                }
+                last
+            }.recoverCatching { throw buildFailure(it) }
+            is TransactionResult.NoWalletFound -> Result.failure(WalletError(WalletError.Kind.NO_WALLET))
+            is TransactionResult.Failure -> Result.failure(fail(result))
+        }
+    }
+
     /** Detached signature of [message] by the connected account (address + base58 signature). */
     suspend fun signText(sender: ActivityResultSender, message: String): Result<ClockProof> = signMessage(sender, message)
 

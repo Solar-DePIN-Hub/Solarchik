@@ -48,7 +48,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
     private fun setBalance(key: String, v: Double) {
         if (key == walletKey()) balance = v
     }
-    /** 0 = desk, 1 = strategies (catalog + mint). */
+    /** 0 = desk, 1 = strategies (catalog + mint), 2 = Strategy NFT market (devnet). */
     private var section = 0
     private var track = Track.PAPER
     private var paying = false
@@ -56,6 +56,8 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
     private lateinit var sectionBox: LinearLayout
     private lateinit var deskBox: LinearLayout
     private lateinit var shopBox: LinearLayout
+    private lateinit var marketBox: LinearLayout
+    private val strategyPanel by lazy { StrategyPanel(host) { render() } }
 
     private lateinit var walletPill: TextView
     private lateinit var clusterLabel: TextView
@@ -81,6 +83,8 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         addView(deskBox)
         shopBox = Ui.column(ctx, gap = 14)
         addView(shopBox)
+        marketBox = Ui.column(ctx, gap = 14)
+        addView(marketBox)
         shopBox.apply {
 
         // Tier switch
@@ -162,14 +166,18 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         tierLine.setTextColor(if (pro) Ui.GOLD else Ui.TEXT)
 
         sectionBox.removeAllViews()
-        sectionBox.addView(Ui.segmented(ctx, listOf(ctx.getString(R.string.desk_tab), ctx.getString(R.string.strategies_tab)), section) {
+        sectionBox.addView(Ui.segmented(ctx, listOf(ctx.getString(R.string.desk_tab), ctx.getString(R.string.strategies_tab), ctx.getString(R.string.market_tab)), section) {
             section = it
             render()
         })
         deskBox.visibility = if (section == 0) View.VISIBLE else View.GONE
         shopBox.visibility = if (section == 1) View.VISIBLE else View.GONE
+        marketBox.visibility = if (section == 2) View.VISIBLE else View.GONE
         if (section == 0) {
             renderDesk()
+        } else if (section == 2) {
+            strategyPanel.load()
+            strategyPanel.render(marketBox)
         } else {
             catalogBox.removeAllViews()
             Catalog.skus.forEach { catalogBox.addView(skuCard(it)) }
