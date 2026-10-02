@@ -97,3 +97,13 @@ describe("browser Buffer shim: from(arrayBuffer) shares memory like Node", () =>
     assert.deepEqual([...target.subarray(0, 6)], [0, 0, 10, 11, 12, 0]);
   });
 });
+
+describe("browser Buffer shim: isBuffer", () => {
+  it("is true only for shim Buffers, so web3.js toBuffer() converts plain Uint8Arrays", () => {
+    assert.equal(SolBuffer.isBuffer(new Uint8Array(4)), false);
+    assert.equal(SolBuffer.isBuffer(SolBuffer.alloc(4)), true);
+    const u = Uint8Array.from([3, 125, 251]);
+    const asBuf = SolBuffer.isBuffer(u) ? u : SolBuffer.from(u.buffer, u.byteOffset, u.byteLength);
+    assert.equal(asBuf.toString("base64"), Buffer.from(u).toString("base64"));
+  });
+});

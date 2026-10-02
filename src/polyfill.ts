@@ -30,7 +30,9 @@ function asBytes(input: unknown, encoding?: string): Uint8Array {
 class SolBuffer extends Uint8Array {
   static poolSize = 8192;
   static isBuffer(value: unknown): boolean {
-    return value instanceof Uint8Array;
+    // Only real shim Buffers. web3.js toBuffer() returns "Buffers" as-is and then calls .toString("base64");
+    // a plain Uint8Array there serialized as "3,125,251,..." (sendTransaction: "too large").
+    return value instanceof SolBuffer;
   }
   static isEncoding(): boolean {
     return true;
