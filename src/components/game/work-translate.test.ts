@@ -76,3 +76,16 @@ test("composed desk lines come out fully English (arb, listing lock, judges step
   for (const l of lines) assert.doesNotMatch(translateText(l), CYR, `${l} -> ${translateText(l)}`);
   assert.equal(translateText("Events 2д on"), "Events 2d on");
 });
+
+test("native API answers English reasons when the client sends lang=en", async () => {
+  const { englishReply } = await import("../../../server/middleware/native-api.ts");
+  const out = englishReply({
+    ok: false,
+    reason: "Немає підпису гаманця.",
+    errors: ["Вікна: лише 5, 15, 60, 240 хв."],
+    pro: { mode: "cosign", reason: "Сервер підписує мінт." },
+    name: "Назва не чіпається",
+  }) as Record<string, unknown>;
+  assert.doesNotMatch(JSON.stringify({ ...out, name: "" }), CYR);
+  assert.equal(out.name, "Назва не чіпається");
+});

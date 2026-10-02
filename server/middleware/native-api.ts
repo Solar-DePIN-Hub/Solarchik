@@ -4,6 +4,7 @@
  * wallet proof signed by the room key, so CORS is open; secrets never leave the server.
  */
 import { DESK_PROXY_PER_MIN, rateLimiter } from "../../src/lib/agents/desk-proxy-rules.ts";
+import { translateText } from "../../src/components/game/work-translate.ts";
 
 interface NativeEvent {
   url: URL;
@@ -54,6 +55,21 @@ function reply(status: number, body: unknown): Response {
   });
 }
 
+const TEXT_KEYS = new Set(["reason", "error", "errors", "modeReason", "note", "message"]);
+
+/**
+ * Server texts are Ukrainian at the source. A native client that sends `"lang":"en"` gets the same
+ * English swap the web desk uses (one dictionary, tested to cover every agent module).
+ */
+export function englishReply(value: unknown, key = ""): unknown {
+  if (typeof value === "string") return TEXT_KEYS.has(key) ? translateText(value) : value;
+  if (Array.isArray(value)) return value.map((v) => englishReply(v, key));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, englishReply(v, k)]));
+  }
+  return value;
+}
+
 function str(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
@@ -86,16 +102,18 @@ export default async function nativeApiMiddleware(
   } catch {
     return reply(400, { ok: false, error: "json" });
   }
+  const lang = body.lang === "en" ? "en" : "uk";
+  const out = (status: number, payload: unknown) => reply(status, lang === "en" ? englishReply(payload) : payload);
   try {
     if (route.startsWith("strategy-") || route.startsWith("market-") || route === "faucet-drip") {
       const { strategyRoute } = await import("../../src/lib/agents/strategy.server.ts");
-      return reply(200, await strategyRoute(route, body, { ip }));
+      return out(200, await strategyRoute(route, body, { ip }));
     }
     const { readProof } = await import("../../src/lib/agents/wallet-proof.ts");
     if (route === "arb-fire") {
       const { cleanArbSymbol } = await import("../../src/lib/agents/arb-rules.ts");
       const { guardedArbFire } = await import("../../src/lib/agents/arb-guard.server.ts");
-      return reply(
+      return out(
         200,
         await guardedArbFire({
           dir: body.dir === "B" ? "B" : "A",
@@ -110,24 +128,24 @@ export default async function nativeApiMiddleware(
       const { readArbHouseOnServer } = await import("../../src/lib/agents/arb-house.server.ts");
       const info = currentArbMode();
       const house = await readArbHouseOnServer();
-      return reply(200, { ...house, mode: info.mode, modeReason: info.reason });
+      return out(200, { ...house, mode: info.mode, modeReason: info.reason });
     }
     if (route === "mint-status") {
       const { mintStatusOnServer } = await import("../../src/lib/agents/mint.server.ts");
-      return reply(200, mintStatusOnServer());
+      return out(200, mintStatusOnServer());
     }
     const b58 = (v: unknown, max: number) => str(v).replace(/[^1-9A-HJ-NP-Za-km-z]/g, "").slice(0, max);
     if (route === "arb-credit") {
       const { readArbCreditOnServer } = await import("../../src/lib/agents/payments.server.ts");
-      return reply(200, await readArbCreditOnServer(b58(body.asset, 44)));
+      return out(200, await readArbCreditOnServer(b58(body.asset, 44)));
     }
     if (route === "arb-credit-claim") {
       const { claimArbCreditOnServer } = await import("../../src/lib/agents/payments.server.ts");
-      return reply(200, await claimArbCreditOnServer({ wallet: b58(body.wallet, 44), asset: b58(body.asset, 44), sig: b58(body.sig, 100) }));
+      return out(200, await claimArbCreditOnServer({ wallet: b58(body.wallet, 44), asset: b58(body.asset, 44), sig: b58(body.sig, 100) }));
     }
     if (route === "fee-record") {
       const { recordFeeOnServer } = await import("../../src/lib/agents/payments.server.ts");
-      return reply(
+      return out(
         200,
         await recordFeeOnServer({
           wallet: b58(body.wallet, 44),
@@ -142,7 +160,7 @@ export default async function nativeApiMiddleware(
       const rules = await import("../../src/lib/agents/position-rules.ts");
       const proof = readProof(body.proof);
       if (route === "position-open") {
-        return reply(
+        return out(
           200,
           await server.openPositionOnServer({
             proof,
@@ -154,10 +172,10 @@ export default async function nativeApiMiddleware(
           }),
         );
       }
-      if (route === "position-close") return reply(200, await server.closePositionOnServer({ proof, fillId: rules.cleanFillId(body.fillId) }));
-      if (route === "fee-window-start") return reply(200, await server.startFeeWindowOnServer({ proof }));
-      if (route === "fee-balance") return reply(200, await server.feeBalanceOnServer(b58(body.wallet, 44)));
-      return reply(
+      if (route === "position-close") return out(200, await server.closePositionOnServer({ proof, fillId: rules.cleanFillId(body.fillId) }));
+      if (route === "fee-window-start") return out(200, await server.startFeeWindowOnServer({ proof }));
+      if (route === "fee-balance") return out(200, await server.feeBalanceOnServer(b58(body.wallet, 44)));
+      return out(
         200,
         await server.recordClockOnServer({
           proof,
@@ -171,10 +189,10 @@ export default async function nativeApiMiddleware(
     }
     if (route === "mint-reissue") {
       const { prepareReissueOnServer } = await import("../../src/lib/agents/mint.server.ts");
-      return reply(200, await prepareReissueOnServer({ proof: readProof(body.proof), oldAsset: b58(body.oldAsset, 44), paySig: b58(body.paySig, 100) }));
+      return out(200, await prepareReissueOnServer({ proof: readProof(body.proof), oldAsset: b58(body.oldAsset, 44), paySig: b58(body.paySig, 100) }));
     }
     const { prepareMintOnServer } = await import("../../src/lib/agents/mint.server.ts");
-    return reply(
+    return out(
       200,
       await prepareMintOnServer({
         proof: readProof(body.proof),
@@ -184,6 +202,6 @@ export default async function nativeApiMiddleware(
     );
   } catch (error) {
     console.error("[native-api]", route, error instanceof Error ? error.message : error);
-    return reply(500, { ok: false, reason: "Сервер не відповів." });
+    return out(500, { ok: false, reason: "Сервер не відповів." });
   }
 }
