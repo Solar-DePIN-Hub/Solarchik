@@ -617,6 +617,11 @@ object Autopilot {
 
     private fun safe(s: RunState, seq: List<Input>) = survived(s, seq) >= HORIZON + seq.size
 
+    /** For the gameplay-preview tool: wrap the bot with showcase moves. */
+    fun busy() = plan.isNotEmpty()
+    fun reset() = plan.clear()
+    fun isSafe(s: RunState, seq: List<Input>) = safe(s, seq)
+
     /** Frames survived without losing a heart. */
     private fun survived(s: RunState, seq: List<Input>): Int {
         val c = copy(s)

@@ -40,6 +40,7 @@ android {
             it.systemProperty("solarchik.liveAgents", (project.findProperty("liveAgents") as String?) ?: "0")
             it.systemProperty("solarchik.liveWaitSec", (project.findProperty("liveWaitSec") as String?) ?: "40")
             it.systemProperty("solarchik.runshots", (project.findProperty("runshots") as String?) ?: layout.buildDirectory.dir("screens-run").get().asFile.path)
+            it.systemProperty("solarchik.runvideo", (project.findProperty("runvideo") as String?) ?: "")
             it.systemProperty("solarchik.shots", (project.findProperty("shots") as String?) ?: layout.buildDirectory.dir("screens").get().asFile.path)
         }
     }
