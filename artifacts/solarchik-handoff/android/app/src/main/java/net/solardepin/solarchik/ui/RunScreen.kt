@@ -460,23 +460,16 @@ class RunScreen(host: MainActivity) : Screen(host) {
 /** Mini roof in a skin's palette (web SKIN_PAL), for the shop tiles. */
 @android.annotation.SuppressLint("ViewConstructor")
 class SkinSwatch(ctx: Context, private val skin: RunSkin) : View(ctx) {
-    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val r = RectF()
-    private val flag = skin == RunSkin.FLAG
-    private val cell = if (flag) 0xFF6AAFD8.toInt() else skin.cell
-    private val deep = if (flag) 0xFF3E86C4.toInt() else skin.deep
-    private val lip = if (flag) 0xFFF0C14D.toInt() else skin.lip
-    // same palette rules as the run's rooftop (RunRenderer.drawPlat)
-    private val frame = Ui.blend(0xFFCBD3DA.toInt(), lip, 0.35f)
-    private val tile = Ui.blend(0xFFB65A34.toInt(), skin.band, 0.3f)
-    private val tileDark = Ui.blend(tile, 0xFF2A1810.toInt(), 0.45f)
     private var skyShader: Shader? = null
-    private var glassShader: Shader? = null
+    private var module: net.solardepin.solarchik.game.run.RunArt.Img? = null
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         val hf = h.toFloat()
         skyShader = LinearGradient(0f, 0f, 0f, hf, 0xFF8FD3FF.toInt(), 0xFFD8F2C8.toInt(), Shader.TileMode.CLAMP)
-        glassShader = LinearGradient(0f, hf * 0.46f, 0f, hf * 0.64f, Ui.blend(cell, Color.WHITE, 0.12f), deep, Shader.TileMode.CLAMP)
+        // the same painted rooftop kit the run draws, glass mapped to this skin
+        module = kit(context).roofKit(KIT_SCALE, skin)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -488,38 +481,25 @@ class SkinSwatch(ctx: Context, private val skin: RunSkin) : View(ctx) {
         p.shader = null
         p.color = 0xFFFFD24A.toInt()
         canvas.drawCircle(w * 0.76f, h * 0.24f, h * 0.1f, p)
-        val left = w * 0.08f
-        val right = w * 0.92f
-        val top = h * 0.44f
-        val deckBot = h * 0.66f
-        val bot = h * 0.84f
-        // ink silhouette, tile eave, deck, modules
-        p.color = 0xFF2A1E16.toInt()
-        r.set(left - 3, top - 3, right + 3, bot + 3); canvas.drawRoundRect(r, 8f, 8f, p)
-        p.color = tileDark
-        r.set(left, deckBot, right, bot); canvas.drawRoundRect(r, 6f, 6f, p)
-        val tw = (right - left) / 5
-        p.color = tile
-        for (i in 0 until 5) {
-            r.set(left + i * tw + 1, deckBot - 4, left + (i + 1) * tw - 1, bot - 2)
-            canvas.drawRoundRect(r, tw / 2, tw / 2, p)
+        val k = kit(context)
+        val m = module
+        val lc = k.roofLeft
+        val rc = k.roofRight
+        if (m == null || lc == null || rc == null) return
+        // left cap · one module · right cap, fitted to the tile width (art is 24 + 64 + 24 units wide, 80 tall)
+        val u = w * 0.9f / (24f + 64f + 24f)
+        val x0 = w * 0.05f
+        val y0 = h * 0.4f
+        r.set(x0, y0, x0 + 24 * u, y0 + 80 * u); canvas.drawBitmap(lc.bmp, null, r, p)
+        r.set(x0 + 24 * u, y0, x0 + 88 * u, y0 + 80 * u); canvas.drawBitmap(m.bmp, null, r, p)
+        r.set(x0 + 88 * u, y0, x0 + 112 * u, y0 + 80 * u); canvas.drawBitmap(rc.bmp, null, r, p)
+    }
+
+    private companion object {
+        const val KIT_SCALE = 2f
+        @Volatile private var shared: net.solardepin.solarchik.game.run.RunArt? = null
+        fun kit(ctx: Context) = shared ?: synchronized(this) {
+            shared ?: net.solardepin.solarchik.game.run.RunArt(ctx.applicationContext.assets).also { shared = it }
         }
-        p.color = frame
-        r.set(left, top, right, deckBot); canvas.drawRoundRect(r, 5f, 5f, p)
-        p.shader = glassShader
-        val mw = (right - left - 9) / 2
-        for (m in 0 until 2) {
-            r.set(left + 3 + m * (mw + 3), top + 2.5f, left + 3 + m * (mw + 3) + mw, deckBot - 2.5f)
-            canvas.drawRoundRect(r, 2f, 2f, p)
-        }
-        p.shader = null
-        p.color = skin.grid
-        p.strokeWidth = 1f
-        for (m in 0 until 2) {
-            val mx = left + 3 + m * (mw + 3)
-            for (k in 1 until 3) canvas.drawLine(mx + mw * k / 3, top + 2.5f, mx + mw * k / 3, deckBot - 2.5f, p)
-        }
-        p.color = 0x8CFFFFFF.toInt()
-        r.set(left + 6, top + 3, left + mw * 0.7f, top + 5); canvas.drawRoundRect(r, 2f, 2f, p)
     }
 }
