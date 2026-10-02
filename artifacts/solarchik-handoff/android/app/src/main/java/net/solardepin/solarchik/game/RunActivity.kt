@@ -83,6 +83,7 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
         radio = RunRadio(this, scope, lang(), audio, onCaption = { overlay.setCaption(it) }, onListening = { overlay.setListening(it) })
         overlay.buddy.setImageBitmap(runCatching { assets.open("sprites/pet/buddy-talk-3.png").use { android.graphics.BitmapFactory.decodeStream(it) } }.getOrNull())
         overlay.setMuted(audio.musicMuted)
+        overlay.onSunTarget = { x, y -> game.sunTargetX = x; game.sunTargetY = y }
         overlay.setMicAvailable(android.speech.SpeechRecognizer.isRecognitionAvailable(this))
 
         val root = FrameLayout(this)
@@ -144,6 +145,7 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
         if (hud.hint) hintSeen = true else if (hintSeen && hud.phase == Phase.RUNNING && !save.runTutorialDone) save.runTutorialDone = true
         overlay.bind(hud)
         radio.onHud(hud)
+        if (hud.phase == Phase.RUNNING || hud.phase == Phase.COUNTDOWN) audio.setTrack(hud.music)
         if (hud.phase == Phase.RUNNING) {
             for (q in quests.liveDone(stats(hud))) {
                 if (!announced.add(q.id)) continue
@@ -156,15 +158,19 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
 
     override fun onEvents(events: List<Ev>, hud: RunHud) {
         radio.push(events, hud)
+        if (Ev.MILESTONE in events) overlay.milestone((hud.meters / RunSim.MILESTONE_M) * RunSim.MILESTONE_M)
         if (Ev.CLOCK in events) {
             // CLOCK IN unlocked mid-run: save it now, celebrate, keep running
             save.unlockClock(hud.meters, hud.score)
             refreshClock()
             overlay.celebrateClock()
         }
-        // web buzz(): jump 18 ms, hurt 40 ms, clock 55 ms
+        // web buzz(): jump 18 ms, hurt 40 ms, clock 55 ms; native adds the boss beats. performHapticFeedback
+        // without FLAG_IGNORE_GLOBAL_SETTING follows the phone's touch-vibration setting.
         when {
-            Ev.CLOCK in events || Ev.HURT in events -> game.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            Ev.CLOCK in events || Ev.HURT in events || Ev.DOWNED in events || Ev.BOSS in events ->
+                game.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            Ev.BEAM in events || Ev.SHATTER in events || Ev.OVERHEAT in events -> game.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
             Ev.JUMP in events -> game.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
         }
     }

@@ -45,8 +45,8 @@ class RunShotsTest {
     private fun renderer() = RunRenderer(
         RunSprites(ctx.assets),
         ResourcesCompat.getFont(ctx, R.font.nunito_bold),
-        ResourcesCompat.getFont(ctx, R.font.fredoka_semibold),
-    )
+        ResourcesCompat.getFont(ctx, if (ctx.resources.configuration.locales[0].language == "uk") R.font.nunito_extrabold else R.font.fredoka_semibold),
+    ).also { it.labels = net.solardepin.solarchik.game.runLabels(ctx) }
 
     private fun overlay(): RunOverlay = RunOverlay(ctx, object : RunOverlay.Actions {
         override fun pauseToggle() {}
@@ -276,6 +276,68 @@ class RunShotsTest {
         shot("18e-gust", g, moment = true)
     }
 
+    /** Steps (bot) until [ev] fires, then [after] more ticks so the effect is mid-flight. */
+    private fun untilEvent(s: RunState, ev: Ev, after: Int, max: Int = 60 * 900, extra: (RunState) -> Boolean = { true }): Boolean {
+        var n = 0
+        while (n++ < max) {
+            val got = RunSim.step(s, RunSim.TICK, Autopilot.input(s))
+            if (s.phase == Phase.DEAD) return false
+            if (ev in got && extra(s)) { repeat(after) { RunSim.step(s, RunSim.TICK, Autopilot.input(s)) }; return true }
+        }
+        return false
+    }
+
+    @Test fun effects() {
+        val land = RunSim.create(seed, goalMeters = 99_999)
+        assertTrue(stepUntil(land) { st -> st.meters > 300 && st.grounded && st.enemies.none { !it.dead && kotlin.math.abs(it.x - st.x) < 420 } && st.plats.any { !it.crumble && it.kind == PlatKind.ROOF && st.x - it.x in 60.0..(it.w - 160) } })
+        // drop it onto the roof from a small hop
+        land.y -= 30; land.vy = 260.0; land.grounded = false
+        var lt = 0
+        while (Ev.LAND !in RunSim.step(land, RunSim.TICK, Input()) && lt++ < 60) {}
+        repeat(4) { RunSim.step(land, RunSim.TICK, Input()) }
+        shot("40-fx-landing-dust", land, moment = true)
+        val coin = RunSim.create(seed, goalMeters = 99_999)
+        assertTrue(untilEvent(coin, Ev.COLLECT, 15) { it.meters > 200 && it.grounded })
+        shot("41-fx-coin-burst-fly", coin, moment = true)
+        val glass = RunSim.create(seed, goalMeters = 99_999)
+        assertTrue(untilEvent(glass, Ev.SHATTER, 8) { st -> st.plats.any { it.crumble && it.fallen && it.fallY < 20 && inView(st, it.x + it.w * 0.5, -150.0, 500.0) } })
+        shot("42-fx-canopy-shatter", glass, moment = true)
+        val wire = RunSim.create(seed, goalMeters = 99_999)
+        assertTrue(stepUntil(wire, max = 60 * 900) { st -> st.plats.any { it.live && RunSim.wireLive(st, it) == 2 && inView(st, it.x, 60.0, 360.0) } })
+        repeat(6) { RunSim.step(wire, RunSim.TICK, Autopilot.input(wire)) }
+        shot("43-fx-cable-sparks", wire, moment = true)
+        // the boss goes down: stomp it the moment it overheats
+        val boss = RunSim.create(seed, goalMeters = 99_999)
+        assertTrue(stepUntil(boss, max = 60 * 900) { it.bossStage == 3 && it.bossT > 0.3 })
+        var downed = false
+        var k = 0
+        while (!downed && k++ < 30) {
+            boss.bossX = boss.x; boss.bossY = RunSim.BANDS[1] - 50; boss.invuln = 3.0; boss.bossT = 0.3
+            boss.y = RunSim.bossBox(boss).t + 2; boss.vy = 300.0; boss.grounded = false
+            downed = Ev.DOWNED in RunSim.step(boss, RunSim.TICK, Input())
+        }
+        assertTrue("downed after $k tries, stage ${boss.bossStage} hitstop ${boss.hitstop}", downed)
+        repeat(10) { RunSim.step(boss, RunSim.TICK, Autopilot.input(boss)) }
+        shot("44-fx-boss-explosion", boss, moment = true)
+        val beam = RunSim.create(seed, goalMeters = 99_999)
+        assertTrue(stepUntil(beam, max = 60 * 900) { it.bossStage == 2 && it.bossBeam in 0.06..0.14 && it.bossShots >= 1 })
+        shot("45-fx-beam-glow", beam, moment = true)
+        val rain = RunSim.create(seed, goalMeters = 99_999)
+        assertTrue(stepUntil(rain, max = 60 * 900) { it.distance in 17_500.0..20_500.0 && it.grounded && it.lightning == 0.0 })
+        shot("46-fx-storm-splashes", rain)
+        val hit = RunSim.create(seed)
+        var n = 0
+        while (n++ < 60 * 60) { if (Ev.HURT in RunSim.step(hit, RunSim.TICK, Input())) break }
+        repeat(2) { RunSim.step(hit, RunSim.TICK, Input()) }
+        shot("47-fx-hit-vignette", hit, at = hit.runTime + 0.05)
+        val fast = RunSim.create(seed, goalMeters = 99_999)
+        assertTrue(stepUntil(fast, max = 60 * 900) { RunSim.speedAt(it) > 400 && it.grounded && it.bossStage == 0 && RunSim.cityStormAt(it.distance) == 0.0 })
+        shot("48-fx-speed-lines", fast)
+        val ms = RunSim.create(seed, goalMeters = 99_999)
+        assertTrue(untilEvent(ms, Ev.MILESTONE, 4) { it.meters >= 500 })
+        shot("49-milestone-banner", ms) { it.milestone(500) }
+    }
+
     @Test fun hurtAndLastHeart() {
         val s = RunSim.create(seed)
         assertTrue(stepUntil(s, bot = false) { it.hearts == 2 })
@@ -387,6 +449,13 @@ class RunShotsTest {
         val v = RunSim.create(seed)
         assertTrue(stepUntil(v) { it.announceLife > 1.2 && it.distance > 5_000 })
         shot("28-uk-village-banner", v)
+        // in-world words follow the locale too
+        val w = RunSim.create(seed, goalMeters = 99_999)
+        assertTrue(stepUntil(w, max = 60 * 900) { st -> st.pops.any { it.text == "NICE" || it.text == "GRIND" || it.text == "STOMP" } && st.pops.all { it.life > 0.25 } })
+        shot("28b-uk-pops", w)
+        val ms = RunSim.create(seed, goalMeters = 99_999)
+        assertTrue(stepUntil(ms) { it.meters >= 252 && it.grounded })
+        shot("28c-uk-milestone", ms) { it.milestone(250) }
         val c = RunSim.create(seed)
         assertTrue(stepUntil(c, max = 60 * 300) { it.clockOpen })
         repeat(20) { RunSim.step(c, RunSim.TICK, Autopilot.input(c)) }

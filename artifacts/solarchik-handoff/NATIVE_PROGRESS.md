@@ -377,3 +377,61 @@ The owner's feedback on 0.21.3 was that it felt childish, too easy and the art w
   - RunShotsTest: night city and storm (with and without lightning) are separate scenes from the boss run (`dayPhasesNightAndStorm`, `maintenanceDrone`).
 - **New tests:** `tutorialHintOnlyEarlyInTheFirstRun`, `cityStormIsASectionNotForever`.
 - The web spec (`web-city-rules.diff`) gains `cityStormAt`, `HINT_TIME` and the tutorial rule.
+
+## 0.21.6 (versionCode 71): sound, music, effects and creature life (2026-10-02)
+
+Everything stays native Kotlin (Canvas + SoundPool/MediaPlayer). No engine was added.
+
+- **Music.** There are four original looping tracks in `assets/audio/music/`. All four are ~-18 LUFS, true peak below -5 dBFS, about 1.8 MB in total.
+
+  | Track | Tempo, key | Length | Character |
+  |---|---|---|---|
+  | golden | 84 bpm, D major | 45.7 s | calm synth |
+  | night | 96 bpm, F minor | 40 s | synthwave |
+  | storm | 112 bpm, C minor | 34.3 s | tense ostinato |
+  | boss | 132 bpm, E minor | 29.1 s | driving |
+
+  - `RunSounds.trackOf` picks the track in this order: the boss theme while the maintenance drone is up (stage 1..3), then storm inside the storm line, then night when `cityMoodAt >= 1.3`, otherwise golden hour.
+  - `RunAudio` crossfades between tracks over 1.6 s (main-thread ramp), ducks to 35 % while Sol talks, and starts a new run on golden hour from the top.
+- **Effects.**
+  - There are 29 original one-shot clips in `assets/audio/sfx/` (~330 KB), played through a 10-stream SoundPool with per-clip mix gains (`RunSounds.GAIN`).
+  - Every sim event has a clip: jump, double, land, slide, coin, gold, hurt, dead, shield, stomp, near, combo, tick, start, grind, bonus, thunder, boss alarm, chapter, CLOCK IN, milestone, gust, canopy crack + shatter, cable zap, beam charge + fire, overheat, downed.
+  - Coins less than 0.5 s apart climb a major scale up to the octave (`RunSounds.coinRate`). land/near/grind are rate-limited (55 ms).
+- **Settings.** A new "Roof run sound" card has music and effects volume sliders (0..100, defaults 70/90; `GameSave.runMusicVol/runSfxVol`). Effects at 0 are silent. The in-run speaker button still mutes the music only, as on the web.
+- **Licences.** All audio is original, synthesised from code by `android/tools/run-audio/` (numpy + ffmpeg/libvorbis, fixed seeds, no samples) and dedicated CC0. See `assets/licenses/AUDIO-CREDITS.txt`. The old web `theme.ogg` is no longer shipped.
+- **Particles (`RunFx`).**
+  - A fixed 512-slot pool in flat arrays: no allocation per frame, analytic motion evaluated at run time.
+  - The sim emits into it only on city rules. Look-ahead copies and classic/web-parity runs carry no pool, and the golden traces are unchanged.
+  - Effects: landing dust, running dust at speed, coin glints + ring, a sun that flies into the HUD suns chip, canopy glass shards + dust, live-cable sparks (with crackle while warning), beam muzzle sparks and sparks along the beam, hit sparks + smoke, shield ring, overheat smoke, and the drone going down (flash, rings, embers, sparks, metal debris, smoke).
+  - Renderer-only effects: rain splashes on visible roofs during the storm, beam bloom and a warm frame tint while firing, and a red edge vignette on hits (cached shader) instead of the flat red wash.
+  - City speed lines only appear above 360 speed, only in the top and bottom bands, and never in the storm.
+- **Lighting.**
+  - Window light and neon get a screen-blended bloom from 1/8–1/10-res copies of their masks, built once at load.
+  - The far skyline draws from a 1/3-res copy for depth of field.
+  - Suns get a second wide pulsing halo.
+- **Creatures.**
+  - Mites have a walk cycle cut from the single painted sprite: the front and back leg pairs swing in opposite phase on the hip line while the shell bobs, rocks and breathes, and the eye glints.
+  - Drones tilt with their bob and the wind, with a spinning two-blade rotor, a double-blink beacon, pulsing eyes and an occasional arc.
+  - The boss has rotor blades, alternating red/green nav lights, a chasing panel strip that speeds up while charging, thruster glow, a shiver while charging and recoil when it fires.
+- **Hero and camera.** The hero leans into the run as speed climbs, on top of the existing squash/stretch. The camera lift now eases after its target, snapping only on cuts.
+- **HUD and transitions.**
+  - The score rolls up instead of jumping.
+  - The suns chip uses the same dark glass as the other chips (gold icon + digits) and pops when the flying sun lands.
+  - A "500 m" glass milestone chip drops in every 250 m (not on the goal; it replaces the in-world number).
+  - Chapter/boss banners sweep in with an overshoot.
+  - The grind/flight tags are glass chips.
+- **Haptics.**
+  - Long press: hurt, CLOCK IN, boss intro and drone down.
+  - Light tick: beam fire, canopy shatter and overheat.
+  - Jump keeps its key tap.
+  - All of them go through `performHapticFeedback`, so they follow the phone's touch-feedback setting.
+- **Localisation.**
+  - In-world words (pops, TAP, FLY, chapter banners) now go through `runLabels()`, so UK shows КЛАС/ЩИТ/ГУП!/ПЕРЕГРІВ/ДРОН ЗБИТО… in Nunito ExtraBold (Fredoka has no Cyrillic).
+  - UK "Grind" is now "Ковзання" and "GO" is now "ВПЕРЕД!".
+  - A string scan finds no other Latin text in UK run strings apart from the brand name.
+- **New sim events** (presentation cues, no effect on play): SHATTER, OVERHEAT, MILESTONE. On DOWNED the stale OVERHEAT pop is dropped.
+- **Tests.**
+  - New `RunFxAudioTest`: every event has a shipped clip, audio < 20 MB, coin ladder, music choice, pool presence and copies, dust/glint/shards/sparks/embers, milestones, a fixed-size pool.
+  - RunShotsTest gains `effects()` (40–49) and UK pops/milestone frames.
+- **Web spec.** `web-city-rules.diff` gains `MILESTONE_M`, `cityMilestone()`, `cityMusicTrack()`, the shatter/overheat events and note 16.
+- **Review exports** (box only): `/workspace/apk-test/audio-0.21.6/` holds the four tracks, all clips, an SFX montage with cue sheet (WAV + OGG) and a golden→night→storm→boss crossfade demo.

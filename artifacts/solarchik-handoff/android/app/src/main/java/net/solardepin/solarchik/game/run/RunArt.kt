@@ -42,6 +42,10 @@ class RunArt(private val assets: AssetManager) {
     val layer = arrayOfNulls<Img>(3)
     val layerLit = arrayOfNulls<Img>(3)
     val layerNeon = arrayOfNulls<Img>(3)
+    /** 0.21.6: low-res copies drawn upscaled = a cheap blur: bloom for window light / neon, depth haze for the far skyline. */
+    val layerLitGlow = arrayOfNulls<Img>(3)
+    val layerNeonGlow = arrayOfNulls<Img>(3)
+    val layerSoft = arrayOfNulls<Img>(3)
     val facade = arrayOfNulls<Img>(3)
     val facadeShader = arrayOfNulls<BitmapShader>(3)
     val facadeLitShader = arrayOfNulls<BitmapShader>(3)
@@ -166,6 +170,9 @@ class RunArt(private val assets: AssetManager) {
         return out
     }
 
+    /** A blurred copy: [div]x smaller (halving steps average properly), drawn back at full size. */
+    private fun soft(img: Img, div: Int): Img = Img(scaled(img.bmp, max(1, img.bmp.width / div), max(1, img.bmp.height / div)), img.w, img.h)
+
     private fun mask(b: Bitmap): Bitmap = b.extractAlpha().also { if (it !== b) b.recycle() }
 
     private fun maskLayer(path: String, lw: Float, k: Float): Img? {
@@ -191,6 +198,9 @@ class RunArt(private val assets: AssetManager) {
             layer[i] = maskLayer("art/city_${names[i]}.webp", LAYER_W, k)
             layerLit[i] = maskLayer("art/city_${names[i]}_lit.webp", LAYER_W, k)
             layerNeon[i] = maskLayer("art/city_${names[i]}_neon.webp", LAYER_W, k)
+            layerLitGlow[i] = layerLit[i]?.let { soft(it, 10) }
+            layerNeonGlow[i] = layerNeon[i]?.let { soft(it, 8) }
+            layerSoft[i] = if (i == 0) layer[i]?.let { soft(it, 3) } else null
         }
         val fn = arrayOf("a", "b", "c")
         for (i in 0 until 3) {

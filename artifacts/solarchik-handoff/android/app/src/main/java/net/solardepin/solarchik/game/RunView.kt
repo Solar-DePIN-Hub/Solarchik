@@ -24,7 +24,7 @@ import net.solardepin.solarchik.game.run.RunSim
 import net.solardepin.solarchik.game.run.RunSkin
 import net.solardepin.solarchik.game.run.RunSprites
 import net.solardepin.solarchik.game.run.RunState
-import net.solardepin.solarchik.game.run.RunSynth
+import net.solardepin.solarchik.game.run.RunSounds
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.ceil
 import kotlin.math.min
@@ -68,6 +68,8 @@ data class RunHud(
     val unders: Int = 0,
     /** Tutorial hint line on (first run, first [RunSim.HINT_TIME] s, until a jump and a slide). */
     val hint: Boolean = false,
+    /** Music for this moment ([RunSounds] track). */
+    val music: Int = RunSounds.GOLDEN,
 ) {
     companion object {
         fun hintOn(s: RunState) = s.tutorial && s.phase == Phase.RUNNING && !s.bonus && !s.clockOpen &&
@@ -76,9 +78,25 @@ data class RunHud(
         fun of(s: RunState) = RunHud(
             s.hearts, s.shield, Math.round(s.score).toInt(), s.meters, s.combo, s.phase, s.countdown, s.death,
             s.suns, s.maxCombo, s.bonus, s.bonusLeft, s.grind, s.didBonus, s.chapter, s.announce,
-            s.announceLife > 0, s.clockOpen, s.stomps, s.grinds, s.unders, hintOn(s),
+            s.announceLife > 0, s.clockOpen, s.stomps, s.grinds, s.unders, hintOn(s), RunSounds.trackOf(s),
         )
     }
+}
+
+/** The sim's English in-world words (pops, chapter banners, cues) -> this locale's strings. */
+fun runLabels(ctx: Context): Map<String, String> {
+    val r = ctx.resources
+    val m = HashMap<String, String>()
+    fun put(k: String, id: Int) { m[k] = r.getString(id) }
+    put("SHIELD", R.string.run_pop_shield); put("GRIND", R.string.run_pop_grind); put("NICE", R.string.run_pop_nice)
+    put("GUST", R.string.run_pop_gust); put("OVERHEAT", R.string.run_pop_overheat); put("DRONE DOWN", R.string.run_pop_drone_down)
+    put("SERPENT", R.string.run_pop_serpent); put("BACK TO ROOFS", R.string.run_pop_back); put("FLY GATE", R.string.run_pop_fly_gate)
+    put("FLY!", R.string.run_pop_fly_go); put("STOMP", R.string.run_pop_stomp); put("SLIDE", R.string.run_pop_slide)
+    put("CLOSE", R.string.run_pop_close); put("UNDER", R.string.run_pop_under); put("CLEAN", R.string.run_pop_clean)
+    put("+SUN", R.string.run_pop_sun); put("HEAT", R.string.run_pop_heat); put("TAP", R.string.run_pop_tap); put("FLY", R.string.run_pop_fly)
+    for (ch in RunSim.CHAPTERS) m[ch.banner] = r.getString(RunOverlay.bannerRes(ch.id))
+    m[RunSim.BOSS_BANNER] = r.getString(R.string.run_boss_banner)
+    return m
 }
 
 /** End of a run (the last heart lost). CLOCK IN at the goal does not end the run. */
@@ -114,13 +132,19 @@ class RunView(context: Context, private val listener: Listener? = null) :
     @Volatile private var setup: RunSetup? = null
     private val restartReq = AtomicBoolean(true)
     var audio: RunAudio? = null
+    /** UI -> game: the HUD suns chip centre (fractions of the view), where collected suns fly. */
+    @Volatile var sunTargetX = 0.28
+    @Volatile var sunTargetY = 0.083
 
     // ---- game thread only ----
     private var state: RunState? = null
     private val sprites by lazy { RunSprites(context.assets) }
     private val renderer by lazy {
-        RunRenderer(sprites, font(R.font.nunito_bold), font(R.font.fredoka_semibold)).also {
+        val uk = context.resources.configuration.locales[0].language == "uk"
+        // Fredoka has no Cyrillic: Ukrainian in-world text uses the rounded Nunito ExtraBold
+        RunRenderer(sprites, font(R.font.nunito_bold), font(if (uk) R.font.nunito_extrabold else R.font.fredoka_semibold)).also {
             it.reducedMotion = reducedMotion()
+            it.labels = runLabels(context)
         }
     }
     private var reported = false
@@ -294,7 +318,7 @@ class RunView(context: Context, private val listener: Listener? = null) :
                 if (hudAcc > 0.12) {
                     hudAcc = 0.0
                     val cd = if (s.phase == Phase.COUNTDOWN) (if (s.countdown > 0.28) ceil(s.countdown).toInt() else 0) else -1
-                    val key = "${s.phase}|${s.hearts}|${s.shield}|${Math.round(s.score)}|${s.combo}|${(s.distance / 8).toInt()}|${s.bonus}|${s.clockOpen}|$cd|${s.announceLife > 0}|${s.grind}|${s.bonusLeft.toInt()}|${RunHud.hintOn(s)}"
+                    val key = "${s.phase}|${s.hearts}|${s.shield}|${Math.round(s.score)}|${s.combo}|${(s.distance / 8).toInt()}|${s.bonus}|${s.clockOpen}|$cd|${s.announceLife > 0}|${s.grind}|${s.bonusLeft.toInt()}|${RunHud.hintOn(s)}|${RunSounds.trackOf(s)}"
                     if (key != hudKey) {
                         hudKey = key
                         val hud = RunHud.of(s)
@@ -314,7 +338,11 @@ class RunView(context: Context, private val listener: Listener? = null) :
                 continue
             }
             try {
-                if (s != null) renderer.draw(canvas, canvas.width, canvas.height, s, now / 1e9)
+                if (s != null) {
+                    renderer.sunTargetX = sunTargetX
+                    renderer.sunTargetY = sunTargetY
+                    renderer.draw(canvas, canvas.width, canvas.height, s, now / 1e9)
+                }
             } finally {
                 holder.unlockCanvasAndPost(canvas)
             }
@@ -326,7 +354,7 @@ class RunView(context: Context, private val listener: Listener? = null) :
     private fun afterStep(s: RunState, events: List<Ev>) {
         if (events.isNotEmpty()) {
             val a = audio
-            if (a != null) for (ev in events) a.play(RunSynth.soundOf(ev))
+            a?.onEvents(events)
             val hud = RunHud.of(s)
             val copy = ArrayList(events)
             post { listener?.onEvents(copy, hud) }

@@ -10,6 +10,7 @@ import android.provider.Settings
 import android.view.View
 import android.widget.CompoundButton
 import android.widget.LinearLayout
+import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import kotlinx.coroutines.delay
@@ -81,6 +82,12 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             }
         })
 
+        addView(section(R.string.settings_run_sound, R.drawable.ic_run_volume, Ui.CYAN).apply {
+            addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.settings_run_sound_body)), 8))
+            addView(Ui.top(volumeRow(R.string.settings_run_music, host.save.runMusicVol) { host.save.runMusicVol = it }, 12))
+            addView(Ui.top(volumeRow(R.string.settings_run_sfx, host.save.runSfxVol) { host.save.runSfxVol = it }, 8))
+        })
+
         addView(section(R.string.settings_language, R.drawable.ic_nav_yard, Ui.GREEN).apply {
             addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.settings_language_body)), 8))
             if (Build.VERSION.SDK_INT >= 33) {
@@ -103,6 +110,30 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         else r.addView(Ui.image(ctx, icon), LinearLayout.LayoutParams(dp(36), dp(36)))
         r.addView(Ui.weight(Ui.h2(ctx, ctx.getString(title))))
         addView(r)
+    }
+
+    /** A labelled 0..100 slider with its value on the right. */
+    private fun volumeRow(label: Int, value: Int, set: (Int) -> Unit): View {
+        val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        val head = Ui.row(ctx)
+        head.addView(Ui.weight(Ui.body(ctx, ctx.getString(label))))
+        val num = Ui.text(ctx, String.format(java.util.Locale.ROOT, "%d", value), 14f, Ui.GOLD, 800)
+        head.addView(num)
+        box.addView(head)
+        val bar = SeekBar(ctx).apply {
+            max = 100
+            progress = value
+            contentDescription = ctx.getString(label)
+            progressTintList = android.content.res.ColorStateList.valueOf(Ui.GOLD)
+            thumbTintList = android.content.res.ColorStateList.valueOf(Ui.GOLD)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) { num.text = String.format(java.util.Locale.ROOT, "%d", p); if (fromUser) set(p) }
+                override fun onStartTrackingTouch(sb: SeekBar) {}
+                override fun onStopTrackingTouch(sb: SeekBar) { set(sb.progress) }
+            })
+        }
+        box.addView(Ui.top(bar, 4))
+        return box
     }
 
     private fun switchRow(label: String, on: Boolean, cb: (CompoundButton, Boolean) -> Unit): View {

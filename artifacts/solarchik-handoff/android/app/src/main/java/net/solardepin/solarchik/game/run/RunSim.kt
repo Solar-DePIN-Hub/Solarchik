@@ -38,6 +38,8 @@ enum class Ev {
     GRIND, BONUS, THUNDER, BOSS, CHAPTER, CLOCK,
     // city rules
     GUST, CRACK, ZAP, CHARGE, BEAM, DOWNED,
+    // native 0.21.6 (sound/FX cues; no effect on play)
+    SHATTER, OVERHEAT, MILESTONE,
 }
 
 enum class ChapterId { SUNRISE, VILLAGE, STORM, NIGHT, SERPENT }
@@ -170,6 +172,10 @@ class RunState(val seed: Int, val mod: DayMod, val goalMeters: Int) {
     var clockOpen = false
     /** Seconds spent in RUNNING (drives the ghost tape). */
     var runTime = 0.0
+    /** City effect particles (0.21.6, presentation only). Null in look-ahead copies and classic runs. */
+    var fx: RunFx? = null
+    /** Next city distance milestone (m), every [RunSim.MILESTONE_M]. */
+    var nextMilestone = 250
     val ghost = ArrayList<GhostSample>()
     /** Native stats for daily quests (not in the web state; no effect on play). */
     var grinds = 0
@@ -217,6 +223,8 @@ object RunSim {
 
     const val BOSS_BANNER = "MAINTENANCE DRONE"
     /** The tutorial hint line shows this long into the first run (then fades), or until a jump and a slide. */
+    /** City milestone spacing (m): a chime and a pop, not a gameplay change. */
+    const val MILESTONE_M = 250
     const val HINT_TIME = 4.5
 
     const val GRAVITY_UP = 1480.0
@@ -646,6 +654,16 @@ object RunSim {
                 if (p.crackT >= CRACK_TIME) {
                     p.fallen = true
                     emit(s.particles, p.x + p.w * 0.5, p.y, 14, C_LAND, 160.0, 160.0)
+                    events.add(Ev.SHATTER)
+                    s.fx?.let { f ->
+                        val n = (p.w / 9).toInt().coerceIn(12, 30)
+                        for (k in 0 until n) {
+                            val px = p.x + p.w * (k + 0.5) / n
+                            f.burst(RunFx.Kind.SHARD, px, p.y - 4, 1, 60.0, 260.0, 1.1, 10.0, RunFx.C_GLASS, -PI / 2, 1.3, 1100.0)
+                        }
+                        f.burst(RunFx.Kind.GLINT, p.x + p.w * 0.5, p.y - 6, 8, 80.0, 200.0, 0.4, 5.0, RunFx.C_GLASS)
+                        for (k in 0 until 4) f.burst(RunFx.Kind.DUST, p.x + p.w * (k + 0.5) / 4, p.y, 1, 20.0, 60.0, 0.8, 9.0, RunFx.C_DUST, -PI / 2, 1.0, -30.0)
+                    }
                 }
             }
         }
@@ -655,6 +673,25 @@ object RunSim {
             if (wire != null && wireLive(s, wire) == 2) {
                 events.add(Ev.ZAP)
                 loseHeart(s, events, DeathKind.HIT)
+                s.fx?.burst(RunFx.Kind.SPARK, s.x, s.y, 16, 150.0, 360.0, 0.4, 1.3, RunFx.C_ZAP, -PI / 2, 1.4, 900.0)
+            }
+        }
+        s.fx?.let { f ->
+            if (f.t >= f.nextSpark) {
+                f.nextSpark = f.t + 0.05
+                for (p in s.plats) {
+                    if (p.kind != PlatKind.WIRE || p.x > s.x + 760 || p.x + p.w < s.x - 260) continue
+                    val live = wireLive(s, p)
+                    if (live == 0 || (live == 1 && fx() > 0.35)) continue
+                    val px = p.x + fx() * p.w
+                    f.burst(RunFx.Kind.SPARK, px, p.y, if (live == 2) 5 else 1, 80.0, 260.0, 0.36, 1.3, if (live == 2) RunFx.C_ZAP else RunFx.C_SPARK, -PI / 2, 1.3, 900.0)
+                    if (live == 2) f.add(RunFx.Kind.GLINT, px, p.y, 0.0, 0.0, 0.14, 14.0, RunFx.C_ZAP)
+                }
+            }
+            // running dust on fast roofs
+            if (s.grounded && !s.grind && speedAt(s) > 300 && f.t >= f.nextDust) {
+                f.nextDust = f.t + 0.11
+                f.add(RunFx.Kind.DUST, s.x - 10, s.y - 2, -60.0 - fx() * 40, -20.0 - fx() * 20, 0.38, 3.5 + fx() * 2, RunFx.C_DUST, -20.0)
             }
         }
         // wind gusts: a warning, then a headwind with a downdraft (not during the boss)
@@ -714,9 +751,21 @@ object RunSim {
                         s.bossBeam = BOSS_BEAM
                         s.shake = min(1.0, s.shake + 0.35)
                         events.add(Ev.BEAM)
+                        s.fx?.let { f ->
+                            val lane = if (s.bossLane == 0) BEAM_LOW else BEAM_HIGH
+                            f.burst(RunFx.Kind.SPARK, s.bossX - 34, y0 + (lane[0] + lane[1]) / 2, 14, 120.0, 320.0, 0.35, 1.3, RunFx.C_SPARK, PI, 1.0, 600.0)
+                            f.add(RunFx.Kind.RING, s.bossX - 34, y0 + (lane[0] + lane[1]) / 2, 200.0, 0.0, 0.3, 6.0, RunFx.C_EMBER)
+                        }
                     }
                 } else if (s.bossBeam > 0) {
                     val bb = beamBox(s)
+                    val f = s.fx
+                    if (f != null && bb != null && f.t >= f.nextBeam) {
+                        f.nextBeam = f.t + 0.035
+                        val py = (bb.t + bb.b) / 2
+                        val px = bb.l + 120 + fx() * (bb.r - bb.l - 120)
+                        f.burst(RunFx.Kind.SPARK, px, py + (fx() - 0.5) * 10, 2, 60.0, 200.0, 0.3, 1.0, RunFx.C_SPARK, -PI / 2, 1.4, 700.0)
+                    }
                     if (bb != null && s.invuln <= 0 && aabb(playerBox(s), bb)) {
                         s.bossHit = true
                         loseHeart(s, events, DeathKind.HIT)
@@ -729,6 +778,11 @@ object RunSim {
                             s.bossStage = 3
                             s.bossT = 0.0
                             s.pops.add(Pop(s.bossX, y0 - 140, "OVERHEAT", 1.0))
+                            events.add(Ev.OVERHEAT)
+                            s.fx?.let { f ->
+                                f.burst(RunFx.Kind.SMOKE, s.bossX, s.bossY - 20, 6, 30.0, 80.0, 1.0, 14.0, RunFx.C_SMOKE, -PI / 2, 0.7, -80.0)
+                                f.burst(RunFx.Kind.SPARK, s.bossX, s.bossY - 10, 10, 120.0, 300.0, 0.4, 1.2, RunFx.C_SPARK, -PI / 2, PI, 800.0)
+                            }
                         } else {
                             s.bossRest = if (s.bossShots >= 2 && chance(s, 0.35)) 0.18 else BOSS_REST
                         }
@@ -753,9 +807,22 @@ object RunSim {
                     s.score += 250
                     s.stomps += 1
                     events.add(Ev.DOWNED)
+                    s.pops.removeAll { it.text == "OVERHEAT" }
                     s.pops.add(Pop(s.bossX, s.bossY - 60, "DRONE DOWN", 1.2))
                     emit(s.particles, s.bossX, s.bossY - 10, 26, C_DRONE, 300.0, 260.0)
                     emitRing(s.particles, s.bossX, s.bossY - 10, C_RING)
+                    s.fx?.let { f ->
+                        val bx = s.bossX
+                        val by = s.bossY - 14
+                        f.add(RunFx.Kind.RING, bx, by, 420.0, 0.0, 0.5, 12.0, RunFx.C_EMBER)
+                        f.add(RunFx.Kind.RING, bx, by, 260.0, 0.0, 0.7, 8.0, RunFx.C_GLINT)
+                        f.add(RunFx.Kind.GLINT, bx, by, 0.0, 0.0, 0.35, 130.0, RunFx.C_GLINT)
+                        f.add(RunFx.Kind.GLINT, bx, by, 0.0, 0.0, 0.6, 80.0, RunFx.C_EMBER)
+                        f.burst(RunFx.Kind.EMBER, bx, by, 40, 140.0, 460.0, 1.0, 4.5, RunFx.C_EMBER, -PI / 2, PI, 520.0)
+                        f.burst(RunFx.Kind.SPARK, bx, by, 26, 220.0, 520.0, 0.5, 1.6, RunFx.C_SPARK, -PI / 2, PI, 700.0)
+                        f.burst(RunFx.Kind.METAL, bx, by, 12, 140.0, 340.0, 1.4, 11.0, RunFx.C_METAL, -PI / 2, 1.2, 1000.0)
+                        f.burst(RunFx.Kind.SMOKE, bx, by, 12, 30.0, 120.0, 1.6, 24.0, RunFx.C_SMOKE, -PI / 2, PI, -70.0)
+                    }
                     for (k in 0 until 5) s.picks.add(Pick(s.bossX + 60 + k * 34, y0 - 70 - (k % 2) * 20, gold = true, shield = false))
                     s.bossStage = 4
                     s.bossT = 0.0
@@ -865,6 +932,7 @@ object RunSim {
     fun create(seed: Int, mod: DayMod = DayMod.CALM, offerBonus: Boolean = false, careBoost: Boolean = false, goalMeters: Int = 1200, classic: Boolean = false): RunState {
         val s = RunState(seed, mod, goalMeters)
         s.classic = classic
+        if (!classic) s.fx = RunFx()
         if (careBoost) s.shield = 1
         addPlat(s, 0.0, BANDS[1], 420.0)
         addEnemy(s, EnemyKind.MITE, 300.0, BANDS[1])
@@ -933,6 +1001,10 @@ object RunSim {
             s.flash = 0.28
             events.add(Ev.SHIELD)
             emit(s.particles, s.x, s.y - 30, 16, C_SHIELD, 240.0, 200.0)
+            s.fx?.let { f ->
+                f.add(RunFx.Kind.RING, s.x, s.y - 30, 240.0, 0.0, 0.4, 7.0, RunFx.C_ZAP)
+                f.burst(RunFx.Kind.GLINT, s.x, s.y - 30, 8, 120.0, 240.0, 0.4, 5.0, RunFx.C_ZAP)
+            }
             s.pops.add(Pop(s.x, s.y - 80, "SHIELD", 0.55))
             return
         }
@@ -944,6 +1016,10 @@ object RunSim {
         s.hitstop = if (hit) 0.05 else 0.03
         events.add(Ev.HURT)
         emit(s.particles, s.x, s.y - 30, 18, if (hit) C_HIT else C_FALL, 260.0, 220.0)
+        if (hit) s.fx?.let { f ->
+            f.burst(RunFx.Kind.SPARK, s.x, s.y - 30, 14, 160.0, 380.0, 0.35, 1.2, RunFx.C_HIT, -PI / 2, PI, 700.0)
+            f.burst(RunFx.Kind.SMOKE, s.x, s.y - 30, 3, 20.0, 50.0, 0.7, 10.0, RunFx.C_SMOKE, -PI / 2, 0.8, -60.0)
+        }
         if (hit) {
             s.grounded = false
             s.vy = -360.0
@@ -1104,6 +1180,7 @@ object RunSim {
         s.distance = s.x
         s.runPhase += dt * (if (s.grounded) 6.4 + spd * 0.006 else 3.0)
         s.runTime += dt
+        s.fx?.t = s.runTime
         val want = (s.runTime / GHOST_DT).toInt()
         if (s.ghost.size <= want && s.ghost.size < GHOST_MAX) s.ghost.add(GhostSample(s.x, s.y, s.grounded))
 
@@ -1125,6 +1202,14 @@ object RunSim {
                 s.announceLife = 0.0
                 s.pops.add(Pop(s.x, s.y - 88, s.goalMeters.toString(), 0.7))
                 events.add(Ev.CLOCK)
+            }
+            if (!s.classic && s.distance / 10 >= s.nextMilestone) {
+                val m = s.nextMilestone
+                s.nextMilestone += MILESTONE_M
+                if (m != s.goalMeters) {
+                    events.add(Ev.MILESTONE) // the HUD shows the banner (RunHud.meters)
+                    s.fx?.let { f -> f.add(RunFx.Kind.RING, s.x, s.y - 30, 260.0, 0.0, 0.45, 8.0, RunFx.C_GLINT) }
+                }
             }
         }
 
@@ -1276,6 +1361,13 @@ object RunSim {
                     if (wire) s.grinds += 1
                     emit(s.particles, s.x, s.y, 8, if (wire) C_SHIELD else C_LAND, 80.0, 90.0)
                     emitRing(s.particles, s.x, s.y, if (wire) C_SHIELD else C_LAND_RING)
+                    s.fx?.let { f ->
+                        if (wire) f.burst(RunFx.Kind.SPARK, s.x, s.y, 8, 120.0, 280.0, 0.32, 1.1, RunFx.C_ZAP, -PI / 2, 1.2, 900.0)
+                        else {
+                            f.burst(RunFx.Kind.DUST, s.x - 10, s.y - 4, 6, 60.0, 150.0, 0.6, 12.0, RunFx.C_DUST, PI, 0.4, -50.0)
+                            f.burst(RunFx.Kind.DUST, s.x + 10, s.y - 4, 5, 50.0, 130.0, 0.55, 11.0, RunFx.C_DUST, 0.0, 0.4, -50.0)
+                        }
+                    }
                     if (wire) {
                         s.score += 40
                         s.pops.add(Pop(s.x, s.y - 70, "GRIND", 0.6))
@@ -1334,6 +1426,12 @@ object RunSim {
                     s.score += Math.round((if (pick.gold) 40 else 16) * mult).toDouble()
                     s.pops.add(Pop(s.x, s.y - 72, if (pick.gold) "+SUN" else "+1", 0.55))
                     events.add(if (pick.gold) Ev.GOLD else Ev.COLLECT)
+                    s.fx?.let { f ->
+                        val col = if (pick.shield) RunFx.C_ZAP else RunFx.C_GLINT
+                        f.burst(RunFx.Kind.GLINT, pick.x, pick.y, if (pick.gold) 9 else 6, 70.0, 180.0, 0.42, if (pick.gold) 7.0 else 5.5, col)
+                        f.add(RunFx.Kind.RING, pick.x, pick.y, 150.0, 0.0, 0.28, 5.0, col)
+                        if (!pick.shield) f.add(RunFx.Kind.FLY, pick.x, pick.y, 0.0, 0.0, 0.55, if (pick.gold) 1.2 else 1.0, col)
+                    }
                     if (s.combo == 4 || s.combo == 8 || s.combo == 12) {
                         events.add(Ev.COMBO)
                         s.fever = 1.4
