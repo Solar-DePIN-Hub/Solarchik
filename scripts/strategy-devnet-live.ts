@@ -24,7 +24,8 @@ import { proofMessage, type ProofAction } from "../src/lib/agents/wallet-proof.t
 import { encodeBase58 } from "../src/lib/agents/base58.ts";
 import { PAY_WALLET } from "../src/lib/game/pay.ts";
 import * as S from "../src/lib/agents/strategy.server.ts";
-import { specFromAttrs, perfFromAttrs, specHash, validateSpec } from "../src/lib/agents/strategy-spec.ts";
+import { specFromAttrs, perfFromAttrs, specHash, validateSpec, verifyPerf } from "../src/lib/agents/strategy-spec.ts";
+import { faucetDrip, FAUCET_DEFAULTS } from "../src/lib/agents/faucet.server.ts";
 import { closePosition, openPosition, type PositionDeps } from "../src/lib/agents/positions-ledger.server.ts";
 import { fetchCoreAgent } from "../src/lib/agents/core-owned.server.ts";
 import nacl from "tweetnacl";
@@ -186,7 +187,13 @@ const sync = await S.syncAsset(env, asset);
 log("5 sync", sync.ok ? { perfSig: sync.perfSig, thawSig: sync.thawSig, perf: sync.perf && { trades: sync.perf.trades, realizedSol: sync.perf.realizedSol, winRatePct: sync.perf.winRatePct, apr7: sync.perf.apr7, apr30: sync.perf.apr30, aprSince: sync.perf.aprSince } } : sync);
 const c5 = await chain(asset);
 log("5 chain results", c5.perf);
-log("5 info", await S.strategyInfo(env, asset).then((i) => (i.ok ? { history: i.history, sales: i.sales.length, listing: i.listing?.status } : i)));
+const info5 = await S.strategyInfo(env, asset);
+log("5 info", info5.ok ? { history: info5.history, sales: info5.sales, listing: info5.listing?.status, perfWrite: info5.perfWrite, versions: info5.versions.map((x) => x.sig), records: info5.records.length } : info5);
+// Judge check: recompute APR from the listed records at the on-chain write time (what the Verify panel does).
+if (info5.ok && info5.chain && info5.perf) {
+  const v5 = verifyPerf(info5.records, info5.chain.changedSec, info5.perf);
+  log("5 judge verify", { ok: v5.ok, mismatches: v5.mismatches, recomputed: { trades: v5.recomputed.trades, aprSince: v5.recomputed.aprSince, apr7: v5.recomputed.apr7 }, onChain: info5.perf });
+}
 // 6. the new owner changes the strategy -> lock resets under the server; after 240 h the server thaws
 const v3 = { ...v.spec, takePct: 90 };
 const p3 = await S.prepareStrategy(env, { proof: proof(buyer, "strategy", S.strategyExtra(asset, v3)), asset, spec: v3 });
@@ -200,4 +207,18 @@ const s6 = await S.syncAsset(env, asset);
 log("6 sync after lock", s6.ok ? { thawSig: s6.thawSig, perfSig: s6.perfSig } : s6);
 const c7 = await chain(asset);
 log("6 chain after thaw", { freeze: c7.freeze, transferDelegate: c7.transferDelegate });
+// 7. judge faucet: a fresh wallet gets one drip from the server faucet wallet; a second ask the same day is refused.
+{
+  const { SystemProgram, Transaction, sendAndConfirmTransaction } = await import("@solana/web3.js");
+  const judge = Keypair.generate();
+  const fdeps = {
+    sql, rpcUrl: RPC, now: Date.now(), caps: { ...FAUCET_DEFAULTS, dripLamports: 50_000_000 }, faucet: authority,
+    balance: (w: string) => conn.getBalance(new PublicKey(w)),
+    send: (to: string, lamports: number) => sendAndConfirmTransaction(conn, new Transaction().add(SystemProgram.transfer({ fromPubkey: authority.publicKey, toPubkey: new PublicKey(to), lamports })), [authority], { commitment: "confirmed" }),
+  };
+  const sign = (ts: number) => ({ wallet: judge.publicKey.toBase58(), ts, sig: encodeBase58(nacl.sign.detached(new TextEncoder().encode(proofMessage("faucet", judge.publicKey.toBase58(), ts, "devnet")), judge.secretKey)) });
+  const first = await faucetDrip(fdeps as never, { proof: sign(Date.now()), ip: "live" });
+  const again = await faucetDrip({ ...fdeps, now: Date.now() + 1 } as never, { proof: sign(Date.now() + 1), ip: "live" });
+  log("7 faucet", { judge: judge.publicKey.toBase58(), first, again, balance: await conn.getBalance(judge.publicKey) });
+}
 console.log("\nJSON", JSON.stringify(out));
