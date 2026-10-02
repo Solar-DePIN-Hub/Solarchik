@@ -25,11 +25,21 @@
 - STEP 21. Secretary worker (`worker/solarchik-screen.js`): `/sip` and `/openai-webhook` check the Standard Webhooks signature with `OPENAI_WEBHOOK_SECRET` (enforced once the secret is set); `/expect`, `/voicemail`, `/phone` need `Authorization: Bearer <SECRETARY_TOKEN>`; incoming calls identify the player from SIP Diversion / History-Info / To (Zadarma +380914810885 → owner account via `OWNER_USER_ID`, other numbers via `/phone`), bill $0.20 per answered call, write the inbox line and let the realtime model save the call note through the per-call `/mcp` tool. See `worker/DEPLOY.md`.
 - STEP 10. Desk token: no literal in source. Server code uses `DESK_TOKEN` env. Browser/native code calls `/api/desk/grok|titan` (`server/middleware/desk-proxy.ts`), which adds the token, POST only, 64 KB, same origin or `DESK_PROXY_ORIGINS`, 30/min per IP per instance. `/api/poly` is server-only. Without `DESK_TOKEN` the proxy answers 503.
 
+- STEP 22. Strategy NFTs (devnet). `strategy-spec.ts` (shared, pure), `strategy-chain.server.ts`, `strategy-ledger.server.ts`, `strategy.server.ts`, `faucet.server.ts`, `migrations/0006_strategy_market.sql`, UI `src/components/work/strategy-chain.tsx`, Android `agents/StrategyMarket.kt` + `ui/StrategyPanel.kt`.
+  - Strategy on chain: lanes, windows, risk, stake 0.005–0.02, price band, edge, stop %, take %, rules DSL (`allow|deny [yes|no] if price|hour|window|lane|stake op value`, ≤ 6 rules, ≤ 160 chars) + version, sha256 hash (`sh`), lastChangedAt (`sc`), unlock (`su`) in Core Attributes with authority UpdateAuthority (server key). New mints use that; legacy server-collection assets switch on their first strategy save (owner-signed approve). The owner cannot write APR.
+  - Trades must follow it: `openPosition` refuses a trade off the on-chain spec (lane, window, price band, stake, rules) or with a broken hash and stamps `strategy_hash`; the web engine applies the same gate.
+  - Results: the server computes trades, win rate, realized PnL and APR 7d / 30d / since change from `agent_positions` (APR = PnL / largest stake × 365 / days × 100, window ≥ 1 day, only trades opened after the change), writes them into the attributes (`rn rw rpnl a7 a30 apr pu` + lifetime `jobs wins losses pnl`) after a close and in the daily cron (`17 3 * * *` → `/api/native/strategy-sync`, Bearer `CRON_SECRET`), with stop/take sweeps.
+  - Sale lock: 240 h from lastChangedAt (`SALE_LOCK_HOURS`), enforced on chain by FreezeDelegate (server authority); the server thaws after the lock. The old 480 h live-work gate (`listEligible`) stays for legacy assets only.
+  - Market: list = freeze + TransferDelegate to the server (escrow); buy = one tx (buyer → seller 95%, → treasury 5%, server thaw + transfer); unlist = server thaw; no strategy change while listed; broken escrows are cancelled.
+  - Judges: every card links to Solana Explorer (devnet) for the asset, Core attributes, strategy-change, results-write, sale and fee txs; "Verify APR" recomputes in the browser/phone from the listed trade records at the on-chain write time `pu` and shows match or the mismatches. Browser trades are labelled simulated. One-tap devnet SOL: public airdrop, then `faucet-drip` (server faucet wallet; one drip per wallet per UTC day, per-IP and daily caps, refuses funded wallets and mainnet RPCs).
+
 ## Env vars (see `.env.example`)
 
 - `DATABASE_URL` — Neon/Postgres. Needed for arb, arb credit, fee verification, Pro payment checks and mint slots. Migrations run in `npm run build` (new: `0004_payments.sql`, `0005_positions.sql`).
 - `MINT_AUTHORITY_SECRET` — devnet mint authority (base58). Needed for Pro, for Free without a DB, and for re-issue on deploys. When set, arb only accepts server-collection agents. Needs no SOL.
-- No new env vars in round 4.
+- `CRON_SECRET` — Bearer for the daily strategy results job (Vercel cron sends it).
+- `FAUCET_SECRET` — devnet faucet wallet for judges (falls back to `MINT_AUTHORITY_SECRET`); fund it with devnet SOL. Optional `FAUCET_DRIP_SOL` (0.2), `FAUCET_DAILY_SOL` (5), `FAUCET_PER_IP` (3).
+- `MINT_AUTHORITY_SECRET` now also pays (devnet) for results writes, thaws and unlists: keep ~0.5 devnet SOL on it.
 - `ARB_HOUSE_KEY`, `BACKPACK_API_KEY`, `BACKPACK_SECRET`, `TITAN_SECRET` — mainnet arb house secrets.
 - `ARB_MAINNET_ENABLED` — `true` to allow real mainnet arb. Leave unset for simulation.
 - `DESK_TOKEN` — same value as the desk worker secret. Rotate it: the old literal is in git history.
