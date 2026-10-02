@@ -3455,7 +3455,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
             sol: next ?? s.sol,
             solKnown: next != null,
             solMiss: next == null,
-            notice: `Кран сервера надіслав ${(r.lamports / 1e9).toFixed(3)} SOL · ${r.sig.slice(0, 8)}…`,
+            notice: `${r.via === "airdrop" ? "Devnet-airdrop надіслав" : "Кран сервера надіслав"} ${(r.lamports / 1e9).toFixed(3)} SOL · ${r.sig.slice(0, 8)}…`,
             log: pushLog(s.log, { id: r.sig, at: Date.now(), kind: "system", text: `Кран сервера ${(r.lamports / 1e9).toFixed(3)} SOL · ${r.sig}` }),
           }));
           get().persist();

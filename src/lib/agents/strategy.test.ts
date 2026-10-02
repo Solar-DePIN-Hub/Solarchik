@@ -36,7 +36,7 @@ import {
   explorerUrl,
   type StrategySpec,
 } from "./strategy-spec.ts";
-import { faucetDrip, FAUCET_DEFAULTS, isDevnetRpc, type FaucetDeps } from "./faucet.server.ts";
+import { faucetDrip, FAUCET_DEFAULTS, FAUCET_EMPTY_REASON, isDevnetRpc, type FaucetDeps } from "./faucet.server.ts";
 import { proofMessage } from "./wallet-proof.ts";
 import { encodeBase58 } from "./base58.ts";
 import { buildBuyTx, buildListTx, buildStrategyTxs, coreState, thawBuilder, txSize } from "./strategy-chain.server.ts";
@@ -547,7 +547,7 @@ describe("judge faucet (devnet fallback, rate-limited)", () => {
     assert.ok(!rich.ok && /досить/.test(rich.reason));
     const failing = Keypair.generate();
     const bad = await faucetDrip(deps({ send: async () => { throw new Error("insufficient lamports"); } }), { proof: proofFor(failing, now0), ip: "ip1" });
-    assert.ok(!bad.ok && /скінчились/.test(bad.reason));
+    assert.ok(!bad.ok && /порожній/.test(bad.reason) && /faucet\.solana\.com/.test(bad.reason));
     assert.ok((await faucetDrip(deps(), { proof: proofFor(failing, now0 + 2), ip: "ip1" })).ok, "slot freed after the failed send");
     const ipCap = await faucetDrip(deps(), { proof: proofFor(Keypair.generate(), now0), ip: "ip1" });
     assert.ok(!ipCap.ok && /мережі/.test(ipCap.reason));
@@ -555,6 +555,28 @@ describe("judge faucet (devnet fallback, rate-limited)", () => {
     const dayCap = await faucetDrip(deps(), { proof: proofFor(Keypair.generate(), now0), ip: "ip4" });
     assert.ok(!dayCap.ok && /вичерпано/.test(dayCap.reason));
     assert.equal(sent.length, 3);
+  });
+  it("empty faucet wallet: devnet airdrop for the user, refill request, clear message when that fails too", async () => {
+    sent = [];
+    const drops: string[] = [];
+    let refills = 0;
+    const roomy = { caps: { ...FAUCET_DEFAULTS, dailyLamports: 100e9 } };
+    const low = { ...roomy, faucetBalance: async () => 50_000_000, refillFaucet: async () => { refills++; } };
+    const w = Keypair.generate();
+    const r = await faucetDrip(deps({ ...low, airdrop: async (to) => { drops.push(to); return "dropSig"; } }), { proof: proofFor(w, now0), ip: "a1" });
+    assert.ok(r.ok && r.via === "airdrop" && r.sig === "dropSig");
+    assert.deepEqual(drops, [w.publicKey.toBase58()]);
+    assert.equal(sent.length, 0, "empty faucet wallet never tries the transfer");
+    assert.equal(refills, 1);
+    const w2 = Keypair.generate();
+    const dry = await faucetDrip(deps({ ...low, airdrop: async () => { throw new Error("429 Too Many Requests"); } }), { proof: proofFor(w2, now0), ip: "a2" });
+    assert.ok(!dry.ok && dry.reason === FAUCET_EMPTY_REASON);
+    assert.ok((await faucetDrip(deps(roomy), { proof: proofFor(w2, now0 + 3), ip: "a2" })).ok, "slot freed after the failed airdrop");
+    // Healthy faucet that dips under the refill line after a drip asks devnet for a refill, still drips itself.
+    const before = refills;
+    const ok = await faucetDrip(deps({ ...roomy, faucetBalance: async () => 1_100_000_000, refillFaucet: low.refillFaucet }), { proof: proofFor(Keypair.generate(), now0), ip: "a3" });
+    assert.ok(ok.ok && ok.via === "faucet");
+    assert.equal(refills, before + 1);
   });
 });
 

@@ -28,9 +28,21 @@ export type FaucetDeps = {
   faucet: Keypair | null;
   balance: (wallet: string) => Promise<number>;
   send: (to: string, lamports: number) => Promise<string>;
+  /** Faucet wallet balance (lamports). Optional: without it the low-balance fallback is skipped. */
+  faucetBalance?: () => Promise<number>;
+  /** Devnet requestAirdrop + confirm. Used when the faucet wallet is (nearly) empty. */
+  airdrop?: (to: string, lamports: number) => Promise<string>;
+  /** Best-effort refill of the faucet wallet itself when it runs low (never blocks a drip). */
+  refillFaucet?: () => Promise<unknown>;
 };
 
-export type FaucetResult = { ok: true; sig: string; lamports: number } | { ok: false; reason: string };
+/** Below this the faucet wallet asks devnet for a refill after a drip. */
+export const FAUCET_REFILL_BELOW = 1_000_000_000;
+const FEE_LAMPORTS = 10_000;
+export const FAUCET_EMPTY_REASON =
+  "Кран сервера порожній, а devnet-airdrop зараз обмежений. Спробуй пізніше або візьми SOL на faucet.solana.com.";
+
+export type FaucetResult = { ok: true; sig: string; lamports: number; via?: "faucet" | "airdrop" } | { ok: false; reason: string };
 
 export const utcDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
@@ -61,14 +73,45 @@ export async function faucetDrip(deps: FaucetDeps, input: { proof: WalletProof |
     [wallet, day, ip, deps.caps.dripLamports, deps.now],
   );
   if (!won.length) return { ok: false, reason: "Цей гаманець уже отримав SOL сьогодні." };
+  const drip = deps.caps.dripLamports;
+  const record = (sig: string) => deps.sql!.query("update faucet_drips set sig = $3 where wallet = $1 and day = $2", [wallet, day, sig]);
+  const release = () => deps.sql!.query("delete from faucet_drips where wallet = $1 and day = $2 and sig is null", [wallet, day]);
+  // Faucet wallet (nearly) empty: go straight to the devnet airdrop for this wallet.
+  const faucetHas = deps.faucetBalance ? await deps.faucetBalance().catch(() => -1) : -1;
+  const faucetEmpty = faucetHas >= 0 && faucetHas < drip + FEE_LAMPORTS;
+  const viaAirdrop = async (): Promise<FaucetResult> => {
+    if (!deps.airdrop) return { ok: false, reason: FAUCET_EMPTY_REASON };
+    try {
+      const sig = await deps.airdrop(wallet, drip);
+      await record(sig);
+      return { ok: true, sig, lamports: drip, via: "airdrop" };
+    } catch {
+      await release();
+      return { ok: false, reason: FAUCET_EMPTY_REASON };
+    }
+  };
+  const refill = async () => {
+    if (deps.refillFaucet) await deps.refillFaucet().catch(() => undefined);
+  };
+  if (faucetEmpty) {
+    await refill();
+    return viaAirdrop();
+  }
   try {
-    const sig = await deps.send(wallet, deps.caps.dripLamports);
-    await deps.sql.query("update faucet_drips set sig = $3 where wallet = $1 and day = $2", [wallet, day, sig]);
-    return { ok: true, sig, lamports: deps.caps.dripLamports };
+    const sig = await deps.send(wallet, drip);
+    await record(sig);
+    if (faucetHas >= 0 && faucetHas - drip < FAUCET_REFILL_BELOW) await refill();
+    return { ok: true, sig, lamports: drip, via: "faucet" };
   } catch (e) {
-    await deps.sql.query("delete from faucet_drips where wallet = $1 and day = $2 and sig is null", [wallet, day]);
     const msg = e instanceof Error ? e.message : "";
-    return { ok: false, reason: /insufficient|0x1\b/i.test(msg) ? "У крана сервера скінчились devnet SOL." : "Кран сервера не відправив SOL." };
+    if (/insufficient|0x1\b/i.test(msg)) {
+      await refill();
+      if (deps.airdrop) return viaAirdrop();
+      await release();
+      return { ok: false, reason: FAUCET_EMPTY_REASON };
+    }
+    await release();
+    return { ok: false, reason: "Кран сервера не відправив SOL." };
   }
 }
 
@@ -107,6 +150,16 @@ export async function faucetFromProcess(proof: WalletProof | null, ip: string, s
         const tx = new web3.Transaction().add(web3.SystemProgram.transfer({ fromPubkey: faucet!.publicKey, toPubkey: new web3.PublicKey(to), lamports }));
         return web3.sendAndConfirmTransaction(conn, tx, [faucet!], { commitment: "confirmed" });
       },
+      faucetBalance: faucet ? () => conn.getBalance(faucet.publicKey) : undefined,
+      airdrop: async (to, lamports) => {
+        const sig = await conn.requestAirdrop(new web3.PublicKey(to), lamports);
+        const bh = await conn.getLatestBlockhash("confirmed");
+        const res = await conn.confirmTransaction({ signature: sig, ...bh }, "confirmed");
+        if (res.value.err) throw new Error("airdrop failed");
+        return sig;
+      },
+      // Fire the request only (no confirm wait): devnet often answers 429, which is fine.
+      refillFaucet: faucet ? () => conn.requestAirdrop(faucet.publicKey, 1_000_000_000) : undefined,
     },
     { proof, ip },
   );

@@ -1,3 +1,4 @@
+import { resolveDatabaseUrl } from "../../../scripts/database-url.mjs";
 import { arbMainnetFlag } from "./live-trading.ts";
 import { ARB_FIRE_SOL, ARB_LIMITS, arbModeFor, type ArbModeInfo, type ArbStore } from "./arb-rules";
 import { verifyProof } from "./wallet-proof.server";
@@ -13,8 +14,7 @@ import type { GuardSql } from "./guard-ledger.server";
  */
 
 export function arbStore(): ArbStore {
-  const url = (process.env.DATABASE_URL || "").trim();
-  if (url) return "shared";
+  if (resolveDatabaseUrl(process.env)) return "shared";
   // In-memory PGLite is per process. Fine for `vite dev`, never for a deploy.
   if (import.meta.env.DEV) return "dev";
   return "none";

@@ -907,6 +907,9 @@ export const WORK_EN: Record<string, string> = {
   "У NFT ще немає стратегії на ланцюгу. Збережи стратегію.": "The NFT has no on-chain strategy yet. Save a strategy.",
   "У гаманці вже": "The wallet already has",
   "У крана сервера скінчились devnet SOL.": "The server faucet is out of devnet SOL.",
+  "Кран сервера порожній, а devnet-airdrop зараз обмежений. Спробуй пізніше або візьми SOL на faucet.solana.com.":
+    "The server faucet is empty and the devnet airdrop is rate-limited right now. Try again later or get SOL at faucet.solana.com.",
+  "Devnet-airdrop надіслав": "Devnet airdrop sent",
   "У ланцюгу ще інша версія. Зачекай кілька секунд.": "The chain still shows another version. Wait a few seconds.",
   "У правилах лише латиниця, числа, ; < > = !": "Rules allow only Latin letters, numbers, ; < > = !",
   "У правилах лише латиниця, числа, ;": "Rules allow only Latin letters, numbers, ;",

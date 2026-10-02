@@ -89,7 +89,7 @@ export async function readStrategyInfo(asset: string): Promise<(StrategyInfo & {
 export type { StrategySpec };
 
 /** Judge onboarding fallback: the server's devnet faucet (rate-limited) when the public airdrop is limited. */
-export async function serverFaucet(): Promise<{ ok: true; sig: string; lamports: number } | { ok: false; reason: string }> {
+export async function serverFaucet(): Promise<{ ok: true; sig: string; lamports: number; via?: "faucet" | "airdrop" } | { ok: false; reason: string }> {
   const kp = await loadKeypair();
   if (!kp) return { ok: false, reason: "Немає ключа кімнати." };
   const proof = await signProof(kp, "faucet", "devnet");

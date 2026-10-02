@@ -1,14 +1,13 @@
 import { pendingMigrations } from "../../scripts/migration-plan.mjs";
+import { resolveDatabaseUrl } from "../../scripts/database-url.mjs";
 
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
 
 // An empty/whitespace DATABASE_URL (an easy misconfig in deploy UIs) must mean
 // "unset" — otherwise production would silently run on the PGLite fallback.
-const rawDatabaseUrl =
-  typeof process !== "undefined" ? process.env.DATABASE_URL : undefined;
-const databaseUrl =
-  rawDatabaseUrl && rawDatabaseUrl.trim() ? rawDatabaseUrl : undefined;
+// DATABASE_URL, else the Vercel Neon integration's POSTGRES_URL (see scripts/database-url.mjs).
+const databaseUrl = typeof process !== "undefined" ? resolveDatabaseUrl(process.env)?.url : undefined;
 
 /**
  * Active backend: real **Neon** when `DATABASE_URL` is set (deployed / configured
