@@ -34,7 +34,17 @@ export async function loadActContext(force = false): Promise<Loaded> {
   const wallet = st.wallet ?? (await st.ensureWallet());
   const { readMarket, readStrategyInfo } = await import("@/lib/agents/strategy-client");
   const { liveCatalog } = await import("@/lib/agents/catalog");
-  const owned = st.nfts.filter((n) => n.owner === wallet.pubkey && n.asset.length >= 32 && !n.asset.startsWith("local-")).slice(0, 8);
+  const mine = () => useAgents.getState().nfts.filter((n) => n.owner === wallet.pubkey && n.asset.length >= 32 && !n.asset.startsWith("local-"));
+  if (!mine().length) {
+    // Fresh browser / restored key: hydrate's chain scan runs in the background, so read the wallet's agents now.
+    try {
+      const { fetchOwnedAgents } = await import("@/lib/agents/chain");
+      for (const n of await fetchOwnedAgents(wallet.pubkey)) await useAgents.getState().refreshAsset(n.asset);
+    } catch {
+      /* RPC quiet: plan with what the desk already knows */
+    }
+  }
+  const owned = mine().slice(0, 8);
   const [infos, market] = await Promise.all([
     Promise.all(owned.map((n) => readStrategyInfo(n.asset).catch(() => ({ ok: false as const, reason: "" })))),
     readMarket().catch(() => []),
@@ -66,7 +76,7 @@ export async function loadActContext(force = false): Promise<Loaded> {
       side.listings[m.asset] = { priceLamports: m.priceLamports, spec: m.chain?.spec ? { ...m.chain.spec } : undefined };
       return { id: m.asset, name: m.name, priceSol: Number(solOf(m.priceLamports)), risk: m.chain?.spec.risk, windows: m.chain?.spec.windows };
     });
-  const canMintFree = !st.nfts.some((n) => n.owner === wallet.pubkey && n.tier === "free");
+  const canMintFree = !useAgents.getState().nfts.some((n) => n.owner === wallet.pubkey && n.tier === "free");
   cache = { ctx: { agents: ctxAgents, market: ctxMarket, canMintFree }, side, at: Date.now() };
   return cache;
 }
