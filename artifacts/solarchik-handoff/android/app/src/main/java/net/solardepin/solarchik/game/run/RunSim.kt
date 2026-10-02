@@ -145,6 +145,9 @@ class RunState(val seed: Int, val mod: DayMod, val goalMeters: Int) {
     var checkY = RunSim.BANDS[1]
     var death = DeathKind.NONE
     var hasJumped = false
+    /** First run on this phone: tutorial hints (HUD hint line, TAP bubble, SLIDE pop). */
+    var tutorial = true
+    var slid = false
     var distance = 0.0
     var fever = 0.0
     var spawnX = 0.0
@@ -213,6 +216,8 @@ object RunSim {
     )
 
     const val BOSS_BANNER = "MAINTENANCE DRONE"
+    /** The tutorial hint line shows this long into the first run (then fades), or until a jump and a slide. */
+    const val HINT_TIME = 4.5
 
     const val GRAVITY_UP = 1480.0
     const val GRAVITY_DOWN = 2400.0
@@ -913,6 +918,7 @@ object RunSim {
         s.slide = SLIDE_TIME
         s.squash = 1.0
         s.jumpBuf = 0.0
+        s.slid = true
         s.grind = false
         events.add(Ev.SLIDE)
         emit(s.particles, s.x, s.y, 8, C_SLIDE, 70.0, 70.0)
@@ -1082,7 +1088,7 @@ object RunSim {
             if (s.bonusLeft <= 0) exitBonus(s)
         }
 
-        val storming = !s.bonus && s.distance > 16000
+        val storming = !s.bonus && (if (s.classic) s.distance > 16000 else cityStormAt(s.distance) > 0.5)
         if (storming) {
             s.stormT += dt
             if (s.stormT > 3.6) {
@@ -1136,7 +1142,7 @@ object RunSim {
             events.add(Ev.BOSS)
         }
 
-        if (!s.slideHint && !s.bonus) {
+        if (!s.slideHint && !s.bonus && (s.classic || s.tutorial)) {
             val drone = s.enemies.firstOrNull { !it.dead && it.kind == EnemyKind.DRONE && it.x > s.x && it.x < s.x + 300 }
             if (drone != null) {
                 s.slideHint = true
@@ -1404,6 +1410,20 @@ object RunSim {
      * City rules sky (native 0.21.4): golden hour, dusk from 450 m, night from 750 m (the 1200 m
      * CLOCK IN lands under neon), dawn back to golden hour by 2400 m. Same 0..2 scale as [moodAt].
      */
+    /**
+     * City storm line, 0..1: a squall over 1600–2200 m of every 2400 m cycle (rolls in and out over 80 m).
+     * Classic rules keep the web's endless storm past 1600 m.
+     */
+    fun cityStormAt(distance: Double): Double {
+        val t = (((distance / 10) % 2400.0) + 2400.0) % 2400.0
+        return when {
+            t < 1560 || t >= 2200 -> 0.0
+            t < 1640 -> (t - 1560) / 80
+            t < 2120 -> 1.0
+            else -> (2200 - t) / 80
+        }
+    }
+
     fun cityMoodAt(distance: Double): Double {
         val m = distance / 10
         val cycle = 2400.0

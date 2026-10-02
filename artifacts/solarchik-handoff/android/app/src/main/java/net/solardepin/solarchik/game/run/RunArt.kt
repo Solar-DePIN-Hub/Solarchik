@@ -106,19 +106,26 @@ class RunArt(private val assets: AssetManager) {
      * golden hour warms, dusk goes rose and dim, night deep blue; storm desaturates.
      * [mood] is 0 golden … 1 dusk … 2 night. Cached per 1/12 step.
      */
-    fun cityFilter(mood: Double, storm: Boolean): ColorMatrixColorFilter {
+    fun cityFilter(mood: Double, storm: Boolean): ColorMatrixColorFilter = cityFilter(mood, if (storm) 1.0 else 0.0)
+
+    /** Time-of-day grade for the painted kit; [storm] 0..1 blends in the cool storm-line grade. */
+    fun cityFilter(mood: Double, storm: Double): ColorMatrixColorFilter {
         val q = (mood * 12).roundToInt().coerceIn(0, 24)
-        val key = q or (if (storm) 1 shl 8 else 0)
+        val sq = (storm * 4).roundToInt().coerceIn(0, 4)
+        val key = q or (sq shl 8)
         return filterCache.getOrPut(key) {
             val m = q / 12f
             val d = m.coerceAtMost(1f)
             val n = (m - 1f).coerceAtLeast(0f)
+            val k = sq / 4f
             // golden-hour warmth fading into dusk rose and night blue
             var r = 1.04f - 0.16f * d - 0.5f * n
             var g = 0.96f - 0.26f * d - 0.38f * n
             var b = 0.88f - 0.18f * d - 0.12f * n
             val add = floatArrayOf(10f - 4f * d - 2f * n, 4f - 2f * d + 2f * n, 0f + 6f * d + 14f * n)
-            if (storm) { r *= 0.8f; g *= 0.84f; b *= 0.92f }
+            // storm line: a cool teal/indigo grade (not grey): red pulled down, blue-green kept
+            r *= 1f - 0.24f * k; g *= 1f - 0.06f * k; b *= 1f + 0.06f * k
+            add[0] -= 6f * k; add[1] += 5f * k; add[2] += 14f * k
             val cm = ColorMatrix(
                 floatArrayOf(
                     r, 0f, 0f, 0f, add[0],
@@ -127,7 +134,7 @@ class RunArt(private val assets: AssetManager) {
                     0f, 0f, 0f, 1f, 0f,
                 ),
             )
-            if (storm) cm.postConcat(ColorMatrix().apply { setSaturation(0.6f) }) else cm.postConcat(ColorMatrix().apply { setSaturation(0.9f) })
+            cm.postConcat(ColorMatrix().apply { setSaturation(0.9f - 0.05f * k) })
             ColorMatrixColorFilter(cm)
         }
     }

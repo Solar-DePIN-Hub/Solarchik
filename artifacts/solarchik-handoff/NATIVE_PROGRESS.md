@@ -359,3 +359,21 @@ The owner's feedback on 0.21.3 was that it felt childish, too easy and the art w
 - With frame-perfect reads, the bot reaches 1200 m on 16/16 seeds.
 - With ±5 or ±8 frames of reaction jitter, 13/16 seeds reach 1200 m. Classic rules were 16/16 even at ±8.
 - A human also misreads, so expect noticeably more failures than the bot. The target was about 2–3 tries for a decent player, and this needs checking on a phone. Speed, gaps and boss timings are all constants at the top of `RunSim`.
+
+## 0.21.5 (versionCode 70): polish pass on the city run (2026-10-02)
+
+- **Tutorial text is first-run only.** The "Tap to jump · swipe down to slide" line shows for the first 4.5 s of the first run on the phone, or until the player has jumped and slid, then fades out over 0.5 s. A `GameSave.runTutorialDone` flag is set once it has shown and gone, and later runs never show it. The intro TAP bubble and the first-drone SLIDE pop follow the same flag (`RunState.tutorial`). Classic/web-parity rules keep the SLIDE pop.
+- **Storm line palette.** The city storm is now a section, 1600–2200 m of every 2400 m cycle (`RunSim.cityStormAt`, rolling in and out over 80 m). Before, it ran forever after 1600 m and turned every later section grey. It has:
+  - a deep indigo sky with a teal horizon glow and a layered storm deck;
+  - a teal/indigo grade on the painted kit (not desaturated) and a cool rim light on the hero;
+  - warm windows and neon that stay on;
+  - brighter two-depth wind-driven rain;
+  - lightning that lights the sky behind the skyline (the layers silhouette and brighten), with a smaller full-screen flash.
+- **Camera lift.** On high double jumps the world eases down so the robot stays below the HUD chips (layers parallax with it).
+- **Pops stack.** Pops born on the same spot (NICE + "+1") stack instead of printing over each other.
+- **Localisation and frames.**
+  - UK distance chip reads "м".
+  - The Sol caption sample no longer mentions the village.
+  - RunShotsTest: night city and storm (with and without lightning) are separate scenes from the boss run (`dayPhasesNightAndStorm`, `maintenanceDrone`).
+- **New tests:** `tutorialHintOnlyEarlyInTheFirstRun`, `cityStormIsASectionNotForever`.
+- The web spec (`web-city-rules.diff`) gains `cityStormAt`, `HINT_TIME` and the tutorial rule.

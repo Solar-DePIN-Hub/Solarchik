@@ -312,7 +312,7 @@
     <string name="run_stats_garden">%1$s · сад</string>
     <string name="run_grind">Grind</string>
     <string name="run_go">GO</string>
-    <string name="run_meters">%1$dm</string>
+    <string name="run_meters">%1$d м</string>
     <string name="run_talk">Говорити</string>
     <string name="run_talk_stop">Стоп</string>
     <string name="run_listening">Слухаю…</string>

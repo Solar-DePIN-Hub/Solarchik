@@ -38,6 +38,7 @@ import net.solardepin.solarchik.wallet.WalletError
  */
 class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
     private lateinit var save: GameSave
+    private var hintSeen = false
     private lateinit var game: RunView
     private lateinit var overlay: RunOverlay
     private lateinit var audio: RunAudio
@@ -114,6 +115,7 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
             careBoost = save.streak > 0,
             skin = garage.skin,
             robot = garage.robot,
+            tutorial = !save.runTutorialDone,
         )
     }
 
@@ -138,6 +140,8 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
 
     override fun onHud(hud: RunHud) {
         this.hud = hud
+        // the tutorial hint is a once-per-phone thing: once it has shown and gone, it stays gone
+        if (hud.hint) hintSeen = true else if (hintSeen && hud.phase == Phase.RUNNING && !save.runTutorialDone) save.runTutorialDone = true
         overlay.bind(hud)
         radio.onHud(hud)
         if (hud.phase == Phase.RUNNING) {
@@ -168,6 +172,7 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
     override fun onResult(result: RunResult) {
         if (ended) return
         ended = true
+        if (hintSeen) save.runTutorialDone = true
         val h = result.hud
         val best = save.bestDistance
         save.recordRun(h.meters, h.score)
