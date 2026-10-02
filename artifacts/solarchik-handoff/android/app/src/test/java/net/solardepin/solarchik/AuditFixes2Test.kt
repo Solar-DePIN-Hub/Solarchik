@@ -74,15 +74,31 @@ class AuditFixes2Test {
     }
 
     @Test fun touchDoesNotWriteGameStateOnTheUiThread() {
-        val v = RunView(ctx) { _, _ -> }
+        val v = RunView(ctx)
         fun field(name: String) = RunView::class.java.getDeclaredField(name).apply { isAccessible = true }
         val t = SystemClock.uptimeMillis()
         v.onTouchEvent(MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, 10f, 10f, 0))
+        v.onTouchEvent(MotionEvent.obtain(t, t + 16, MotionEvent.ACTION_MOVE, 10f, 400f, 0)) // swipe down = slide
         v.performClick()
-        assertEquals(true, field("onFloor").get(v))
-        assertEquals(0f, field("vy").get(v))
+        // the run state is created and stepped by the game thread only
+        assertEquals(null, field("state").get(v))
         val input = field("input").get(v) as RunInput
-        assertTrue(input.take()) // queued for the game thread
+        assertTrue(input.take()) // jump queued for the game thread
+        assertTrue(input.takeSlide()) // slide queued too
+        assertFalse(input.take())
+        v.onTouchEvent(MotionEvent.obtain(t, t + 32, MotionEvent.ACTION_UP, 10f, 400f, 0))
+        assertFalse(input.jumpHeld)
+        assertFalse(input.slideHeld)
+    }
+
+    @Test fun pausedOrEndedRunIgnoresTaps() {
+        val v = RunView(ctx)
+        val input = RunView::class.java.getDeclaredField("input").apply { isAccessible = true }.get(v) as RunInput
+        v.paused = true
+        val t = SystemClock.uptimeMillis()
+        v.onTouchEvent(MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, 10f, 10f, 0))
+        v.performClick()
+        assertFalse(input.take())
     }
 
     // ---- (2) daily report on the UTC game day ----

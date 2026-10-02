@@ -336,3 +336,30 @@ Seeker CLOCK IN default (mainnet) left as is, as asked.
   - The worker does not verify the webhook signature.
   - No sideband WebSocket is open, so nothing is written to `/voicemail`, the per-player inbox, or billing.
   - The player is not identified from the SIP Diversion header.
+
+## 0.21.2 (versionCode 67): native roof run merged into native-full (2026-10-02)
+
+Merge of branch `native-run` (0.21.0–0.21.1) into native-full 0.20.6. Both feature sets are kept: call secretary, carrier forwarding, Free agent per wallet, plus the run.
+
+**The web roof run, native** (SurfaceView + Canvas, no WebView)
+- `game/run/RunSim.kt` is a line-for-line port of the web `sim.ts`. Parity is checked against golden traces generated from the web sim (`src/test/resources/run-golden.json`).
+- CLOCK IN at 1200 m no longer freezes the run. It fires one "clock" event, then shows a banner and a persistent HUD Sign badge. Tapping the badge pauses and signs in place, using the shared `ClockIn` flow (Yard MWA). Signing is also on the pause and result cards; with no wallet, a button leads to the Yard. The web needs the matching patch in sim.ts / RoofRun.tsx (diff kept on the box: `/workspace/apk-test/web-sim-clock-nonblocking.diff`).
+- Shop: every web robot (10) and roof skin (20) can be bought with suns, previewed live in the lobby, equipped and saved. Web costs and legacy unlocks apply.
+- Daily quests: the 3 web missions plus a daily bounty, a day chest, milestones, a reward reveal with count-up, and quest toasts during the run.
+- Art pass:
+  - Background: far range, forest and storybook trees, a grass/sunflower/fence foreground parallax, god rays, aurora curtains.
+  - Rooftops: solar modules on an aluminium deck, a clay-tile eave, a glint sweep, and a shadow underneath.
+  - Hero: drawn about 1.6x the web size with an ink outline (the sim hitbox is unchanged), landing squash and take-off stretch, a contact shadow, and a head-panel glint.
+  - Mites, drones and suns are larger and outlined, with an idle bob.
+  - Juice: pickup sparkles, magnet trail, landing ring, elastic pops, a red flash on hurt, a CLOCK shockwave.
+  - HUD and buttons in a chunky 3D game style.
+- Ukrainian display face: Nunito ExtraBold (Cyrillic, OFL in `assets/licenses/OFL-Nunito.txt`).
+- Pet-care starting shield: the native app has no pet, so the shield is given when the CLOCK IN streak is live (streak > 0).
+
+**Tests**: `testDebugUnitTest` ran 204 tests: 199 passed, 0 failed, 5 skipped (opt-in live/devnet ITs). They include RunSimTest (web parity + non-blocking clock), RunMetaTest (shop, quests, milestones, unlock, flow), RunShotsTest (48 scene renders) and ScreensTest (shop pages). `lintDebug` reported no issues.
+
+**APKs** (box only)
+- `solarchik-0.21.2-debug.apk`: 8789516 B, sha256 `d5928041cfac5390596c7ef44093824211a8d027d30bf58f3536199823634f0a`.
+- `solarchik-0.21.2-release-boxkey.apk`: 5148758 B, sha256 `38126ab188355c2136a3eaeb33a04bce97ebefc6a8f3cf02f6db17bb6d5cbc2f`. R8, `CN=Solarchik BOX TEST KEY (not production)`, cert SHA-256 `91102f8f…59a01e`. Not the production key.
+
+**Not verified here**: device play-feel and the real MWA sign from the in-run badge (no emulator by rule; checked with Robolectric renders and flow tests).

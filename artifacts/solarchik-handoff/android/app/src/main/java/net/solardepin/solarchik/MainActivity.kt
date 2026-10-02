@@ -82,8 +82,13 @@ class MainActivity : ComponentActivity() {
     var bottomInset = 0
         private set
 
-    private val runLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+    private val runLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         renderAll()
+        // "Sign today" on the run's CLOCK IN card: open the Yard and start the wallet flow there.
+        if (res.data?.getBooleanExtra(RunActivity.EXTRA_SIGN, false) == true) {
+            select(Tab.YARD)
+            (screen(Tab.YARD) as? net.solardepin.solarchik.ui.YardScreen)?.signFromRun()
+        }
     }
 
     private val notePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -347,8 +352,7 @@ class MainActivity : ComponentActivity() {
         runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
     }
 
-    fun explorerTx(sig: String, cluster: String): String =
-        if (cluster == "devnet") "https://explorer.solana.com/tx/$sig?cluster=devnet" else "https://explorer.solana.com/tx/$sig"
+    fun explorerTx(sig: String, cluster: String): String = net.solardepin.solarchik.game.ClockIn.explorerTx(sig, cluster)
 
     fun explorerAddress(addr: String, cluster: String): String =
         if (cluster == "devnet") "https://explorer.solana.com/address/$addr?cluster=devnet" else "https://explorer.solana.com/address/$addr"
@@ -366,20 +370,13 @@ class MainActivity : ComponentActivity() {
     }
 
     fun errorText(t: Throwable?): String = when (t) {
-        is WalletError -> when (t.kind) {
-            WalletError.Kind.NO_WALLET -> getString(R.string.err_no_wallet)
-            WalletError.Kind.DECLINED -> getString(R.string.err_declined)
-            WalletError.Kind.NETWORK -> getString(R.string.err_network)
-            WalletError.Kind.FAILED -> getString(R.string.err_failed, (t.message ?: "").take(120))
-        }
         is MintError -> when (t.kind) {
             MintError.Kind.FREE_USED -> getString(R.string.mint_err_free)
             MintError.Kind.PRO_MAINNET_OFF -> getString(R.string.mint_err_pro_off)
             MintError.Kind.TOO_BIG -> getString(R.string.mint_err_big)
             MintError.Kind.WALLET_CHANGED -> getString(R.string.mint_err_wallet_changed)
         }
-        is java.io.IOException -> getString(R.string.err_network)
-        else -> getString(R.string.err_failed, (t?.message ?: "").take(120))
+        else -> WalletError.text(this, t)
     }
 
     companion object {

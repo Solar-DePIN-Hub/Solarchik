@@ -13,7 +13,6 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.app.ShareCompat
 import kotlinx.coroutines.launch
 import net.solardepin.solarchik.MainActivity
 import net.solardepin.solarchik.R
@@ -22,6 +21,7 @@ import net.solardepin.solarchik.core.FeeProgress
 import net.solardepin.solarchik.core.FeeWindow
 import net.solardepin.solarchik.core.SolarchikConfig
 import net.solardepin.solarchik.core.StreakRules
+import net.solardepin.solarchik.game.ClockIn
 import net.solardepin.solarchik.game.GameSave
 import net.solardepin.solarchik.ui.Ui.dp
 import java.time.DayOfWeek
@@ -362,19 +362,18 @@ class YardScreen(host: MainActivity) : Screen(host) {
         }
     }
 
+    /** The run's CLOCK IN card asked to sign right away (web onClock). */
+    fun signFromRun() = clockIn()
+
     private fun clockIn() {
-        if (!save.clockedToday() || save.signedToday() || signing) return
+        if (!ClockIn.ready(save) || signing) return
         signing = true
         render()
-        // Captured before the wallet opens: the proof belongs to the day that was run.
-        val day = save.today()
-        val meters = save.todayDistance()
         host.scope.launch {
-            val proof = host.wallet.clockInOnChain(host.sender, meters, save.todayScore(), save.nextStreak(), day)
+            val result = ClockIn.sign(host.wallet, host.sender, save)
             signing = false
-            proof.onSuccess {
-                val granted = save.stampClock(it.address, it.signature, it.cluster, it.kind, day, meters)
-                granted.firstOrNull()?.let { w ->
+            result.onSuccess { granted ->
+                granted?.let { w ->
                     host.toast(ctx.getString(R.string.yard_granted, ctx.getString(if (w.kind == FeeWindow.KIND_LONG) R.string.window_7d else R.string.window_48h)))
                 }
             }.onFailure {
@@ -384,16 +383,7 @@ class YardScreen(host: MainActivity) : Screen(host) {
         }
     }
 
-    private fun shareDay() {
-        if (!save.signedToday() || save.clockSig.isBlank()) return
-        val text = ctx.getString(R.string.share_text, save.todayDistance(), save.streak) + "\n${Fmt.short(save.clockSig)} · ${save.clockCluster}"
-        val body = if (save.clockKind == "tx") "$text\n${host.explorerTx(save.clockSig, save.clockCluster)}" else text
-        ShareCompat.IntentBuilder(host)
-            .setType("text/plain")
-            .setText(body)
-            .setChooserTitle(ctx.getString(R.string.share_title))
-            .startChooser()
-    }
+    private fun shareDay() = ClockIn.share(host, save)
 
     private fun openProof() {
         if (save.clockKind != "tx" || save.clockSig.isBlank()) return

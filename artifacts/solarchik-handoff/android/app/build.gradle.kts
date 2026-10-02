@@ -17,14 +17,14 @@ fun keystoreSecret(envName: String, propName: String): String =
 android {
     namespace = "net.solardepin.solarchik"
     compileSdk = 35
-    layout.buildDirectory.set(file("/tmp/solarchik-apk-build"))
+    layout.buildDirectory.set(file((project.findProperty("buildRoot") as String?) ?: "/tmp/solarchik-apk-build"))
 
     defaultConfig {
         applicationId = "net.solardepin.solarchik"
         minSdk = 26
         targetSdk = 35
-        versionCode = 66
-        versionName = "0.20.6"
+        versionCode = 67
+        versionName = "0.21.2"
         buildConfigField("boolean", "MAINNET_PAID_MINT", "false")
     }
 
@@ -39,6 +39,7 @@ android {
             it.systemProperty("solarchik.chat", (project.findProperty("chat") as String?) ?: "")
             it.systemProperty("solarchik.liveAgents", (project.findProperty("liveAgents") as String?) ?: "0")
             it.systemProperty("solarchik.liveWaitSec", (project.findProperty("liveWaitSec") as String?) ?: "40")
+            it.systemProperty("solarchik.runshots", (project.findProperty("runshots") as String?) ?: layout.buildDirectory.dir("screens-run").get().asFile.path)
             it.systemProperty("solarchik.shots", (project.findProperty("shots") as String?) ?: layout.buildDirectory.dir("screens").get().asFile.path)
         }
     }
