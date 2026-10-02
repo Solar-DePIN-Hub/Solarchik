@@ -6,6 +6,8 @@
 import { DESK_PROXY_PER_MIN, rateLimiter } from "../../src/lib/agents/desk-proxy-rules.ts";
 import { translateText } from "../../src/components/game/work-translate.ts";
 
+const SOL_PER_MIN = 40;
+
 interface NativeEvent {
   url: URL;
   req: { method?: string; text?: () => Promise<string>; headers?: Headers };
@@ -37,9 +39,13 @@ const ROUTES = new Set([
   "market-unlist",
   "market-prepare-buy",
   "market-confirm-buy",
+  "sol-chat",
+  "sol-voice",
 ]);
 const MAX_BODY = 16 * 1024;
 const allow = rateLimiter(DESK_PROXY_PER_MIN);
+/** Sol chat/voice: a run fires a line every few seconds and the app caches voice by text, so allow more. */
+const allowSol = rateLimiter(SOL_PER_MIN);
 
 const CORS = {
   "access-control-allow-origin": "*",
@@ -92,7 +98,8 @@ export default async function nativeApiMiddleware(
   }
   if (method !== "POST") return reply(405, { ok: false, error: "method" });
   const ip = (event.req.headers?.get("x-forwarded-for") ?? "").split(",")[0]?.trim() || "unknown";
-  if (!allow(`${ip}:${route}`, Date.now())) return reply(429, { ok: false, error: "slow down" });
+  const limiter = route.startsWith("sol-") ? allowSol : allow;
+  if (!limiter(`${ip}:${route}`, Date.now())) return reply(429, { ok: false, error: "slow down" });
   const text = (await event.req.text?.()) ?? "";
   if (text.length > MAX_BODY) return reply(413, { ok: false, error: "too large" });
   let body: Record<string, unknown> = {};
@@ -101,6 +108,21 @@ export default async function nativeApiMiddleware(
     if (parsed && typeof parsed === "object") body = parsed as Record<string, unknown>;
   } catch {
     return reply(400, { ok: false, error: "json" });
+  }
+  // Sol replies are generated in the requested language; the UK→EN dictionary swap does not apply.
+  if (route === "sol-chat") {
+    const { solChat } = await import("../../src/lib/game/sol-native.server.ts");
+    const r = await solChat(body);
+    return reply(r.status, r.body);
+  }
+  if (route === "sol-voice") {
+    const { solVoice } = await import("../../src/lib/game/sol-native.server.ts");
+    const r = await solVoice(body);
+    if (!r.audio) return reply(r.status, r.body);
+    return new Response(r.audio as unknown as BodyInit, {
+      status: 200,
+      headers: { "content-type": "audio/wav", "cache-control": "no-store", "x-sol-model": r.model || "", ...CORS, "access-control-expose-headers": "x-sol-model" },
+    });
   }
   const lang = body.lang === "en" ? "en" : "uk";
   const out = (status: number, payload: unknown) => reply(status, lang === "en" ? englishReply(payload) : payload);
