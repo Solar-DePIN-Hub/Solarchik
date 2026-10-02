@@ -1,3 +1,4 @@
+import { LIVE_OFF_REASON, liveTradingFrom } from "./live-trading.ts";
 import { createHmac } from "node:crypto";
 import type { Address, Hex } from "viem";
 import { DEPOSIT_FACTORY, deriveDepositWallet } from "./deposit-wallet";
@@ -98,6 +99,7 @@ async function pollCreate(id: string): Promise<{ ok: true; address: string } | {
 export async function ensureDepositWalletOnServer(
   owner: string,
 ): Promise<{ ok: true; address: Address; deployed: true } | { ok: false; error: string }> {
+  if (!liveTradingFrom(process.env.LIVE_TRADING_ENABLED)) return { ok: false, error: LIVE_OFF_REASON };
   const derived = deriveDepositWallet(owner);
   if (!derived) return { ok: false, error: "Адреса Polygon не та." };
   const alive = await codeAt(derived);
@@ -130,6 +132,7 @@ export async function ensureDepositWalletOnServer(
 }
 
 export async function walletNonceOnServer(owner: string): Promise<{ ok: true; nonce: string } | { ok: false; error: string }> {
+  if (!liveTradingFrom(process.env.LIVE_TRADING_ENABLED)) return { ok: false, error: LIVE_OFF_REASON };
   const query = `address=${encodeURIComponent(owner)}&type=WALLET`;
   const path = `/v1/account/transactions/params?${query}`;
   try {
@@ -153,6 +156,7 @@ export async function submitWalletBatchOnServer(input: {
   deadline: string;
   calls: { target: string; value: string; data: Hex }[];
 }): Promise<{ ok: true; hash: string } | { ok: false; error: string }> {
+  if (!liveTradingFrom(process.env.LIVE_TRADING_ENABLED)) return { ok: false, error: LIVE_OFF_REASON };
   const payload = {
     type: "WALLET",
     from: input.from,

@@ -1,3 +1,4 @@
+import { arbMainnetFlag } from "./live-trading.ts";
 import { ARB_FIRE_SOL, ARB_LIMITS, arbModeFor, type ArbModeInfo, type ArbStore } from "./arb-rules";
 import { verifyProof } from "./wallet-proof.server";
 import type { WalletProof } from "./wallet-proof";
@@ -20,7 +21,8 @@ export function arbStore(): ArbStore {
 }
 
 export function currentArbMode(): ArbModeInfo {
-  return arbModeFor(process.env.ARB_MAINNET_ENABLED, arbStore());
+  // Mainnet arb also needs LIVE_TRADING_ENABLED=true (see live-trading.ts: geo-blocking + legal review first).
+  return arbModeFor(arbMainnetFlag(process.env.LIVE_TRADING_ENABLED, process.env.ARB_MAINNET_ENABLED), arbStore());
 }
 
 async function guardSql(): Promise<GuardSql> {

@@ -21,6 +21,7 @@ import { createWallet, importRoomSecret, loadKeypair, loadMarketKeypair, loadWal
 import { ensurePolygonAddress, importPolygonSecret, loadPolygonAccount } from "./polygon";
 import { holdRest, readPolyBalances, reviewClose, reviewPolymarket, reviewRedeem, scanRedeem, type GrokTrace, type PolyTicket } from "./poly";
 import { readChainlinkTwap, type TwapSnapshot } from "./twap";
+import { LIVE_OFF_REASON, liveTradingAllowed, setLiveTradingAllowed } from "./live-trading";
 import { cancelPolyOrder, placePolyOrder, readPolyOrder, redeemPolyPosition, withdrawPusd as sendPusd } from "./poly-order";
 import { liveQuotes } from "./shift";
 import { readTitanKey } from "./titan-key";
@@ -146,6 +147,8 @@ type AgentsState = {
   /** Mainnet USDC of the room key. Null until the network answers. */
   roomMainnetUsdc: number | null;
   roomMainnetUsdcKnown: boolean;
+  /** Server LIVE_TRADING_ENABLED (live-trading.ts). Off: no live mode is offered at all. */
+  liveTrading: boolean;
   /** Live Jupiter path. Off until Phantom is connected and both switches are on. */
   liveArmed: boolean;
   liveAck: boolean;
@@ -814,6 +817,20 @@ async function syncServerLedgers(room: string): Promise<void> {
     /* status unknown: no re-issue button */
   }
   useAgents.getState().persist();
+}
+
+/** Reads the server live-trading flag. Off (or unknown): live switches are cleared and not offered. */
+async function refreshLiveTrading(): Promise<void> {
+  let on = false;
+  try {
+    const status = await callMintStatus();
+    on = status.liveTrading === true;
+    useAgents.setState({ mintCollection: status.collection });
+  } catch {
+    on = false;
+  }
+  setLiveTradingAllowed(on);
+  useAgents.setState(on ? { liveTrading: true } : { liveTrading: false, liveArmed: false, liveAck: false, autoRun: false });
 }
 
 const PENDING_PRO_KEY = "solarchik.pending-pro";
@@ -2133,6 +2150,10 @@ export function currentPhantomSigner(): PhantomSigner | null {
 }
 
 async function sendLiveSwap(amount: number, user: string) {
+  if (!liveTradingAllowed()) {
+    useAgents.setState({ notice: LIVE_OFF_REASON });
+    return;
+  }
   liveSending = true;
   let sentSig = "";
   try {
@@ -2277,6 +2298,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
   arbCredit: {},
   mintCollection: null,
   arbHouse: null,
+  liveTrading: false,
   liveArmed: false,
   liveAck: false,
   autoRun: false,
@@ -2324,6 +2346,10 @@ export const useAgents = create<AgentsState>((set, get) => ({
   },
 
   setLiveArmed(on) {
+    if (on && !liveTradingAllowed()) {
+      set({ liveArmed: false, liveAck: false, notice: LIVE_OFF_REASON });
+      return;
+    }
     if (on && !get().wallet) {
       set({ liveArmed: false, notice: "Гаманець кімнати ще не готовий." });
       return;
@@ -2337,6 +2363,10 @@ export const useAgents = create<AgentsState>((set, get) => ({
   },
 
   setLiveAck(on) {
+    if (on && !liveTradingAllowed()) {
+      set({ liveAck: false, notice: LIVE_OFF_REASON });
+      return;
+    }
     if (on && !get().liveArmed) {
       set({ liveAck: false, notice: "Спочатку ввімкни дрібні живі угоди." });
       return;
@@ -2357,6 +2387,10 @@ export const useAgents = create<AgentsState>((set, get) => ({
         notice: "Авто вимкнено. Нових угод немає.",
       });
       get().persist();
+      return;
+    }
+    if (!liveTradingAllowed()) {
+      set({ autoRun: false, notice: LIVE_OFF_REASON });
       return;
     }
     const now = get();
@@ -2552,6 +2586,10 @@ export const useAgents = create<AgentsState>((set, get) => ({
 
   async prepareBridgeDeposit(open = false) {
     if (get().bridgeBusy) return;
+    if (!liveTradingAllowed()) {
+      set({ bridgeWhy: LIVE_OFF_REASON, bridgePlan: null });
+      return;
+    }
     const room = get().wallet?.pubkey;
     const polygon = get().polyAddress;
     if (!room || !polygon) {
@@ -2579,6 +2617,10 @@ export const useAgents = create<AgentsState>((set, get) => ({
   async confirmBridge() {
     const shown = get().bridgePlan;
     if (!shown?.canConfirm || get().bridgeBusy) return;
+    if (!liveTradingAllowed()) {
+      set({ bridgePlan: null, bridgeWhy: LIVE_OFF_REASON });
+      return;
+    }
     const room = get().wallet?.pubkey;
     const polygon = get().polyAddress;
     if (!room || !polygon) return;
@@ -3104,8 +3146,9 @@ export const useAgents = create<AgentsState>((set, get) => ({
       laneNotes: saved.laneNotes,
       lastEventsGrokAt: saved.lastEventsGrokAt,
       grokFlight: false,
-      liveArmed: saved.liveArmed,
-      liveAck: saved.liveAck,
+      // Live switches only come back when the server allows live trading (re-checked below).
+      liveArmed: saved.liveArmed && liveTradingAllowed(),
+      liveAck: saved.liveAck && liveTradingAllowed(),
       autoRun: false,
       track,
       brain: STACK,
@@ -3160,6 +3203,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
         void syncServerLedgers(wallet.pubkey).catch(() => undefined);
       }
     })();
+    void refreshLiveTrading();
     const resume = () => {
       if (saved.autoRun && get().liveArmed && get().liveAck) get().setAutoRun(true);
       else get().persist();
@@ -3535,6 +3579,10 @@ export const useAgents = create<AgentsState>((set, get) => ({
   },
 
   async claimArbDeposit(asset, rawSig) {
+    if (!liveTradingAllowed()) {
+      set({ notice: LIVE_OFF_REASON });
+      return false;
+    }
     const room = get().wallet?.pubkey;
     const sig = String(rawSig || "").trim();
     const nft = get().nfts.find((n) => n.asset === asset && n.classId === 2 && n.owner === room);
@@ -3556,6 +3604,10 @@ export const useAgents = create<AgentsState>((set, get) => ({
   },
 
   async fundArbDesk(asset, sol) {
+    if (!liveTradingAllowed()) {
+      set({ notice: LIVE_OFF_REASON });
+      return;
+    }
     if (get().chainBusy) {
       set({ notice: "Ще йде транзакція. Зачекайте." });
       return;
@@ -3656,6 +3708,10 @@ export const useAgents = create<AgentsState>((set, get) => ({
   },
 
   async buySlice(mint, sol) {
+    if (!liveTradingAllowed()) {
+      set({ notice: LIVE_OFF_REASON });
+      return;
+    }
     if (get().chainBusy) {
       set({ notice: "Ще йде транзакція. Зачекайте." });
       return;

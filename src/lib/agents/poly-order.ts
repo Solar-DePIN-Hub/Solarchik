@@ -15,6 +15,7 @@ import { ensureDepositWallet, submitWalletBatch, walletNonce } from "./deposit";
 import { bestAsk, bestBid, readOutcomeApproved, readPolyAllowance } from "./poly";
 import type { PolyTicket } from "./poly";
 import { loadPolygonAccount } from "./polygon";
+import { LIVE_OFF_REASON, liveTradingAllowed } from "./live-trading";
 
 const PUSD = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB" as Hex;
 const CTF = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045" as Hex;
@@ -560,9 +561,11 @@ export async function readPolyOrder(orderId: string): Promise<{ status: string; 
 export async function placePolyOrder(
   ticket: PolyTicket,
 ): Promise<{ ok: true; orderId: string; status: string } | { ok: false; error: string }> {
+  const selling = ticket.side === "SELL" || ticket.action === "sell";
+  // Live gate (live-trading.ts): no new Polymarket position unless the server enabled live trading.
+  if (!selling && !liveTradingAllowed()) return { ok: false, error: LIVE_OFF_REASON };
   const account = await loadPolygonAccount();
   if (!account) return { ok: false, error: "Ключа Polygon немає" };
-  const selling = ticket.side === "SELL" || ticket.action === "sell";
   if (!selling && ticket.lane === "crypto") {
     const label = ticket.windowLabel;
     if (label !== "5m" && label !== "15m" && label !== "1h" && label !== "4h") {

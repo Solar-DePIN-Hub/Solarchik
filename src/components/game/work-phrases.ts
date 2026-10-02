@@ -1,5 +1,9 @@
 /** English cabinet strings. Ukrainian UI stays the source text. */
 export const WORK_EN: Record<string, string> = {
+  "Живі угоди вимкнено в цій збірці: агенти торгують лише в пісочниці (paper / devnet). Нічого не відправлено.": "Live trading is off in this build: agents trade only in the sandbox (paper / devnet). Nothing was sent.",
+  "Живі угоди вимкнено в цій збірці: агенти торгують лише в пісочниці (paper / devnet) і пишуть результати в Strategy NFT. Реальні ринки й ціни лише читаються.": "Live trading is off in this build: agents trade only in the sandbox (paper / devnet) and write results to the Strategy NFT. Real markets and prices are only read.",
+  "Купівля акцій — живі гроші, тому в цій збірці вимкнена. Сайт Slice можна відкрити.": "Buying stocks uses real money, so it is off in this build. You can still open the Slice site.",
+  "Каса арбу на mainnet вимкнена в цій збірці: арб рахує реальні спреди Backpack/Titan, а угоди лише симулює.": "The mainnet arb treasury is off in this build: arb reads real Backpack/Titan spreads and only simulates the trades.",
   "Мало: сервер нарахував": "Too little: the server charged",
   "лампортів за цю позицію.": "lamports for this position.",
   "Відмітку підписав інший гаманець.": "The clock-in was signed by another wallet.",

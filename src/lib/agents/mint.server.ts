@@ -6,6 +6,7 @@ import { liveCatalog } from "./catalog";
 import { attrList } from "./core-attrs";
 import { mergeAttrs, mintSpecMeta, specAttrs, specFromStrategy } from "./strategy-spec";
 import { ROYALTY_BPS } from "./fees.config";
+import { liveTradingFrom } from "./live-trading";
 import { PAY_WALLET } from "@/lib/game/pay";
 import { COLLECTION_NAME, type AgentNft } from "./types";
 import { arbStore } from "./arb-guard.server";
@@ -54,6 +55,8 @@ export type MintStatus = {
   free: { mode: MintMode; reason: string };
   authority: string | null;
   collection: string | null;
+  /** Server LIVE_TRADING_ENABLED (see live-trading.ts). Off = the UI offers no live mode. */
+  liveTrading: boolean;
 };
 
 export function mintStatusOnServer(): MintStatus {
@@ -64,6 +67,7 @@ export function mintStatusOnServer(): MintStatus {
     free: mintModeFor("free", cfg),
     authority: key ? key.publicKey.toBase58() : null,
     collection: key ? serverCollectionKeypair(key).publicKey.toBase58() : null,
+    liveTrading: liveTradingFrom(process.env.LIVE_TRADING_ENABLED),
   };
 }
 

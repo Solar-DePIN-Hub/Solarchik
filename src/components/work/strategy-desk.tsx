@@ -27,6 +27,7 @@ export function StrategyDesk({ nft }: { nft: AgentNft }) {
   const claimArbDeposit = useAgents((s) => s.claimArbDeposit);
   const [depositSig, setDepositSig] = useState("");
   const chainBusy = useAgents((s) => s.chainBusy);
+  const liveTrading = useAgents((s) => s.liveTrading);
   const credit = useAgents((s) => s.arbCredit[nft.asset] ?? 0);
   const mintCollection = useAgents((s) => s.mintCollection);
   const reissueAgent = useAgents((s) => s.reissueAgent);
@@ -274,6 +275,7 @@ export function StrategyDesk({ nft }: { nft: AgentNft }) {
           <p className="text-xs text-muted leading-snug sm:col-span-2" data-testid="dex-hint">
             Бот читає ці числа: варіант, поріг, розмір, паузу. Котирування Titan на цей розмір. Чистий край уже без 0,10% Backpack і 5 bps запасу. Ордер не йде, поки каса Backpack порожня.
           </p>
+          {liveTrading ? (
           <div className="sm:col-span-2 rounded-md border border-border bg-bg p-3 flex flex-col gap-2">
             <p className="text-xs text-muted leading-snug">Каса арбу. Не секретар.</p>
             <button
@@ -329,6 +331,11 @@ export function StrategyDesk({ nft }: { nft: AgentNft }) {
               </Button>
             </div>
           </div>
+          ) : (
+            <p className="sm:col-span-2 text-xs text-muted leading-snug" data-testid="arb-live-off">
+              Каса арбу на mainnet вимкнена в цій збірці: арб рахує реальні спреди Backpack/Titan, а угоди лише симулює.
+            </p>
+          )}
         </fieldset>
       ) : null}
 

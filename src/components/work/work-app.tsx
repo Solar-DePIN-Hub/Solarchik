@@ -44,6 +44,7 @@ var TABS = [
 function SlicePanel() {
 	const wallet = useAgents((s) => s.wallet);
 	const chainBusy = useAgents((s) => s.chainBusy);
+	const liveTrading = useAgents((s) => s.liveTrading);
 	const [sol, setSol] = useState("0.02");
 	const [mint, setMint] = useState(SLICE_STOCKS[0].mint);
 	return /* @__PURE__ */ jsxs("section", {
@@ -55,6 +56,11 @@ function SlicePanel() {
 				className: "mt-1 text-sm text-muted leading-normal",
 				children: "Покупка йде ключем гаманця агента через Jupiter, ті самі акції що на Slice. Сайт Slice окремо не бачить цей ключ."
 			}),
+			!liveTrading ? /* @__PURE__ */ jsx("p", {
+				className: "mt-2 text-xs text-muted leading-normal",
+				"data-testid": "slice-live-off",
+				children: "Купівля акцій — живі гроші, тому в цій збірці вимкнена. Сайт Slice можна відкрити."
+			}) : null,
 			/* @__PURE__ */ jsx("p", {
 				className: "mt-2 break-all font-mono text-xs",
 				children: wallet ? wallet.pubkey : "Гаманця агента ще немає."
@@ -87,7 +93,7 @@ function SlicePanel() {
 						onChange: (e) => setSol(e.target.value)
 					}),
 					/* @__PURE__ */ jsx(Button, {
-						disabled: !wallet || chainBusy,
+						disabled: !wallet || chainBusy || !liveTrading,
 						"data-testid": "slice-buy",
 						onClick: () => void useAgents.getState().buySlice(mint, Number(sol.replace(",", "."))),
 						children: "Купити ключем агента"
@@ -273,6 +279,7 @@ function WalletDesk() {
 	const lossStreak = useAgents((s) => s.lossStreak);
 	const daySpent = useAgents((s) => s.daySpent);
 	const sessionSpent = useAgents((s) => s.sessionSpent);
+	const liveTrading = useAgents((s) => s.liveTrading);
 	const liveArmed = useAgents((s) => s.liveArmed);
 	const liveAck = useAgents((s) => s.liveAck);
 	const autoRun = useAgents((s) => s.autoRun);
@@ -556,7 +563,7 @@ function WalletDesk() {
 					})
 				]
 			}),
-			/* @__PURE__ */ jsxs("div", {
+			liveTrading ? /* @__PURE__ */ jsxs("div", {
 				className: "mt-2 rounded-md border border-border p-2",
 				"data-testid": "bridge-block",
 				children: [
@@ -655,7 +662,7 @@ function WalletDesk() {
 						]
 					}) : null
 				]
-			}),
+			}) : null,
 			/* @__PURE__ */ jsx("p", {
 				className: "mt-2 text-xs text-muted leading-normal",
 				children: `Пісочниця. Це тестовий переказ Devnet. Мейннет лише читання${mainnetSlot != null ? `, слот ${mainnetSlot}, вузол живий` : ""}.`
@@ -668,7 +675,7 @@ function WalletDesk() {
 				className: "mt-1 text-xs leading-normal",
 				children: "Запиши секрет ключа, потім надсилай mainnet SOL на цю адресу."
 			}) : null,
-			/* @__PURE__ */ jsxs("div", {
+			liveTrading ? /* @__PURE__ */ jsxs("div", {
 				className: "mt-2 flex flex-col gap-1 text-xs",
 				children: [
 					/* @__PURE__ */ jsxs("label", {
@@ -700,6 +707,10 @@ function WalletDesk() {
 						}), "Агент працює сам у межах лімітів"]
 					})
 				]
+			}) : /* @__PURE__ */ jsx("p", {
+				className: "mt-2 text-xs text-muted leading-normal",
+				"data-testid": "live-off",
+				children: "Живі угоди вимкнено в цій збірці: агенти торгують лише в пісочниці (paper / devnet) і пишуть результати в Strategy NFT. Реальні ринки й ціни лише читаються."
 			}),
 			/* @__PURE__ */ jsxs("p", {
 				className: "mt-1 text-xs leading-normal",

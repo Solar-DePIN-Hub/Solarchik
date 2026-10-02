@@ -69,6 +69,8 @@ export async function readArbCreditOnServer(asset: string): Promise<{ ok: true; 
 export async function claimArbCreditOnServer(input: { wallet: string; asset: string; sig: string }): Promise<CreditResult> {
   const { wallet, asset, sig } = input;
   if (!isAddress(wallet) || !isAddress(asset) || !isSignature(sig)) return { ok: false, reason: "Погані дані.", creditSol: null };
+  const { LIVE_OFF_REASON, liveTradingFrom } = await import("./live-trading.ts");
+  if (!liveTradingFrom(process.env.LIVE_TRADING_ENABLED)) return { ok: false, reason: LIVE_OFF_REASON, creditSol: null };
   const sql = await sqlOrNull();
   if (!sql) return { ok: false, reason: "Кредит арбу закритий: немає бази (DATABASE_URL). Нічого не зараховано.", creditSol: null };
   const ledger = await import("./guard-ledger.server");

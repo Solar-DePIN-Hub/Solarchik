@@ -478,3 +478,37 @@ describe("buffer alias on the server", () => {
     assert.equal(ix.data.length, 12);
   });
 });
+
+describe("live trading is off by default (hackathon build)", () => {
+  it("only an explicit LIVE_TRADING_ENABLED=true turns it on", async () => {
+    const { liveTradingFrom, arbMainnetFlag } = await import("./live-trading.ts");
+    for (const v of [undefined, null, "", "false", "0", "yes", "1", " tru e"]) assert.equal(liveTradingFrom(v as string | undefined), false, String(v));
+    assert.equal(liveTradingFrom("true"), true);
+    assert.equal(liveTradingFrom(" TRUE "), true);
+    // Mainnet arb needs both flags.
+    assert.equal(arbModeFor(arbMainnetFlag(undefined, "true"), "shared").mode, "sim");
+    assert.equal(arbModeFor(arbMainnetFlag("false", "true"), "shared").mode, "sim");
+    assert.equal(arbModeFor(arbMainnetFlag("true", "true"), "shared").mode, "mainnet");
+  });
+
+  it("the browser gate starts closed and every live path checks it", async () => {
+    const gate = await import("./live-trading.ts");
+    assert.equal(gate.liveTradingAllowed(), false);
+    const src = (f: string) => readFileSync(new URL(f, import.meta.url), "utf8");
+    const poly = src("./poly-order.ts");
+    const place = poly.slice(poly.indexOf("export async function placePolyOrder"));
+    assert.ok(place.indexOf("liveTradingAllowed()") > 0 && place.indexOf("liveTradingAllowed()") < place.indexOf("loadPolygonAccount()"));
+    const store = src("./store.ts");
+    const body = (name: string) => store.slice(store.indexOf(name), store.indexOf(name) + 400);
+    for (const name of ["setLiveArmed(on) {", "setLiveAck(on) {", "async fundArbDesk(", "async claimArbDeposit(", "async buySlice(", "async prepareBridgeDeposit(", "async confirmBridge(", "async function sendLiveSwap("]) {
+      assert.match(body(name), /liveTradingAllowed\(\)/, name);
+    }
+    const auto = store.slice(store.indexOf("setAutoRun(on) {"), store.indexOf("setAutoRun(on) {") + 900);
+    assert.match(auto, /liveTradingAllowed\(\)/);
+    const dep = src("./deposit.server.ts");
+    assert.equal((dep.match(/liveTradingFrom\(process\.env\.LIVE_TRADING_ENABLED\)/g) || []).length, 3);
+    assert.match(src("./payments.server.ts"), /LIVE_TRADING_ENABLED/);
+    assert.match(src("./arb-guard.server.ts"), /arbMainnetFlag\(process\.env\.LIVE_TRADING_ENABLED, process\.env\.ARB_MAINNET_ENABLED\)/);
+    assert.match(src("./mint.server.ts"), /liveTrading: liveTradingFrom\(process\.env\.LIVE_TRADING_ENABLED\)/);
+  });
+});
