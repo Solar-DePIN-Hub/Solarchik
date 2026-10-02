@@ -320,10 +320,19 @@ Seeker CLOCK IN default (mainnet) left as is, as asked.
 **Changes**
 - Settings → Call secretary → "Forward unanswered calls to Sol secretary". Each button opens the system dialer (`ACTION_DIAL`, no CALL_PHONE) pre-filled with a GSM conditional-forwarding code, and the user presses call. On: `**61*<num>#` (no answer), `**67*<num>#` (busy), `**62*<num>#` (unreachable). Off: `##61#`, `##67#`, `##62#`, and `##004#` (all conditional forwarding). `#` is escaped in the `tel:` URI.
 - EN/UK text explains that the carrier does the forwarding, contacts still ring normally (call screening never touches them), carrier fees may apply, and CDMA networks and some carriers use different codes.
-- Secretary number: **empty by default, set in Settings**. There is no verified secretary phone number. The screen worker has no carrier, SIP or Twilio/Zadarma number configured (only OPENAI_API_KEY plus KV). The only number in the repos is the web save default `380914810885` (`src/lib/game/save.ts`, from 0.19.51), and nothing ties it to the secretary, so it is not used. Validation accepts international format only: `+` or `00`, then 8–15 digits with no leading 0. Spaces, dashes, dots and brackets are stripped. `*`, `#`, letters and a second `+` are rejected, so typed input cannot alter the MMI code. Stored in `solarchik.secretary` and wiped by Delete my data.
+- Secretary number: **defaults to `+380914810885`**, the Sol secretary's Zadarma virtual number. The owner confirmed it on 2026-10-02; it is paid until 21.10.2026, on Zadarma SIP 810891 with a virtual PBX. The web app has the same default (`src/lib/game/save.ts`). The player can edit it or clear it ("cleared" stays cleared; Delete my data restores the default). Validation accepts international format only: `+` or `00`, then 8–15 digits with no leading 0. `*`, `#`, letters and a second `+` are rejected, so typed input cannot alter the MMI code.
 
 **Tests**: `testDebugUnitTest` ran 142 tests: 137 passed, 0 failed, 5 skipped (opt-in ITs). There are 4 new SecretaryTest cases: number validation and the empty default, the codes and `tel:` escaping, no CALL_PHONE, and a Robolectric Settings click-through that asserts the `ACTION_DIAL` intents. `lintDebug` reported no issues.
 
 **APKs** (box only)
-- `solarchik-0.20.6-debug.apk`: 6761492 B, sha256 `6a6b2c0e336309c1eae07f335dde0ebc109b64bbf2d55da223cd17bf3d1f5924`.
-- `solarchik-0.20.6-release-boxkey.apk`: 3228145 B, sha256 `391f8c59f811d0c91f6909af29b0ac1b8cea674c9a8539d7db79b0d6ad2ddf6d`, `CN=Solarchik BOX TEST KEY (not production)`, cert SHA-256 `91102f8f…59a01e`.
+- `solarchik-0.20.6-debug.apk`: 6995750 B, sha256 `60457b4fa960cb8c65620ab431a73916494a31b08f27d9bc0b2a8995e39cb982`.
+- `solarchik-0.20.6-release-boxkey.apk`: 3228284 B, sha256 `8533b529d66fc6f364d4f431474996737efaaa443a32ee8f903e5875946822b5`, `CN=Solarchik BOX TEST KEY (not production)`, cert SHA-256 `91102f8f…59a01e`.
+
+**How a call to +380914810885 reaches the AI** (not configured; nothing was changed on Zadarma):
+- Route the number in Zadarma to OpenAI's SIP endpoint `proj_<id>@sip.api.openai.com` over TLS on port 5061. Use either "Virtual phone numbers → ⚙ → External Server (SIP URI)" or "My PBX → Extensions → Call forwarding → External server (SIP URI)".
+- In the OpenAI project that owns the worker's key, set a webhook for `realtime.call.incoming` to `https://solarchik-screen.davidbell1603.workers.dev/sip`.
+- The worker then answers with `gpt-realtime` and the VOICE prompt.
+- Gaps:
+  - The worker does not verify the webhook signature.
+  - No sideband WebSocket is open, so nothing is written to `/voicemail`, the per-player inbox, or billing.
+  - The player is not identified from the SIP Diversion header.

@@ -157,21 +157,22 @@ class SecretaryTest {
 
     // ---- 0.20.6: carrier call forwarding to the Sol secretary ----
 
-    @Test fun forwardNumberIsEmptyByDefaultAndValidated() {
-        assertEquals("", Secretary.forwardNumber(ctx))
+    @Test fun forwardNumberDefaultsToTheSecretaryAndIsValidated() {
+        assertEquals("+380914810885", Secretary.forwardNumber(ctx))
+        assertEquals(Secretary.DEFAULT_FORWARD_NUMBER, Secretary.cleanNumber(Secretary.DEFAULT_FORWARD_NUMBER))
         assertEquals("+380441234567", Secretary.cleanNumber(" +380 (44) 123-45-67 "))
         assertEquals("+12025550123", Secretary.cleanNumber("0012025550123"))
         listOf("", "0441234567", "+0441234567", "+38044", "+1234567890123456", "+38044*123#", "+380+441234567", "tel:+380441234567", "+38o441234567")
             .forEach { assertNull(it, Secretary.cleanNumber(it)) }
         assertNull(Secretary.setForwardNumber(ctx, "12345"))
-        assertEquals("", Secretary.forwardNumber(ctx))
+        assertEquals("invalid input keeps the old number", "+380914810885", Secretary.forwardNumber(ctx))
         assertEquals("+380441234567", Secretary.setForwardNumber(ctx, "+380 44 123 45 67"))
         assertEquals("+380441234567", Secretary.forwardNumber(ctx))
         assertEquals("", Secretary.setForwardNumber(ctx, "  "))
-        assertEquals("", Secretary.forwardNumber(ctx))
+        assertEquals("cleared stays cleared", "", Secretary.forwardNumber(ctx))
         Secretary.setForwardNumber(ctx, "+380441234567")
         AppData.wipe(ctx)
-        assertEquals("", Secretary.forwardNumber(ctx))
+        assertEquals("wipe restores the default", "+380914810885", Secretary.forwardNumber(ctx))
     }
 
     @Test fun gsmForwardingCodes() {
@@ -198,12 +199,19 @@ class SecretaryTest {
         a.select(MainActivity.Tab.SETTINGS)
         val root = a.window.decorView
         val noAnswer = ctx.getString(R.string.fwd_no_answer, "**61")
+        val input = all(root).filterIsInstance<EditText>().single { it.hint == ctx.getString(R.string.fwd_number_hint) }
+        assertEquals("+380914810885", input.text.toString())
+        assertTrue(texts(root).contains(ctx.getString(R.string.fwd_number_set, "+380914810885")))
+        find(root, noAnswer)!!.performClick()
+        assertEquals("**61*+380914810885#", shadowOf(a).nextStartedActivity.data!!.schemeSpecificPart)
+
+        // Cleared: the button does nothing but explain.
+        input.setText("")
+        find(root, ctx.getString(R.string.fwd_save))!!.performClick()
         assertTrue(texts(root).contains(ctx.getString(R.string.fwd_number_empty)))
-        // Without a number the button does nothing but explain.
         find(root, noAnswer)!!.performClick()
         assertNull(shadowOf(a).nextStartedActivity)
 
-        val input = all(root).filterIsInstance<EditText>().single { it.hint == ctx.getString(R.string.fwd_number_hint) }
         input.setText("+380 44 123 45 67")
         find(root, ctx.getString(R.string.fwd_save))!!.performClick()
         assertEquals("+380441234567", Secretary.forwardNumber(ctx))

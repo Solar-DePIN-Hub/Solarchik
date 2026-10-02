@@ -74,15 +74,18 @@ object Secretary {
     const val FORWARD_ALL_OFF = "##004#"
 
     /**
-     * No verified secretary phone number exists yet (the screen worker has no carrier/SIP number configured),
-     * so the target is empty until the player or owner types one in.
+     * The Sol secretary's Zadarma virtual number (owner-confirmed 2026-10-02; the number is paid until 21.10.2026).
+     * Same default as the web app (src/lib/game/save.ts secNumber). The player can change or clear it in Settings.
      */
-    fun forwardNumber(ctx: Context): String = prefs(ctx).getString("fwdNumber", null).orEmpty()
+    const val DEFAULT_FORWARD_NUMBER = "+380914810885"
+
+    /** Saved number; the default until the player saves another one; "" once the player cleared it. */
+    fun forwardNumber(ctx: Context): String = prefs(ctx).getString("fwdNumber", null) ?: DEFAULT_FORWARD_NUMBER
 
     /** Saves a valid number (returns it) or leaves the old one and returns null. Blank clears it. */
     fun setForwardNumber(ctx: Context, raw: String): String? {
         if (raw.isBlank()) {
-            prefs(ctx).edit().remove("fwdNumber").apply()
+            prefs(ctx).edit().putString("fwdNumber", "").apply()
             return ""
         }
         val clean = cleanNumber(raw) ?: return null

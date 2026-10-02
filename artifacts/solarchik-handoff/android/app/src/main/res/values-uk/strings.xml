@@ -351,7 +351,7 @@
     <string name="fwd_number_label">Номер секретаря</string>
     <string name="fwd_number_hint">+380…</string>
     <string name="fwd_save">Зберегти</string>
-    <string name="fwd_number_empty">Номер секретаря ще не задано. Введіть його в міжнародному форматі (+ і код країни).</string>
+    <string name="fwd_number_empty">Номер секретаря не задано. Введіть його в міжнародному форматі (+ і код країни) або номер Sol-секретаря +380914810885.</string>
     <string name="fwd_number_set">Переадресація на: %1$s</string>
     <string name="fwd_number_bad">Потрібен міжнародний формат: + і код країни, 8–15 цифр.</string>
     <string name="fwd_number_saved">Номер секретаря збережено.</string>

@@ -363,7 +363,7 @@
     <string name="fwd_number_label">Secretary phone number</string>
     <string name="fwd_number_hint">+380…</string>
     <string name="fwd_save">Save</string>
-    <string name="fwd_number_empty">No secretary number set yet. Enter it in international format (+ and country code).</string>
+    <string name="fwd_number_empty">No secretary number set. Enter it in international format (+ and country code), or the Sol secretary number +380914810885.</string>
     <string name="fwd_number_set">Forwarding target: %1$s</string>
     <string name="fwd_number_bad">Use international format: + and country code, 8–15 digits.</string>
     <string name="fwd_number_saved">Secretary number saved.</string>
