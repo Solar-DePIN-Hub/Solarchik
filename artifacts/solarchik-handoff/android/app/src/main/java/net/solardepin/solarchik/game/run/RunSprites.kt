@@ -24,8 +24,11 @@ import kotlin.math.sin
  * Bought robots run on their own 4-frame strips (assets/sprites/robots/<id>-run-N.webp).
  */
 class RunSprites(private val assets: AssetManager) {
-    /** A frame ready to blit: [bmp] with the ink ring baked in, [pad] px of ring on each side, [rim] its silhouette. */
-    class Frame(val bmp: Bitmap, val pad: Int, val rim: Bitmap)
+    /**
+     * A frame ready to blit: [bmp] with the ink ring baked in, [pad] px of ring on each side, [rim] its
+     * silhouette, [cx] the head/torso pivot as a fraction of the bitmap width (drawn at the feet x).
+     */
+    class Frame(val bmp: Bitmap, val pad: Int, val rim: Bitmap, val cx: Float = 0.5f)
 
     private val runSrc: List<Bitmap> by lazy { (1..8).mapNotNull { load("art/hero/run-$it.webp") } }
     private val jumpSrc: List<Bitmap> by lazy { (1..4).mapNotNull { load("art/hero/jump-$it.webp") } }
@@ -47,24 +50,37 @@ class RunSprites(private val assets: AssetManager) {
     private val robotFrames = HashMap<String, List<Frame>>()
     private val robotSlide = HashMap<String, Frame?>()
 
-    /** Scale and ink every hero frame for an on-screen body height of [px] device pixels. */
+    /**
+     * Scale and ink every hero frame for an on-screen body height of [px] device pixels.
+     * 0.21.7: one common scale for the whole set (the tallest run frame = [px]) instead of every
+     * frame stretched to the same height. The painted frames are cropped tight and differ 426–459 px,
+     * so per-frame normalising made the robot pulse in size and drift sideways every step.
+     */
+    @Synchronized
     fun prepareHero(px: Int) {
         if (px <= 0 || px == heroPx) return
         heroPx = px
-        run = runSrc.map { frame(it, px) }
-        jump = jumpSrc.map { frame(it, px) }
+        val ref = runSrc.maxOfOrNull { it.height } ?: 1
+        run = runSrc.map { frame(it, px * it.height / ref) }
+        jump = jumpSrc.map { frame(it, px * it.height / ref) }
         slide = slideSrc?.let { frame(it, (px * SLIDE_H).roundToInt()) }
         robotFrames.clear()
         robotSlide.clear()
     }
 
     /** web SPR.robotRun(id): the bought robot's 4-frame run strip, prepared (empty if missing). */
+    @Synchronized
     fun robotRun(id: String): List<Frame> {
         if (heroPx <= 0) return emptyList()
-        return robotFrames.getOrPut(id) { robotSources(id).map { frame(it, heroPx) } }
+        return robotFrames.getOrPut(id) {
+            val src = robotSources(id)
+            val ref = src.maxOfOrNull { it.height } ?: 1
+            src.map { frame(it, heroPx * it.height / ref) }
+        }
     }
 
     /** A bought robot's slide pose: its first run frame leaned back, prepared. */
+    @Synchronized
     fun robotSlide(id: String): Frame? {
         if (heroPx <= 0) return null
         return robotSlide.getOrPut(id) {
@@ -113,16 +129,36 @@ class RunSprites(private val assets: AssetManager) {
         }
         val body = Bitmap.createScaledBitmap(cur, w, h, true)
         if (cur !== src && cur !== body) cur.recycle()
+        // 0.21.7: a thinner, even ink line (12 offsets at 1.3 %, was a 16-blit 2.2 % ring that read
+        // as a brown smudge on small screens).
         val p = max(2, (h * OUTLINE).roundToInt())
         val out = Bitmap.createBitmap(w + 2 * p, h + 2 * p, Bitmap.Config.ARGB_8888)
         val cv = Canvas(out)
-        for (k in 0 until 16) {
-            val a = k * PI / 8
+        for (k in 0 until 12) {
+            val a = k * PI / 6
             cv.drawBitmap(body, (p + cos(a) * p).toFloat(), (p + sin(a) * p).toFloat(), ink)
         }
         cv.drawBitmap(body, p.toFloat(), p.toFloat(), plain)
+        val cx = (p + pivotX(body)) / out.width
         if (body !== src) body.recycle()
-        return Frame(out, p, out.extractAlpha())
+        return Frame(out, p, out.extractAlpha(), cx)
+    }
+
+    /** Alpha-weighted x centre of the top 45 % (head + panel): the point that must not wobble. */
+    private fun pivotX(b: Bitmap): Float {
+        val w = b.width
+        val rows = max(1, (b.height * 0.45f).roundToInt())
+        val px = IntArray(w)
+        var sum = 0.0
+        var wx = 0.0
+        for (y in 0 until rows) {
+            b.getPixels(px, 0, w, 0, y, w, 1)
+            for (x in 0 until w) {
+                val a = px[x] ushr 24
+                if (a > 40) { sum += a; wx += a.toDouble() * x }
+            }
+        }
+        return if (sum > 0) (wx / sum).toFloat() else w / 2f
     }
 
     private fun leaned(src: Bitmap, deg: Float): Bitmap {
@@ -143,8 +179,8 @@ class RunSprites(private val assets: AssetManager) {
         /** Slide pose height as a fraction of the standing body. */
         const val SLIDE_H = 0.5f
         const val RUN_RATE = 1.5
-        const val OUTLINE = 0.022f
-        const val INK = 0xFF1A1418.toInt()
+        const val OUTLINE = 0.013f
+        const val INK = 0xFF141826.toInt()
     }
 
     private fun load(path: String, maxH: Int = 0): Bitmap? = try {

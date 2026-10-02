@@ -43,10 +43,33 @@ class WalletError(val kind: Kind, detail: String = "", val signOnlyMayHelp: Bool
                 Kind.NO_WALLET -> ctx.getString(net.solardepin.solarchik.R.string.err_no_wallet)
                 Kind.DECLINED -> ctx.getString(net.solardepin.solarchik.R.string.err_declined)
                 Kind.NETWORK -> ctx.getString(net.solardepin.solarchik.R.string.err_network)
-                Kind.FAILED -> ctx.getString(net.solardepin.solarchik.R.string.err_failed, (t.message ?: "").take(120))
+                Kind.FAILED -> ctx.getString(net.solardepin.solarchik.R.string.err_failed, detail(ctx, t.message))
             }
             is java.io.IOException -> ctx.getString(net.solardepin.solarchik.R.string.err_network)
-            else -> ctx.getString(net.solardepin.solarchik.R.string.err_failed, (t?.message ?: "").take(120))
+            else -> ctx.getString(net.solardepin.solarchik.R.string.err_failed, detail(ctx, t?.message))
+        }
+
+        /**
+         * 0.21.7: the English detail inside the localized sentence ("Помилка гаманця: Wallet sent no
+         * signature") comes from string resources for every message the app itself raises; a raw
+         * wallet/RPC text is never appended (generic localized line, raw text only in logcat).
+         */
+        fun detail(ctx: android.content.Context, message: String?): String {
+            val m = (message ?: "").trim()
+            val res = when {
+                m.isEmpty() || m == "FAILED" -> net.solardepin.solarchik.R.string.err_d_unknown
+                m == "No account" || m.endsWith("without account") -> net.solardepin.solarchik.R.string.err_d_no_account
+                m == "Wallet sent no signature" -> net.solardepin.solarchik.R.string.err_d_no_sig
+                m == "Wallet returned no transaction" -> net.solardepin.solarchik.R.string.err_d_no_tx
+                m == "Server sent no transaction" -> net.solardepin.solarchik.R.string.err_d_server_no_tx
+                m == "Wallet signed without a message" -> net.solardepin.solarchik.R.string.err_d_no_message
+                m.startsWith("Transaction failed on chain") -> return ctx.getString(net.solardepin.solarchik.R.string.err_d_chain, m.substringAfter(":", "").trim().take(60))
+                else -> 0
+            }
+            if (res != 0) return ctx.getString(res)
+            // Raw wallet/RPC text is English or JSON: logged for debugging, never shown inside a localized sentence.
+            runCatching { android.util.Log.w("SolanaWallet", "wallet failure: ${m.take(200)}") }
+            return ctx.getString(net.solardepin.solarchik.R.string.err_d_unknown)
         }
 
         /**

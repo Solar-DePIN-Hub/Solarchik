@@ -23,8 +23,8 @@ android {
         applicationId = "net.solardepin.solarchik"
         minSdk = 26
         targetSdk = 35
-        versionCode = 71
-        versionName = "0.21.6"
+        versionCode = 72
+        versionName = "0.21.7"
         buildConfigField("boolean", "MAINNET_PAID_MINT", "false")
     }
 
@@ -111,6 +111,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
     implementation("androidx.work:work-runtime-ktx:2.10.5")
+    // 0.21.7: installs src/main/baseline-prof.txt so ART compiles the run/UI code ahead of time
+    implementation("androidx.profileinstaller:profileinstaller:1.4.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")

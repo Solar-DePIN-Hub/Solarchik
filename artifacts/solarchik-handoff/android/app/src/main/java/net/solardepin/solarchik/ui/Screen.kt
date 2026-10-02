@@ -40,10 +40,19 @@ abstract class Screen(val host: MainActivity) {
         return sv
     }
 
+    /** Scroll the page so [v] sits near the top (below the status bar). */
+    fun scrollToView(v: View) {
+        val sv = scroll ?: return
+        var y = 0
+        var cur: View? = v
+        while (cur != null && cur !== sv) { y += cur.top; cur = cur.parent as? View }
+        sv.smoothScrollTo(0, (y - host.topInset - ctx.dp(80)).coerceAtLeast(0))
+    }
+
     open fun applyInsets() {
         if (!this::column.isInitialized) return
         val side = ctx.dp(18)
-        column.setPadding(side, host.topInset + ctx.dp(14), side, host.bottomInset + ctx.dp(96))
+        column.setPadding(side, host.topInset + ctx.dp(14), side, host.bottomInset + ctx.dp(112))
     }
 
     open fun render() {}

@@ -48,8 +48,15 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
     private fun setBalance(key: String, v: Double) {
         if (key == walletKey()) balance = v
     }
-    /** 0 = desk, 1 = strategies (catalog + mint), 2 = Strategy NFT market (devnet). */
-    private var section = 0
+    /** 0 = desk, 1 = strategies (catalog + mint), 2 = Strategy NFT market (devnet), 3 = Slice (stocks, paper). */
+    var section = 0
+        private set
+
+    /** Home cards open a section directly (0.21.7). */
+    fun openSection(i: Int) {
+        section = i.coerceIn(0, 3)
+        render()
+    }
     private var track = Track.PAPER
     private var paying = false
 
@@ -57,7 +64,9 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
     private lateinit var deskBox: LinearLayout
     private lateinit var shopBox: LinearLayout
     private lateinit var marketBox: LinearLayout
+    private lateinit var sliceBox: LinearLayout
     private val strategyPanel by lazy { StrategyPanel(host) { render() } }
+    private val slicePanel by lazy { SlicePanel(host) { render() } }
 
     private lateinit var walletPill: TextView
     private lateinit var clusterLabel: TextView
@@ -85,6 +94,8 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         addView(shopBox)
         marketBox = Ui.column(ctx, gap = 14)
         addView(marketBox)
+        sliceBox = Ui.column(ctx, gap = 12)
+        addView(sliceBox)
         shopBox.apply {
 
         // Tier switch
@@ -166,14 +177,18 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         tierLine.setTextColor(if (pro) Ui.GOLD else Ui.TEXT)
 
         sectionBox.removeAllViews()
-        sectionBox.addView(Ui.segmented(ctx, listOf(ctx.getString(R.string.desk_tab), ctx.getString(R.string.strategies_tab), ctx.getString(R.string.market_tab)), section) {
+        sectionBox.addView(Ui.segmented(ctx, listOf(ctx.getString(R.string.desk_tab), ctx.getString(R.string.strategies_tab), ctx.getString(R.string.market_tab), ctx.getString(R.string.slice_tab)), section) {
             section = it
             render()
         })
         deskBox.visibility = if (section == 0) View.VISIBLE else View.GONE
         shopBox.visibility = if (section == 1) View.VISIBLE else View.GONE
         marketBox.visibility = if (section == 2) View.VISIBLE else View.GONE
-        if (section == 0) {
+        sliceBox.visibility = if (section == 3) View.VISIBLE else View.GONE
+        if (section == 3) {
+            if (MainActivity.tickerEnabled) slicePanel.load()
+            slicePanel.render(sliceBox)
+        } else if (section == 0) {
             renderDesk()
         } else if (section == 2) {
             strategyPanel.load()
@@ -279,7 +294,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
             if (r.track == Track.PAPER && r.key.startsWith("paper:")) pills.addView(Ui.pill(ctx, ctx.getString(R.string.desk_trial), Ui.CYAN))
             pills.addView(Ui.pill(ctx, ctx.getString(if (r.tier == AgentTier.PRO) R.string.tier_pro else R.string.tier_free), if (r.tier == AgentTier.PRO) Ui.GOLD else Ui.CYAN))
             col.addView(pills)
-            col.addView(Ui.top(Ui.text(ctx, r.name, 15f, Ui.TEXT, 800), 6))
+            col.addView(Ui.top(Ui.text(ctx, AgentNames.display(ctx, r.name), 15f, Ui.TEXT, 800), 6))
             sku?.let { col.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.mint_lanes, lanes(it.lanes)), 11f, accent, 700), 2)) }
             r.open?.let { p ->
                 val left = (p.closeAt - System.currentTimeMillis()).coerceAtLeast(0)
@@ -302,7 +317,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         host.scope.launch {
             host.desk.start(r.key, r.skuId, r.tier, r.name, r.track)
                 .onSuccess {
-                    host.toast(ctx.getString(R.string.desk_started, r.name, ctx.getString(if (r.track == Track.PAPER) R.string.track_paper else R.string.track_devnet)))
+                    host.toast(ctx.getString(R.string.desk_started, AgentNames.display(ctx, r.name), ctx.getString(if (r.track == Track.PAPER) R.string.track_paper else R.string.track_devnet)))
                     host.deskChanged()
                 }
                 .onFailure { host.toast(if (it is DeskError) ctx.getString(R.string.desk_not_owned) else host.errorText(it)) }
@@ -313,7 +328,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
     private fun stopRun(r: AgentRun) {
         host.scope.launch {
             host.desk.stop(r.key)
-            host.toast(ctx.getString(R.string.desk_stopped, r.name))
+            host.toast(ctx.getString(R.string.desk_stopped, AgentNames.display(ctx, r.name)))
             host.deskChanged()
             render()
         }
@@ -423,7 +438,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         pills.addView(Ui.pill(ctx, ctx.getString(if (tier == AgentTier.PRO) R.string.tier_pro else R.string.tier_free), if (tier == AgentTier.PRO) Ui.GOLD else Ui.CYAN, filled = tier == AgentTier.PRO))
         if (sku.paidOnly) pills.addView(Ui.pill(ctx, ctx.getString(R.string.tier_paid_only), Ui.GOLD))
         col.addView(pills)
-        col.addView(Ui.top(Ui.text(ctx, sku.nameFor(tier), 17f, Ui.TEXT, 800), 8))
+        col.addView(Ui.top(Ui.text(ctx, AgentNames.display(ctx, sku.nameFor(tier)), 17f, Ui.TEXT, 800), 8))
         col.addView(Ui.top(Ui.muted(ctx, ctx.getString(sku.blurbRes)), 4))
         col.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.mint_lanes, lanes(sku.lanes)), 12f, sku.accent, 700), 6))
         row.addView(Ui.weight(col))
@@ -509,7 +524,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         val row = Ui.row(ctx, gap = 12)
         row.addView(Ui.image(ctx, sku?.artRes ?: R.drawable.robot_sunflower), LinearLayout.LayoutParams(dp(44), dp(56)))
         val col = Ui.column(ctx)
-        col.addView(Ui.text(ctx, a.name, 15f, Ui.TEXT, 800))
+        col.addView(Ui.text(ctx, AgentNames.display(ctx, a.name), 15f, Ui.TEXT, 800))
         val fee = Catalog.feeRateFor(a.tier)
         col.addView(Ui.top(Ui.muted(ctx, Fmt.short(a.asset) + " · " + ctx.getString(R.string.agent_fee_line, Fmt.pct(fee)), 12f), 3))
         row.addView(Ui.weight(col))

@@ -58,6 +58,7 @@ class YardScreen(host: MainActivity) : Screen(host) {
 
     override fun build(): View = page {
         addView(hero())
+        addView(homeCards())
         addView(todayCard())
         addView(feeCard())
         addView(weekCard())
@@ -112,6 +113,78 @@ class YardScreen(host: MainActivity) : Screen(host) {
         bottom.addView(modPill)
         frame.addView(bottom, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         return frame
+    }
+
+    // ---------------- Home cards (0.21.7): Secretary first, then Agents · Slice · Streak ----------------
+
+    private lateinit var secState: TextView
+    private lateinit var agentsState: TextView
+    private lateinit var sliceState: TextView
+    private lateinit var streakState: TextView
+
+    private fun bold(colors: IntArray, tag: String, onTap: () -> Unit): LinearLayout = Ui.column(ctx).apply {
+        background = Ui.gradient(colors, dp(22).toFloat())
+        setPadding(dp(14), dp(14), dp(14), dp(14))
+        elevation = dp(6).toFloat()
+        isClickable = true
+        foreground = Ui.ripple(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT), dp(22).toFloat(), 0x33FFFFFF)
+        this.tag = tag
+        setOnClickListener {
+            it.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+            onTap()
+        }
+    }
+
+    private fun homeCards(): View = Ui.column(ctx, gap = 10).apply {
+        val sec = bold(intArrayOf(android.graphics.Color.parseColor("#2C6BFF"), android.graphics.Color.parseColor("#7A4DFF")), "home-secretary") {
+            host.select(MainActivity.Tab.SETTINGS, animate = true)
+            (host.screen(MainActivity.Tab.SETTINGS) as? SettingsScreen)?.focusSecretary()
+        }
+        val top = Ui.row(ctx, gap = 12).apply { gravity = Gravity.CENTER_VERTICAL }
+        top.addView(Ui.iconBadge(ctx, R.drawable.ic_call, android.graphics.Color.WHITE, 40))
+        top.addView(Ui.weight(Ui.column(ctx).apply {
+            addView(Ui.text(ctx, ctx.getString(R.string.home_sec_title), 18f, android.graphics.Color.WHITE, 900))
+            secState = Ui.text(ctx, "", 12f, Ui.withAlpha(android.graphics.Color.WHITE, 0xDD), 700)
+            addView(Ui.top(secState, 2))
+        }))
+        top.addView(Ui.text(ctx, "›", 26f, android.graphics.Color.WHITE, 900))
+        sec.addView(top)
+        addView(sec)
+        val row = Ui.row(ctx, gap = 10)
+        fun tile(colors: IntArray, tag: String, icon: Int, title: Int, onTap: () -> Unit): TextView {
+            val t = bold(colors, tag, onTap)
+            t.addView(Ui.image(ctx, icon).apply { setColorFilter(Ui.INK) }, LinearLayout.LayoutParams(dp(22), dp(22)))
+            t.addView(Ui.top(Ui.text(ctx, ctx.getString(title), 14f, Ui.INK, 900).apply { maxLines = 1 }, 8))
+            val state = Ui.text(ctx, "", 11f, Ui.withAlpha(Ui.INK, 0xCC), 800).apply { maxLines = 2 }
+            t.addView(Ui.top(state, 2))
+            row.addView(t, LinearLayout.LayoutParams(0, dp(108), 1f))
+            return state
+        }
+        agentsState = tile(intArrayOf(android.graphics.Color.parseColor("#FFD86B"), android.graphics.Color.parseColor("#F5A524")), "home-agents", R.drawable.ic_nav_agents, R.string.home_agents_title) {
+            host.select(MainActivity.Tab.AGENTS, animate = true)
+            (host.screen(MainActivity.Tab.AGENTS) as? AgentsScreen)?.openSection(0)
+        }
+        sliceState = tile(intArrayOf(android.graphics.Color.parseColor("#7CF0D0"), android.graphics.Color.parseColor("#2FB8C9")), "home-slice", R.drawable.ic_slice, R.string.home_slice_title) {
+            host.select(MainActivity.Tab.AGENTS, animate = true)
+            (host.screen(MainActivity.Tab.AGENTS) as? AgentsScreen)?.openSection(3)
+        }
+        streakState = tile(intArrayOf(android.graphics.Color.parseColor("#FF9E6B"), android.graphics.Color.parseColor("#FF5E7E")), "home-streak", R.drawable.ic_flame, R.string.home_streak_title) {
+            host.select(MainActivity.Tab.RUN, animate = true)
+        }
+        addView(row)
+    }
+
+    private fun renderHome() {
+        if (!this::secState.isInitialized) return
+        val sup = net.solardepin.solarchik.screen.Secretary.supported()
+        val on = sup && net.solardepin.solarchik.screen.PlayerIds.screeningOn(ctx) && net.solardepin.solarchik.screen.Secretary.holdsRole(ctx)
+        secState.text = ctx.getString(when { !sup -> R.string.home_sec_unsupported; on -> R.string.home_sec_on; else -> R.string.home_sec_off })
+        val running = host.desk.state().runs.count { it.running }
+        agentsState.text = if (running > 0) ctx.resources.getQuantityString(R.plurals.home_agents_running, running, running) else ctx.getString(R.string.home_agents_none)
+        val book = net.solardepin.solarchik.agents.SliceStore(ctx).book()
+        sliceState.text = ctx.getString(R.string.home_slice_state, "$" + String.format(java.util.Locale.US, "%,.0f", book.value(emptyMap())))
+        val st = save.liveStreak().streak
+        streakState.text = ctx.resources.getQuantityString(R.plurals.home_streak_days, st, st)
     }
 
     private fun todayCard(): View = Ui.card(ctx).apply {
@@ -204,6 +277,7 @@ class YardScreen(host: MainActivity) : Screen(host) {
 
     override fun render() {
         if (!this::status.isInitialized) return
+        renderHome()
         val goal = GameSave.GOAL_M
         renderedDay = save.today()
         val state = save.liveStreak()
@@ -262,8 +336,21 @@ class YardScreen(host: MainActivity) : Screen(host) {
         weekSub.text = ctx.getString(R.string.yard_week_sub, state.streak)
         renderFee()
         renderCrew()
-        solLine.text = SolScreen.tipOfDay(ctx, save.today())
+        renderSolLine(state.streak)
         renderClocks()
+    }
+
+    /** Live AI greeting once a day (cached); the tip of the day only until it lands / offline. */
+    private fun renderSolLine(streak: Int) {
+        val day = save.today()
+        val lang = host.lang
+        val greet = net.solardepin.solarchik.sol.SolGreeting.cached(ctx, day, lang)
+        solLine.text = greet ?: SolScreen.tipOfDay(ctx, day)
+        if (greet != null) return
+        host.scope.launch {
+            val g = net.solardepin.solarchik.sol.SolGreeting.fetch(ctx, day, lang, ctx.getString(R.string.sol_greet_cue, streak))
+            if (g != null) solLine.text = g
+        }
     }
 
     private fun renderWeek(days: List<String>) {

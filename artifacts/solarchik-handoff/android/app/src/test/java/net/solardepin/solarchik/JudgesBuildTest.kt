@@ -43,8 +43,10 @@ class JudgesBuildTest {
         val src = File("src/main/java/net/solardepin/solarchik").walkTopDown().filter { it.extension == "kt" }
             .joinToString("\n") { it.readText() }
         assertFalse("old server without /api/native", "solarchik-super-app" in src)
-        val panel = File("src/main/java/net/solardepin/solarchik/ui/StrategyPanel.kt").readText()
-        val called = Regex("""(?:post|confirm)\("([a-z-]+)"""").findAll(panel).map { it.groupValues[1] }.toSet()
+        // 0.21.7: buy / strategy change moved into StrategyFlows (shared with Sol's confirmed actions).
+        val panel = File("src/main/java/net/solardepin/solarchik/ui/StrategyPanel.kt").readText() +
+            File("src/main/java/net/solardepin/solarchik/agents/StrategyFlows.kt").readText()
+        val called = Regex("""(?:post|confirm|api)\("([a-z-]+)"""").findAll(panel).map { it.groupValues[1] }.toSet()
         assertEquals(routes.toSet(), called)
     }
 

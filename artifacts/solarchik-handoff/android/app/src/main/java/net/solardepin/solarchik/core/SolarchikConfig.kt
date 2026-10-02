@@ -52,12 +52,20 @@ object SolarchikConfig {
     const val AGENT_URI = "urn:solarchik:agent"
     const val CORE_NAME_MAX = 32
     const val RPC_DEVNET = "https://api.devnet.solana.com"
+    /** Server proxy for devnet JSON-RPC: retries 429/5xx and falls back to a second node (0.21.7). */
+    const val RPC_DEVNET_FALLBACK = "https://solarchik-market.vercel.app/solana-rpc"
     const val RPC_MAINNET = "https://api.mainnet-beta.solana.com"
     const val AIRDROP_SOL = 1.0
     const val LAMPORTS_PER_SOL = 1_000_000_000L
 
     // --- Sol (AI friend worker) ---
     const val FRIEND_CHAT_URL = "https://friend.solardepin.net/v1/chat"
+    /** Primary Sol chat (Gemini, solarchik-market server; same host as StrategyMarket). */
+    const val SOL_CHAT_URL = "https://solarchik-market.vercel.app/api/native/sol-chat"
+    /** Sol's neural voice (Gemini TTS, WAV). The system TTS is only the offline fallback. */
+    const val SOL_VOICE_URL = "https://solarchik-market.vercel.app/api/native/sol-voice"
+    /** Sol "do things" mode: model → one structured action; the app confirms and executes (0.21.7). */
+    const val SOL_ACT_URL = "https://solarchik-market.vercel.app/api/native/sol-act"
 
     fun lamports(sol: Double): Long = Math.round(sol * LAMPORTS_PER_SOL)
 }

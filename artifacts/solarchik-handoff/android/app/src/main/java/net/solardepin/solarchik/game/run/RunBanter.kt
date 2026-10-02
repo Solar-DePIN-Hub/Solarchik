@@ -24,14 +24,14 @@ object RunBanter {
     private val UK = mapOf(
         BanterKind.GO to listOf("Поїхали. Я з тобою на дахах.", "Починай стрибати. Я поруч."),
         BanterKind.CHAPTER to listOf("Нові дахи попереду. Дивись під ноги.", "Дахи змінились. Тримай рівновагу."),
-        BanterKind.COMBO to listOf("Гарний темп. Тримай його.", "Добрий ритм. Не поспішай наступний стрибок."),
-        BanterKind.GOLD to listOf("Золоте сонце. Гарна робота."),
-        BanterKind.HURT to listOf("Обережно. Ще є серця.", "Вдарило. Стрибай трохи раніше."),
-        BanterKind.DEAD to listOf("Нічого. Можемо пробігти ще раз.", "Впали. Переведи подих і ще раз."),
-        BanterKind.BONUS to listOf("Летимо. Збирай жовті сонця."),
-        BanterKind.GRIND to listOf("Гарний слайд по дроту. Тримай баланс."),
-        BanterKind.SHIELD to listOf("Щит увімкнений. Можна витримати один удар."),
-        BanterKind.BOSS to listOf("Великий попереду. Стрибни і натисни зверху."),
+        BanterKind.COMBO to listOf("Гарний темп. Тримай його.", "Добрий ритм. Не поспішай із наступним стрибком."),
+        BanterKind.GOLD to listOf("Золоте сонце! Чудово."),
+        BanterKind.HURT to listOf("Обережно, серця ще є.", "Ой, влучило. Стрибай трохи раніше."),
+        BanterKind.DEAD to listOf("Нічого страшного. Пробіжимо ще раз.", "Впали. Переведи подих — і ще раз."),
+        BanterKind.BONUS to listOf("Летимо! Збирай сонечка."),
+        BanterKind.GRIND to listOf("Гарно ковзаєш по дроту. Тримай рівновагу."),
+        BanterKind.SHIELD to listOf("Щит увімкнено — один удар витримаємо."),
+        BanterKind.BOSS to listOf("Попереду великий бос. Стрибни й придави його згори."),
     )
     private val CH_EN = mapOf(
         ChapterId.VILLAGE to "Solar district. Glass canopies crack, keep moving.",
@@ -41,9 +41,9 @@ object RunBanter {
     )
     private val CH_UK = mapOf(
         ChapterId.VILLAGE to "Сонячний квартал. Скляні навіси тріскають, не зупиняйся.",
-        ChapterId.STORM to "Лінія шторму. Стеж за кабелями і вітром.",
+        ChapterId.STORM to "Смуга шторму. Стеж за дротами й вітром.",
         ChapterId.NIGHT to "Нічне місто. Тримайся вогнів у вікнах.",
-        ChapterId.SERPENT to "Високі дахи. Кожен проліт важливий.",
+        ChapterId.SERPENT to "Високі дахи. Тут важить кожен стрибок.",
     )
 
     private var lastLine = ""
@@ -77,8 +77,9 @@ object RunBanter {
 
     fun eventToBanter(ev: Ev): BanterKind? = if (ev == Ev.DEAD) BanterKind.DEAD else null
 
-    fun context(meters: Int, chapter: ChapterId, combo: Int, suns: Int, hearts: Int): String =
-        "${meters}m ${chapter.name.lowercase()} combo $combo suns $suns hearts $hearts"
+    fun context(meters: Int, chapter: ChapterId, combo: Int, suns: Int, hearts: Int, lang: String = "en"): String =
+        if (lang == "uk") "$meters м, комбо $combo, сонечок $suns, сердець $hearts"
+        else "$meters m, combo $combo, suns $suns, hearts $hearts"
 
     fun periodicKind(bonus: Boolean, combo: Int, hearts: Int): BanterKind = when {
         bonus -> BanterKind.BONUS

@@ -248,9 +248,27 @@ object RunSim {
     const val GHOST_MAX = 480
 
     // city rules
-    const val CITY_SPEED0 = 215.0
-    const val CITY_RAMP = 0.021
+    /**
+     * City pace (0.21.7 rebalance; the owner could not get far): start 205, a gentle ramp to 1500 m,
+     * then the old steepness to the 410 cap (was 215 + 0.021/unit, capped by ~930 m).
+     */
+    const val CITY_SPEED0 = 205.0
+    const val CITY_RAMP = 0.009
+    const val CITY_RAMP_LATE = 0.02
+    const val CITY_RAMP_KNEE = 15000.0
     const val CITY_CAP = 410.0
+    /** City hitboxes (smaller than the drawn sprites, so near misses read as misses). */
+    const val CITY_PW = 12.0
+    /** Grace after a lost heart on city roofs (classic keeps 1.45 s). */
+    const val CITY_INVULN = 1.8
+    const val CITY_DIFF_FROM = 2000.0
+    const val CITY_DIFF_SPAN = 16000.0
+    const val CITY_CALM_TO = 3000.0
+    const val CITY_DRONE_FROM = 4000.0
+    const val CITY_WIRE_FROM = 4500.0
+    const val CITY_CRUMBLE_FROM = 5500.0
+    const val CITY_WAVE_FROM = 11000.0
+    const val CITY_EASY_TO = 15000.0
     const val CRACK_TIME = 0.38
     const val WIRE_CYCLE = 2.2
     const val WIRE_WARN = 1.2
@@ -318,9 +336,13 @@ object RunSim {
     fun speedAt(s: RunState): Double {
         val heat = if (s.fever > 0) 10.0 else 0.0
         val grind = if (s.grind) 18.0 else 0.0
-        if (!s.classic) return min(CITY_CAP + 16, CITY_SPEED0 + s.distance * CITY_RAMP + heat + grind)
+        if (!s.classic) return min(CITY_CAP + 16, citySpeed(s.distance) + heat + grind)
         return min(SPEED_CAP + 16, SPEED0 + s.distance * 0.018 + heat + grind)
     }
+
+    fun citySpeed(d: Double): Double =
+        if (d < CITY_RAMP_KNEE) CITY_SPEED0 + d * CITY_RAMP
+        else CITY_SPEED0 + CITY_RAMP_KNEE * CITY_RAMP + (d - CITY_RAMP_KNEE) * CITY_RAMP_LATE
 
     private fun feetOn(px: Double, p: Plat) = !p.fallen && px >= p.x - FEET && px <= p.x + p.w + FEET
 
@@ -345,13 +367,14 @@ object RunSim {
 
     fun playerBox(s: RunState): Box {
         val h = if (s.slide > 0) PH_SLIDE else PH
-        return Box(s.x - PW, s.x + PW, s.y - h, s.y - 2)
+        val pw = if (s.classic) PW else CITY_PW
+        return Box(s.x - pw, s.x + pw, s.y - h, s.y - 2)
     }
 
-    fun enemyBox(e: Enemy): Box = when (e.kind) {
+    fun enemyBox(e: Enemy, city: Boolean = false): Box = when (e.kind) {
         EnemyKind.BUSH -> Box(e.x - 24, e.x + 24, e.y - 20, e.y)
-        EnemyKind.DRONE -> Box(e.x - 22, e.x + 22, e.y - 28, e.y + 6)
-        EnemyKind.MITE -> Box(e.x - 24, e.x + 24, e.y - 32, e.y)
+        EnemyKind.DRONE -> if (city) Box(e.x - 18, e.x + 18, e.y - 24, e.y + 4) else Box(e.x - 22, e.x + 22, e.y - 28, e.y + 6)
+        EnemyKind.MITE -> if (city) Box(e.x - 20, e.x + 20, e.y - 28, e.y) else Box(e.x - 24, e.x + 24, e.y - 32, e.y)
     }
 
     private fun aabb(a: Box, b: Box) = a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t
@@ -512,21 +535,28 @@ object RunSim {
 
     private enum class CityPiece { CALM, PAIR, MITE, DRONE, WAVE, CRUMBLE, WIRE }
 
-    /** 0 at 120 m, 1 from 900 m on: gaps widen and roofs narrow with it. */
-    fun cityDiff(x: Double) = min(1.0, max(0.0, (x - 1200) / 7800))
+    /** 0 at 200 m, 1 from 1800 m on: gaps widen and roofs narrow with it (0.21.7: was 120 → 900 m). */
+    fun cityDiff(x: Double) = min(1.0, max(0.0, (x - CITY_DIFF_FROM) / CITY_DIFF_SPAN))
 
+    /**
+     * Which hazard a roof carries (0.21.7: everything later, in world units = m x 10): calm roofs to
+     * 300 m, mites/pairs from 300 m, drones 400 m, wires 450 m, crumbling roofs 550 m, drone waves
+     * 1100 m, and about one roof in eight more stays calm until 1500 m. Day mods follow the same floors.
+     */
     private fun cityPiece(s: RunState, x: Double): CityPiece {
-        if (x < 1700) return CityPiece.CALM
+        if (x < CITY_CALM_TO) return CityPiece.CALM
         val r = rand(s, 0.0, 1.0)
-        if (s.mod == DayMod.WIRE && r < 0.3) return CityPiece.WIRE
-        if (s.mod == DayMod.DRONES && r < 0.3) return if (x > 3000 && r < 0.15) CityPiece.WAVE else CityPiece.DRONE
+        if (s.mod == DayMod.WIRE && r < 0.3 && x > CITY_WIRE_FROM) return CityPiece.WIRE
+        if (s.mod == DayMod.DRONES && r < 0.3 && x > CITY_DRONE_FROM) return if (x > CITY_WAVE_FROM && r < 0.15) CityPiece.WAVE else CityPiece.DRONE
+        // extra breathers before 1500 m, taken from the crumble/wave share (the hardest roofs)
+        if (x < CITY_EASY_TO && r >= 0.62 && r < 0.75) return CityPiece.CALM
         return when {
             r < 0.19 -> CityPiece.MITE
             r < 0.32 -> CityPiece.PAIR
-            r < 0.45 && x > 2000 -> CityPiece.DRONE
-            r < 0.59 && x > 3200 -> CityPiece.WAVE
-            r < 0.75 && x > 2600 -> CityPiece.CRUMBLE
-            r < 0.86 && x > 2200 -> CityPiece.WIRE
+            r < 0.45 && x > CITY_DRONE_FROM -> CityPiece.DRONE
+            r < 0.59 && x > CITY_WAVE_FROM -> CityPiece.WAVE
+            r < 0.75 && x > CITY_CRUMBLE_FROM -> CityPiece.CRUMBLE
+            r < 0.86 && x > CITY_WIRE_FROM -> CityPiece.WIRE
             else -> CityPiece.CALM
         }
     }
@@ -1036,7 +1066,7 @@ object RunSim {
         s.comboTimer = 0.0
         s.airJumps = 1
         s.coyote = COYOTE
-        s.invuln = 1.45
+        s.invuln = if (s.classic) 1.45 else CITY_INVULN
         s.slide = 0.0
         if (why == DeathKind.FALL) {
             // city rules: cracked roofs ahead of the checkpoint are whole again for the retry
@@ -1331,7 +1361,7 @@ object RunSim {
                 val pb = playerBox(s)
                 for (e in s.enemies) {
                     if (e.dead || e.kind == EnemyKind.BUSH) continue
-                    val eb = enemyBox(e)
+                    val eb = enemyBox(e, !s.classic)
                     val fromAbove = prevY - 2 <= eb.t + 10
                     if (s.vy > 55 && fromAbove && aabb(pb, eb)) {
                         stomp(s, e, events)
@@ -1447,7 +1477,7 @@ object RunSim {
             val pb = playerBox(s)
             for (e in s.enemies) {
                 if (e.dead) continue
-                val eb = enemyBox(e)
+                val eb = enemyBox(e, !s.classic)
                 if (aabb(pb, eb)) {
                     loseHeart(s, events, DeathKind.HIT)
                     break

@@ -93,15 +93,24 @@ class RunAudio(private val context: Context) {
         get() = prefs.getBoolean("runMusicMuted", false)
         set(v) { prefs.edit().putBoolean("runMusicMuted", v).apply(); applyMusic() }
 
-    /** Loads the clips off the UI thread. */
-    fun prepare() {
+    /**
+     * Loads the clips and prepares all music players off the UI thread (0.21.7: MediaPlayer.prepare()
+     * used to run on the UI thread at the first crossfade, a visible hitch mid-run). [onReady] on the UI thread.
+     */
+    fun prepare(onReady: (() -> Unit)? = null) {
         readVolumes()
         Thread({
             for (name in RunSounds.GAIN.keys) {
                 runCatching { context.assets.openFd("audio/sfx/$name.ogg").use { ids[name] = pool.load(it, 1) } }
             }
+            for (i in RunSounds.TRACKS.indices) if (!released) runCatching { build(i)?.let { ready.compareAndSet(i, null, it) } }
+            main.post { onReady?.invoke() }
         }, "run-sfx").start()
     }
+
+    /** Players prepared off-thread, handed to the UI thread. */
+    private val ready = java.util.concurrent.atomic.AtomicReferenceArray<MediaPlayer?>(RunSounds.TRACKS.size)
+    @Volatile private var released = false
 
     private fun readVolumes() {
         sfxVol = prefs.getInt("runSfxVol", 90).coerceIn(0, 100) / 100f
@@ -157,7 +166,9 @@ class RunAudio(private val context: Context) {
         track = RunSounds.GOLDEN
     }
 
-    private fun player(i: Int): MediaPlayer? = players[i] ?: runCatching {
+    private fun player(i: Int): MediaPlayer? = players[i] ?: (ready.getAndSet(i, null) ?: build(i))?.also { players[i] = it }
+
+    private fun build(i: Int): MediaPlayer? = runCatching {
         context.assets.openFd("audio/music/${RunSounds.TRACKS[i]}.ogg").use { fd ->
             MediaPlayer().apply {
                 setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
@@ -167,7 +178,7 @@ class RunAudio(private val context: Context) {
                 prepare()
             }
         }
-    }.getOrNull()?.also { players[i] = it }
+    }.getOrNull()
 
     private fun target(i: Int): Float = if (i == track && wantMusic && !musicMuted) musicVol * (if (ducked) 0.35f else 1f) else 0f
 
@@ -215,6 +226,8 @@ class RunAudio(private val context: Context) {
     }
 
     fun release() {
+        released = true
+        for (i in RunSounds.TRACKS.indices) runCatching { ready.getAndSet(i, null)?.release() }
         main.removeCallbacks(fader)
         for (i in players.indices) { runCatching { players[i]?.release() }; players[i] = null }
         runCatching { pool.release() }

@@ -40,21 +40,51 @@ open class Rpc(val url: String) {
             put("method", method)
             put("params", params)
         }.toString()
-        val req = Request.Builder().url(url)
+        // 0.21.7: the public devnet node answers 429 in bursts. Retry 429/5xx twice (300/900 ms), then once
+        // through the market's /solana-rpc proxy (it retries and falls back to a second node). Airdrops are
+        // never retried: a faucet 429 is a real "no", and a repeat could double-spend the faucet's quota.
+        if (method == "requestAirdrop") return@withContext parse(post(url, body))
+        var last: Throwable? = null
+        for (wait in RETRY_MS) {
+            if (wait > 0) pause(wait)
+            try {
+                return@withContext parse(post(url, body))
+            } catch (e: RpcException) {
+                if (!retryable(e.code)) throw e
+                last = e
+            }
+        }
+        val fb = fallbackFor(url) ?: throw last!!
+        try {
+            parse(post(fb, body))
+        } catch (e: java.io.IOException) {
+            throw last ?: e
+        }
+    }
+
+    /** One HTTP round trip; HTTP failures become [RpcException] with the status as code. Test seam. */
+    protected open fun post(target: String, body: String): String {
+        val req = Request.Builder().url(target)
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
-        client.newCall(req).execute().use { res ->
+        return client.newCall(req).execute().use { res ->
             val text = res.body?.string().orEmpty()
             if (res.code == 429) throw RpcException("rate limited", 429)
             if (!res.isSuccessful) throw RpcException("HTTP ${res.code}", res.code)
-            val obj = runCatching { json.parseToJsonElement(text) as JsonObject }
-                .getOrElse { throw RpcException("bad RPC response") }
-            obj["error"]?.takeIf { it !is JsonNull }?.let {
-                val e = it.jsonObject
-                throw RpcException(e["message"]?.jsonPrimitive?.contentOrNull ?: "rpc error", e["code"]?.jsonPrimitive?.longOrNull?.toInt() ?: 0)
-            }
-            obj["result"] ?: JsonNull
+            text
         }
+    }
+
+    protected open suspend fun pause(ms: Long) = kotlinx.coroutines.delay(ms)
+
+    private fun parse(text: String): JsonElement {
+        val obj = runCatching { json.parseToJsonElement(text) as JsonObject }
+            .getOrElse { throw RpcException("bad RPC response") }
+        obj["error"]?.takeIf { it !is JsonNull }?.let {
+            val e = it.jsonObject
+            throw RpcException(e["message"]?.jsonPrimitive?.contentOrNull ?: "rpc error", e["code"]?.jsonPrimitive?.longOrNull?.toInt() ?: 0)
+        }
+        return obj["result"] ?: JsonNull
     }
 
     suspend fun latestBlockhash(): ByteArray {
@@ -140,6 +170,15 @@ open class Rpc(val url: String) {
     }
 
     companion object {
+        /** First try, then the two retries after 300 and 900 ms. */
+        val RETRY_MS = longArrayOf(0, 300, 900)
+
+        fun retryable(code: Int): Boolean = code == 429 || code in 500..599
+
+        /** The devnet proxy for the public devnet node; other clusters have no fallback. */
+        fun fallbackFor(url: String): String? =
+            if (url == net.solardepin.solarchik.core.SolarchikConfig.RPC_DEVNET) net.solardepin.solarchik.core.SolarchikConfig.RPC_DEVNET_FALLBACK else null
+
         /** Throws [RpcException] (never NPE) when the node answers without a usable blockhash. */
         fun parseBlockhash(r: JsonElement): ByteArray {
             val hash = ((r as? JsonObject)?.get("value") as? JsonObject)?.get("blockhash")?.let { it as? JsonPrimitive }?.contentOrNull

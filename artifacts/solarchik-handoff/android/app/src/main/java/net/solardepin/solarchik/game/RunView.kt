@@ -22,7 +22,7 @@ import net.solardepin.solarchik.game.run.RunAudio
 import net.solardepin.solarchik.game.run.RunRenderer
 import net.solardepin.solarchik.game.run.RunSim
 import net.solardepin.solarchik.game.run.RunSkin
-import net.solardepin.solarchik.game.run.RunSprites
+import net.solardepin.solarchik.game.run.RunPreload
 import net.solardepin.solarchik.game.run.RunState
 import net.solardepin.solarchik.game.run.RunSounds
 import java.util.concurrent.atomic.AtomicBoolean
@@ -138,7 +138,18 @@ class RunView(context: Context, private val listener: Listener? = null) :
 
     // ---- game thread only ----
     private var state: RunState? = null
-    private val sprites by lazy { RunSprites(context.assets) }
+    /** Process-wide prepared sprites (RunPreload): the Yard warms them before the run opens. */
+    private val sprites by lazy { RunPreload.sprites(context) }
+    /** UI -> game: robot/skin to warm before the first run (set before the surface exists). */
+    @Volatile private var primeRobot = "stock"
+    @Volatile private var primeSkin = "flag"
+    /** game: assets decoded, scaled and drawn once (GPU upload) behind the loading cover. */
+    @Volatile var warmed = false
+        private set
+    /** UI thread callback once [warmed]; the activity starts the countdown only then. */
+    var onReady: (() -> Unit)? = null
+    /** Death beat: slow-motion then a frozen world behind the result card. */
+    private var deadAtNs = 0L
     private val renderer by lazy {
         val uk = context.resources.configuration.locales[0].language == "uk"
         // Fredoka has no Cyrillic: Ukrainian in-world text uses the rounded Nunito ExtraBold
@@ -168,6 +179,12 @@ class RunView(context: Context, private val listener: Listener? = null) :
     private fun reducedMotion(): Boolean = runCatching {
         Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
     }.getOrDefault(false)
+
+    /** UI thread: which robot/skin the first run uses, so the warm-up prepares exactly those frames. */
+    fun prime(robot: String, skin: String) {
+        primeRobot = robot
+        primeSkin = skin
+    }
 
     /** UI thread: start (or restart) a run with [s]. Applied by the game thread on its next frame. */
     fun start(s: RunSetup) {
@@ -290,20 +307,74 @@ class RunView(context: Context, private val listener: Listener? = null) :
         return RunSim.create(s.seed, s.mod, s.offerBonus, s.careBoost, s.goalMeters).also { it.tutorial = s.tutorial }
     }
 
+    /**
+     * Game thread, before the first run: decode/scale everything (instant when the Yard preloaded),
+     * then draw a throw-away world a few times so every bitmap is uploaded to the GPU and the draw
+     * code is JIT-warm. The loading cover hides these frames; the sim does not exist yet.
+     */
+    private fun warmUp(): Boolean {
+        val w = surfaceW
+        val h = surfaceH
+        if (w <= 0 || h <= 0) return false
+        val k = h / renderer.logicalH
+        RunPreload.warm(context, primeRobot, primeSkin, k)
+        renderer.skin = RunSkin.of(primeSkin)
+        renderer.robot = primeRobot
+        val dummy = RunSim.create(1, DayMod.of(""), false, false, 1200)
+        for (i in 0 until 3) {
+            val canvas = runCatching { holder.lockHardwareCanvas() }.getOrNull() ?: runCatching { holder.lockCanvas() }.getOrNull() ?: return false
+            try {
+                renderer.draw(canvas, canvas.width, canvas.height, dummy, i * 0.016)
+                RunSim.step(dummy, RunSim.TICK, Input(false, false, false, false))
+                // every hero / robot frame once, tiny, in a corner (covered by the loading layer)
+                val all = sprites.run + sprites.jump + listOfNotNull(sprites.slide) + sprites.robotRun(primeRobot)
+                for ((j, f) in all.withIndex()) {
+                    canvas.drawBitmap(f.bmp, null, android.graphics.RectF(j * 3f, 0f, j * 3f + 2f, 2f), null)
+                    canvas.drawBitmap(f.rim, null, android.graphics.RectF(j * 3f, 3f, j * 3f + 2f, 5f), null)
+                }
+            } finally {
+                holder.unlockCanvasAndPost(canvas)
+            }
+        }
+        renderer.reset()
+        return true
+    }
+
     private fun loop(my: Int) {
         var last = System.nanoTime()
         var acc = 0.0
         while (running && my == generation) {
-            if (restartReq.getAndSet(false) || state == null) {
+            if (!warmed) {
+                if (runCatching { warmUp() }.getOrDefault(true)) {
+                    warmed = true
+                    post { onReady?.invoke() }
+                } else {
+                    try { Thread.sleep(16) } catch (_: InterruptedException) { break }
+                    continue
+                }
+                last = System.nanoTime()
+            }
+            if (RunStartGate.shouldCreate(warmed, setup != null, restartReq.get(), state != null)) {
+                restartReq.set(false)
                 state = newRun()
+                deadAtNs = 0L
                 acc = 0.0
                 state?.let { post { listener?.onHud(RunHud.of(it)) } }
             }
             val s = state
             val now = System.nanoTime()
-            val dt = min((now - last) / 1e9, 0.05)
+            var dt = min((now - last) / 1e9, 0.05)
             last = now
-            if (s != null && !paused) {
+            var drawClock = now / 1e9
+            if (s != null && s.phase == Phase.DEAD) {
+                // death beat: the fall plays in slow motion for DEATH_BEAT, then the world holds still
+                if (deadAtNs == 0L) deadAtNs = now
+                val since = (now - deadAtNs) / 1e9
+                val beat = RunOverlay.DEATH_BEAT_MS / 1000.0
+                dt = if (since < beat) dt * 0.35 else 0.0
+                drawClock = deadAtNs / 1e9 + min(since, beat) * 0.35
+            }
+            if (s != null && !paused && dt > 0) {
                 acc += dt
                 var steps = 0
                 while (acc >= RunSim.TICK && steps < 3) {
@@ -341,7 +412,7 @@ class RunView(context: Context, private val listener: Listener? = null) :
                 if (s != null) {
                     renderer.sunTargetX = sunTargetX
                     renderer.sunTargetY = sunTargetY
-                    renderer.draw(canvas, canvas.width, canvas.height, s, now / 1e9)
+                    renderer.draw(canvas, canvas.width, canvas.height, s, drawClock)
                 }
             } finally {
                 holder.unlockCanvasAndPost(canvas)
@@ -371,6 +442,12 @@ class RunView(context: Context, private val listener: Listener? = null) :
             }
         }
     }
+}
+
+/** When the game thread may create a run: never before the assets are warm (0.21.7 lag fix). */
+object RunStartGate {
+    fun shouldCreate(warmed: Boolean, hasSetup: Boolean, restartRequested: Boolean, hasState: Boolean): Boolean =
+        warmed && hasSetup && (restartRequested || !hasState)
 }
 
 /**

@@ -63,6 +63,10 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
     companion object {
         const val BANNER_MS = 2800L
         const val CARD_W = 404
+        /** Sol's caption chip width (dp). */
+        const val CAPTION_W = 230
+        /** Death beat before the result card (ms): the fall reads, then the card. */
+        const val DEATH_BEAT_MS = 1100L
         const val CARD_W_WIDE = 720
         const val SIGNED_BADGE_MS = 4000L
         val BG = Color.parseColor("#0B1620")
@@ -218,6 +222,15 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
     private val pauseStats: TextView
     private val pauseSign: SignSection
     private val deadLayer = FrameLayout(ctx)
+    /** Death beat layer (dim + word) between the last hit and the result card. */
+    private val deathDim = FrameLayout(ctx)
+    private val deathWord: TextView
+    private var deadSince = 0L
+    /** Tests set 0 to see the card at once. */
+    var deathBeatMs = DEATH_BEAT_MS
+    /** Opaque "getting the roofs ready" cover while RunView warms its assets. */
+    private val loadingLayer = FrameLayout(ctx)
+    private var loading = false
     private val deadCard: LinearLayout
     private val deadTitle: TextView
     private val deadReached: TextView
@@ -389,14 +402,18 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
             setOnClickListener { if (!clock.signed && !clock.busy) actions.signBadge() }
         }
         hud.addView(clockBadge, LayoutParams(LayoutParams.WRAP_CONTENT, dp(46), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(12) })
-        questToast = label("", 14f, FG).apply {
+        // 0.21.7: a small one-line toast at the right edge under the slide button, never mid-screen
+        questToast = label("", 12f, FG).apply {
             background = chip()
-            setPadding(dp(14), dp(8), dp(14), dp(8))
-            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(5), dp(10), dp(5))
+            gravity = Gravity.CENTER_VERTICAL
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            maxWidth = dp(260)
             visibility = GONE
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
-        hud.addView(questToast, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(66) })
+        hud.addView(questToast, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { topMargin = dp(84); rightMargin = dp(12) })
 
         // bottom hint / garden banner
         hintV = label(ctx.getString(R.string.run_hint), 14f, alpha(FG, 0.8f), track = 0.025f).apply { gravity = Gravity.CENTER; setShadowLayer(dp(3).toFloat(), 0f, dp(1).toFloat(), alpha(Color.BLACK, 0.45f)) }
@@ -442,16 +459,18 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         hud.addView(milestoneV, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(64) })
 
         // Sol caption + mic + music
-        captionRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM; visibility = GONE }
-        buddy = ImageView(ctx).apply { scaleType = ImageView.ScaleType.FIT_END; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
-        captionRow.addView(buddy, LinearLayout.LayoutParams(dp(32), dp(36)).apply { marginEnd = dp(6) })
-        captionV = label("", 12f, FG, body).apply {
-            background = chip(); setPadding(dp(10), dp(6), dp(10), dp(6)); maxWidth = dp(240 - 38)
-            setLineSpacing(0f, 1.2f); ellipsize = TextUtils.TruncateAt.END; maxLines = 4
+        // 0.21.7: Sol's line is a small chip in the sky under the hearts (top-left, next to Sol's face),
+        // at most two short lines, auto-hidden by RunRadio. It used to sit low-left over the hero's path.
+        captionRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; visibility = GONE }
+        buddy = ImageView(ctx).apply { scaleType = ImageView.ScaleType.FIT_CENTER; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
+        captionRow.addView(buddy, LinearLayout.LayoutParams(dp(22), dp(24)).apply { marginEnd = dp(5) })
+        captionV = label("", 11f, FG, body).apply {
+            background = chip(); setPadding(dp(8), dp(4), dp(8), dp(4)); maxWidth = dp(CAPTION_W)
+            setLineSpacing(0f, 1.1f); ellipsize = TextUtils.TruncateAt.END; maxLines = 2
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
         captionRow.addView(captionV, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        hud.addView(captionRow, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply { leftMargin = dp(70); bottomMargin = dp(70) })
+        hud.addView(captionRow, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply { leftMargin = dp(12); topMargin = dp(62) })
 
         micBtn = iconButton(R.drawable.ic_run_mic, GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(PRIMARY); setStroke(dp(3), Color.parseColor("#A8650E")) }, 56, 24, PRIMARY_FG, ctx.getString(R.string.run_talk)) { actions.mic() }
         hud.addView(micBtn, LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.START).apply { leftMargin = dp(12); bottomMargin = dp(67) })
@@ -503,6 +522,13 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         pauseLayer.addView(scroller(pauseCard), LayoutParams(dp(CARD_W), LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         addView(pauseLayer, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
+        // ---- death beat ----
+        deathDim.visibility = GONE
+        deathDim.setBackgroundColor(alpha(Color.BLACK, 0.38f))
+        deathWord = label("", 40f, FG).apply { setShadowLayer(dp(6).toFloat(), 0f, dp(2).toFloat(), alpha(Color.BLACK, 0.7f)) }
+        deathDim.addView(deathWord, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        addView(deathDim, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+
         // ---- result card (dead): stats, CLOCK IN sign / day card, rewards reveal ----
         deadLayer.visibility = GONE
         deadLayer.isClickable = true
@@ -552,6 +578,16 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         deadCard.addView(deadCols)
         deadLayer.addView(scroller(deadCard), LayoutParams(dp(CARD_W), LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         addView(deadLayer, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+
+        // ---- loading cover (first frames are warmed behind it; the countdown starts after) ----
+        loadingLayer.setBackgroundColor(BG)
+        loadingLayer.isClickable = true
+        loadingLayer.visibility = GONE
+        val loadCol = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+        loadCol.addView(android.widget.ProgressBar(ctx).apply { indeterminateTintList = ColorStateList.valueOf(PRIMARY) }, LinearLayout.LayoutParams(dp(40), dp(40)))
+        loadCol.addView(label(ctx.getString(R.string.run_loading), 16f, FG), lp(top = 14))
+        loadingLayer.addView(loadCol, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        addView(loadingLayer, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     private fun scroller(card: View) = android.widget.ScrollView(ctx).apply {
@@ -642,8 +678,20 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
 
     fun setCaption(text: String) {
         captionV.text = text
-        captionRow.visibility = if (text.isEmpty()) GONE else VISIBLE
+        captionRow.visibility = if (text.isEmpty() || last?.phase == Phase.DEAD) GONE else VISIBLE
     }
+
+    fun setLoading(on: Boolean) {
+        loading = on
+        if (!on && animations && loadingLayer.visibility == VISIBLE) {
+            loadingLayer.animate().alpha(0f).setDuration(220).withEndAction { loadingLayer.alpha = 1f; refreshVisibility() }.start()
+            loading = false
+            return
+        }
+        refreshVisibility()
+    }
+
+    val isLoading: Boolean get() = loading
 
     fun setListening(on: Boolean) {
         listening = on
@@ -774,8 +822,12 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         clockBanner.visibility = if (banner && !paused) VISIBLE else GONE
         val signedFresh = clock.signed && now - signedSeenAt < SIGNED_BADGE_MS
         clockBadge.visibility = if (live && !paused && clock.open && (!clock.signed || signedFresh)) VISIBLE else GONE
-        deadLayer.visibility = if (dead) VISIBLE else GONE
+        val cardDue = dead && android.os.SystemClock.uptimeMillis() - deadSince >= deathBeatMs
+        deadLayer.visibility = if (cardDue) VISIBLE else GONE
+        deathDim.visibility = if (dead && !cardDue) VISIBLE else GONE
+        if (dead) { questToast.visibility = GONE; captionRow.visibility = GONE }
         if (!live || paused) questToast.visibility = GONE
+        loadingLayer.visibility = if (loading) VISIBLE else GONE
     }
 
     /** Score chip: rolls up to [score] (web: plain tabular digits); jumps straight there on a new run or without animations. */
@@ -833,7 +885,13 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
             deadRibbon.visibility = if (h.clockOpen) VISIBLE else GONE
             if (prev?.phase != Phase.DEAD) {
                 rewardsBox.visibility = GONE
-                popIn(deadCard)
+                deadSince = android.os.SystemClock.uptimeMillis()
+                // death beat: dim + the fall/hit word first, the card after DEATH_BEAT_MS
+                deathWord.text = deadTitle.text
+                deathDim.alpha = 0f
+                if (animations) deathDim.animate().alpha(1f).setDuration(320).start() else deathDim.alpha = 1f
+                popIn(deathWord)
+                postDelayed({ refreshVisibility(); popIn(deadCard) }, deathBeatMs)
             }
         }
         refreshVisibility()

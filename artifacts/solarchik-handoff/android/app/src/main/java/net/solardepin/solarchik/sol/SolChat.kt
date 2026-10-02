@@ -31,47 +31,64 @@ data class ChatTurn(
     val fallback: Boolean = false,
     /** Answered on the phone from the game rules, not by the worker. */
     val local: Boolean = false,
+    /** Devnet Explorer link of a transaction Sol ran after the player's confirm tap (0.21.7). */
+    val link: String = "",
+    /** A line from Sol's action mode (confirm card, result). */
+    val action: Boolean = false,
 )
 
-data class SolReply(val text: String, val fallback: Boolean, val offline: Boolean)
+data class SolReply(val text: String, val fallback: Boolean, val offline: Boolean, val model: String = "")
 
 /**
- * Client for the AI friend worker (worker/solarchik-ai-friend.js): POST /v1/chat with
- * {message, language, playerId, conversationId, history<=4, scene} -> {reply, fallback}.
- * No keys on the phone; the worker holds them.
+ * Sol's live AI. Primary: solarchik-market /api/native/sol-chat (Gemini, short warm replies strictly
+ * in the app language, ~1 s). Secondary: the AI friend worker (worker/solarchik-ai-friend.js). A reply
+ * that is not in the app language (Ukrainian with stray English words, or Cyrillic for English) is
+ * dropped and the next endpoint answers. Only when every endpoint fails does the caller get the
+ * offline line (marked offline + fallback so the UI labels it). No keys on the phone.
  */
 class SolChat(
-    private val url: String = SolarchikConfig.FRIEND_CHAT_URL,
+    private val urls: List<String> = listOf(SolarchikConfig.SOL_CHAT_URL, SolarchikConfig.FRIEND_CHAT_URL),
     private val post: suspend (String, String) -> String? = ::httpPost,
 ) {
+    constructor(url: String, post: suspend (String, String) -> String? = ::httpPost) : this(listOf(url), post)
+
     suspend fun ask(message: String, language: String, playerId: String, conversationId: String, history: List<ChatTurn>, scene: String = "yard", context: String = ""): SolReply {
-        val body = buildJsonObject {
-            put("message", message.take(2000))
-            put("language", language)
-            put("playerId", playerId)
-            put("conversationId", conversationId)
-            put("scene", scene)
-            put("name", "Sol")
-            if (context.isNotBlank()) put("context", context.take(400))
-            put("history", buildJsonArray {
-                history.filter { !it.fallback && !it.local }.takeLast(4).forEach { t ->
-                    add(buildJsonObject { put("role", t.role); put("content", t.text.take(400)) })
+        val lang = if (language == "uk") "uk" else "en"
+        val turns = buildJsonArray {
+            history.filter { !it.fallback && !it.local }.takeLast(6).forEach { t ->
+                add(buildJsonObject { put("role", t.role); put("content", t.text.take(400)) })
+            }
+        }
+        var answered = false
+        for (url in urls) {
+            val friend = url == SolarchikConfig.FRIEND_CHAT_URL || url.endsWith("/v1/chat")
+            val body = buildJsonObject {
+                put("message", message.take(2000))
+                put("language", lang)
+                put("scene", scene)
+                if (context.isNotBlank()) put("context", context.take(400))
+                put("history", turns)
+                if (friend) {
+                    put("playerId", playerId)
+                    put("conversationId", conversationId)
+                    put("name", "Sol")
                 }
-            })
-        }.toString()
-        val text = try {
-            post(url, body)
-        } catch (c: kotlinx.coroutines.CancellationException) {
-            throw c // the screen went away: no reply to store
-        } catch (_: Throwable) {
-            null
-        } ?: return SolReply(offlineLine(language), fallback = true, offline = true)
-        return runCatching {
-            val o = json.parseToJsonElement(text).jsonObject
+            }.toString()
+            val text = try {
+                post(url, body)
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c // the screen went away: no reply to store
+            } catch (_: Throwable) {
+                null
+            } ?: continue
+            answered = true
+            val o = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull() ?: continue
             val reply = o["reply"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
             val fb = o["fallback"]?.jsonPrimitive?.booleanOrNull == true
-            if (reply.isBlank()) SolReply(offlineLine(language), true, true) else SolReply(SolRules.tidy(reply), fb, false)
-        }.getOrElse { SolReply(offlineLine(language), true, true) }
+            if (reply.isBlank() || fb || !fitsLanguage(reply, lang)) continue
+            return SolReply(SolRules.tidy(reply), false, false, o["model"]?.jsonPrimitive?.contentOrNull.orEmpty())
+        }
+        return SolReply(offlineLine(lang), fallback = true, offline = !answered)
     }
 
     companion object {
@@ -80,12 +97,35 @@ class SolChat(
         fun offlineLine(language: String): String =
             if (language == "uk") "Я зараз не дістаю до сонячної вежі. Спробуй ще раз за хвилину." else "I can't reach the sun tower right now. Try again in a minute."
 
-        private suspend fun httpPost(url: String, body: String): String? = withContext(Dispatchers.IO) {
+        /** Latin words a Ukrainian reply may contain (names of the game, chain and tiers). */
+        private val LATIN_OK = setOf("sol", "solana", "solarchik", "devnet", "mainnet", "nft", "nfts", "pro", "usdc", "btc", "ok", "ai", "seeker", "phantom", "solflare", "slice")
+        private val LATIN_WORD = Regex("\\b[A-Za-z]{2,}\\b")
+
+        /** A uk reply must be Cyrillic (no Russian-only letters, no stray English); an en reply has no Cyrillic. */
+        fun fitsLanguage(reply: String, lang: String): Boolean {
+            val letters = reply.count { it.isLetter() }
+            if (letters == 0) return false
+            val cyr = reply.count { it in '\u0400'..'\u04FF' }
+            if (lang != "uk") return cyr == 0
+            if (cyr < letters * 0.7) return false
+            if (reply.any { it in "ыэъёЫЭЪЁ" }) return false
+            return LATIN_WORD.findAll(reply).all { it.value.lowercase() in LATIN_OK }
+        }
+
+        private val clientFor = mutableMapOf<String, okhttp3.OkHttpClient>()
+
+        private fun client(url: String): okhttp3.OkHttpClient = synchronized(clientFor) {
+            // The market route answers in ~1 s and gives up itself after 9 s; the friend worker after 14 s.
+            val secs = if (url.endsWith("/v1/chat")) 15L else 11L
+            clientFor.getOrPut(url) { Rpc.client.newBuilder().callTimeout(secs, java.util.concurrent.TimeUnit.SECONDS).build() }
+        }
+
+        internal suspend fun httpPost(url: String, body: String): String? = withContext(Dispatchers.IO) {
             val req = Request.Builder().url(url)
                 .header("Origin", "https://appassets.androidplatform.net")
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
-            Rpc.client.newCall(req).execute().use { res -> if (res.isSuccessful) res.body?.string() else null }
+            client(url).newCall(req).execute().use { res -> if (res.isSuccessful) res.body?.string() else null }
         }
 
         private val NUM = Regex("\\d+(?:\\.\\d+)?")

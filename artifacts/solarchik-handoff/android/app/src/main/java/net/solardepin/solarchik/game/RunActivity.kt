@@ -56,7 +56,13 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
     private val announced = HashSet<String>()
 
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        if (ok) radio.startListen() else overlay.setCaption(getString(R.string.run_mic_denied))
+        // the run was paused before the dialog; the player resumes, then talks
+        if (!ok) overlay.setCaption(getString(R.string.run_mic_denied))
+    }
+
+    /** App language (phone language, or the player's pick in Settings). */
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(net.solardepin.solarchik.core.AppLocale.wrap(newBase))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,8 +83,12 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
         quests = RunQuests(this, garage)
         wallet = SolanaWallet(this)
         sender = ActivityResultSender(this)
-        audio = RunAudio(this).also { it.prepare() }
-        game = RunView(this, this).also { it.audio = audio }
+        audio = RunAudio(this).also { it.prepare { audioReady = true; maybeGo() } }
+        game = RunView(this, this).also {
+            it.audio = audio
+            it.prime(garage.robot, garage.skin)
+            it.onReady = { artReady = true; maybeGo() }
+        }
         overlay = RunOverlay(this, this)
         radio = RunRadio(this, scope, lang(), audio, onCaption = { overlay.setCaption(it) }, onListening = { overlay.setListening(it) })
         overlay.buddy.setImageBitmap(runCatching { assets.open("sprites/pet/buddy-talk-3.png").use { android.graphics.BitmapFactory.decodeStream(it) } }.getOrNull())
@@ -100,6 +110,20 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
                 if (ended) yard() else pauseToggle()
             }
         })
+        // 0.21.7: no countdown until the art is warm and the music is prepared (loading cover meanwhile).
+        overlay.setLoading(true)
+        game.postDelayed({ audioReady = true; maybeGo() }, AUDIO_WAIT_MS) // never wait on audio forever
+    }
+
+    private var artReady = false
+    private var audioReady = false
+    private var begun = false
+
+    /** Start the first run once both the art and the audio are ready. */
+    private fun maybeGo() {
+        if (begun || !artReady || !audioReady || isFinishing) return
+        begun = true
+        overlay.setLoading(false)
         startRun()
     }
 
@@ -281,7 +305,11 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
             return
         }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) radio.startListen()
-        else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        else {
+            // 0.21.7: the system permission dialog never pops over a live run: pause first, then ask.
+            setPaused(true)
+            micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
     }
 
     override fun slideDown() = game.slideDown()
@@ -333,5 +361,6 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
 
     companion object {
         const val EXTRA_SIGN = "solarchik.run.sign"
+        const val AUDIO_WAIT_MS = 4000L
     }
 }

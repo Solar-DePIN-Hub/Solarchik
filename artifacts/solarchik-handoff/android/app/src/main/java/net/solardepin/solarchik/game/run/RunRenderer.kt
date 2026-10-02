@@ -881,21 +881,33 @@ class RunRenderer(
         fill.shader = null
     }
 
+    private var glowShader: Shader? = null
+    private var glowKey = ""
+
+    /** Soft warm glow behind the hero. The gradient is built once per size (it was allocated every frame). */
     private fun heroGlow(c: Canvas, x: Double, y: Double, size: Double, charged: Boolean) {
         val rr = size * if (charged) 0.7 else 0.48
         val cy = y - size * 0.42
-        val inner = (6 / rr).toFloat()
-        fill.shader = if (charged) {
-            RadialGradient(x.toFloat(), (y - size * 0.4).toFloat(), rr.toFloat(),
-                intArrayOf(rgba(120, 190, 255, 0.45), rgba(120, 190, 255, 0.45), rgba(255, 210, 60, 0.22), rgba(255, 170, 80, 0.0)),
-                floatArrayOf(0f, inner, 0.45f, 1f), Shader.TileMode.CLAMP)
-        } else {
-            RadialGradient(x.toFloat(), (y - size * 0.4).toFloat(), rr.toFloat(),
-                intArrayOf(rgba(255, 200, 120, 0.22), rgba(255, 200, 120, 0.22), rgba(255, 170, 80, 0.0)),
-                floatArrayOf(0f, inner, 1f), Shader.TileMode.CLAMP)
+        val key = "$charged|${(rr * 4).roundToInt()}"
+        if (key != glowKey || glowShader == null) {
+            glowKey = key
+            val inner = (6 / rr).toFloat()
+            glowShader = if (charged) {
+                RadialGradient(0f, 0f, rr.toFloat(),
+                    intArrayOf(rgba(120, 190, 255, 0.45), rgba(120, 190, 255, 0.45), rgba(255, 210, 60, 0.22), rgba(255, 170, 80, 0.0)),
+                    floatArrayOf(0f, inner, 0.45f, 1f), Shader.TileMode.CLAMP)
+            } else {
+                RadialGradient(0f, 0f, rr.toFloat(),
+                    intArrayOf(rgba(255, 200, 120, 0.22), rgba(255, 200, 120, 0.22), rgba(255, 170, 80, 0.0)),
+                    floatArrayOf(0f, inner, 1f), Shader.TileMode.CLAMP)
+            }
         }
-        circle(c, x, cy, rr, fill)
+        c.save()
+        c.translate(x.toFloat(), (y - size * 0.4).toFloat())
+        fill.shader = glowShader
+        circle(c, 0.0, cy - (y - size * 0.4), rr, fill)
         fill.shader = null
+        c.restore()
     }
 
     private val hurtRed = PorterDuffColorFilter(0xFFFF4830.toInt(), PorterDuff.Mode.SRC_IN)
@@ -919,10 +931,12 @@ class RunRenderer(
             circle(c, feetX, feetY - size / 2, size / 3, solid(0xFF7AD1FF.toInt(), a))
             return
         }
-        // prepared at the exact on-screen height: logical size = pixels / scale (x size ratio for previews)
+        // prepared at the exact on-screen height: logical size = pixels x (size / prepared body px).
+        // One scale for every frame and a fixed head pivot (Frame.cx) keep the robot from pulsing/drifting.
         val sc = size / heroHNow
-        val hgt = f.bmp.height / kNow * sc
-        val pad = f.pad / kNow * sc
+        val perPx = if (spr.heroPx > 0) size / spr.heroPx else sc / kNow
+        val hgt = f.bmp.height * perPx
+        val pad = f.pad * perPx
         val sy = 1 - squash * 0.34 + stretch * 0.28
         val sx = 1 + squash * 0.22 - stretch * 0.12
         val dw = hgt * f.bmp.width / f.bmp.height
@@ -935,7 +949,7 @@ class RunRenderer(
             c.rotate(Math.toDegrees(r).toFloat())
             c.translate(0f, (hgt * 0.46).toFloat())
         }
-        rect.set((-dw / 2).toFloat(), (-hgt).toFloat(), (dw / 2).toFloat(), 0f)
+        rect.set((-dw * f.cx).toFloat(), (-hgt).toFloat(), (dw * (1 - f.cx)).toFloat(), 0f)
         if (shadow) {
             c.save()
             c.translate(3f, 4f)
@@ -946,7 +960,7 @@ class RunRenderer(
         if (rimA > 0) {
             // rim light from the sun / city glow: the silhouette offset up and towards the light
             c.save()
-            c.translate((1.8 * sc).toFloat(), (-1.4 * sc).toFloat())
+            c.translate((1.0 * sc).toFloat(), (-0.8 * sc).toFloat())
             maskPaint.color = color(rimCol, rimA * a)
             c.drawBitmap(f.rim, null, rect, maskPaint)
             c.restore()
@@ -1756,7 +1770,7 @@ class RunRenderer(
         val k = hPx / logicalH
         spr.art.prepare(k.toFloat(), skin)
         kNow = k
-        heroHNow = min(logicalH * 0.2, 136.0)
+        heroHNow = min(logicalH * HERO_FRAC, HERO_H)
         spr.prepareHero(Math.round(heroHNow * k).toInt())
         c.save()
         c.scale(k.toFloat(), k.toFloat())
@@ -1806,7 +1820,7 @@ class RunRenderer(
         val storming = stormK > 0.01
         val flash = if (s.bonus) 0.0 else s.lightning / 0.55
         // drawn ~1.6x the web size for phone readability; the sim hitbox (PW/PH) is unchanged
-        val heroH = min(h * 0.2, 136.0)
+        val heroH = min(h * HERO_FRAC, HERO_H)
         val spd = RunSim.speedAt(s)
         val look = spd * 0.18
         val camX = s.x - w * 0.27 + look
@@ -2242,6 +2256,12 @@ class RunRenderer(
     companion object {
         /** World units per screen height (the desktop browser frame in the reference shot). */
         const val LOGICAL_H = 680.0
+        /**
+         * Hero body height in logical units (0.21.7: 106, was 136 = 20 % of the screen, much larger than
+         * the sim's 62-unit hitbox drawn at ~92 units, so hits looked unfair and the robot crowded the roofs).
+         */
+        const val HERO_H = 106.0
+        const val HERO_FRAC = 0.156
         // palette slots
         private const val POP_SLOTS = 24
         private const val P_TOP = 0

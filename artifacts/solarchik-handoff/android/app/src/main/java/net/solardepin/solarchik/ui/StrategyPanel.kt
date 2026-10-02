@@ -87,7 +87,7 @@ class StrategyPanel(private val host: MainActivity, private val onChange: () -> 
 
     private fun card(c: StrategyCard, listing: Boolean): View = Ui.card(ctx, pad = 14).apply {
         val head = Ui.row(ctx, gap = 8)
-        head.addView(Ui.weight(Ui.text(ctx, c.name.ifBlank { Fmt.short(c.asset) }, 15f, Ui.TEXT, 800)))
+        head.addView(Ui.weight(Ui.text(ctx, c.name.ifBlank { Fmt.short(c.asset) }.let { AgentNames.display(ctx, it) }, 15f, Ui.TEXT, 800)))
         c.priceLamports?.let { head.addView(Ui.text(ctx, Fmt.sol(it / 1e9) + " SOL", 15f, Ui.GOLD, 800)) }
         addView(head)
         if (c.hasChain) {
@@ -225,18 +225,14 @@ class StrategyPanel(private val host: MainActivity, private val onChange: () -> 
         return last
     }
 
+    private fun flows() = net.solardepin.solarchik.agents.StrategyFlows(net.solardepin.solarchik.agents.MwaSigner(host.wallet, host.sender))
+
+    private fun outcomeText(o: net.solardepin.solarchik.agents.FlowOutcome): String =
+        o.error?.let { WalletError.text(ctx, it) } ?: o.reason
+
     private fun saveStrategy(c: StrategyCard, spec: JsonObject) = act {
-        val v = StrategyApi.post("strategy-validate", buildJsonObject { put("spec", spec) })
-        if (!StrategyApi.ok(v)) return@act StrategyApi.reason(v)
-        val hash = (v["hash"] as JsonPrimitive).content
-        val clean = v["spec"] as JsonObject
-        val pr = proof("strategy", "${c.asset}:$hash") ?: return@act status
-        val prep = StrategyApi.post("strategy-prepare", buildJsonObject { put("proof", pr); put("asset", c.asset); put("spec", clean) })
-        if (!StrategyApi.ok(prep)) return@act StrategyApi.reason(prep)
-        val sig = host.wallet.signServerTxs(host.sender, StrategyApi.txs(prep)).getOrElse { return@act WalletError.text(ctx, it) }
-        val version = (prep["version"] as JsonPrimitive).content.toInt()
-        val conf = confirm("strategy-confirm", buildJsonObject { put("asset", c.asset); put("version", version); put("sig", sig) })
-        if (StrategyApi.ok(conf)) ctx.getString(R.string.sm_saved, Fmt.short(sig), StrategyRules.SALE_LOCK_HOURS) else StrategyApi.reason(conf)
+        val o = flows().changeStrategy(host.wallet.address, c.asset, spec)
+        if (o.ok) ctx.getString(R.string.sm_saved, Fmt.short(o.sig), StrategyRules.SALE_LOCK_HOURS) else outcomeText(o)
     }
 
     private fun list(c: StrategyCard, priceSol: Double) = act {
@@ -257,20 +253,11 @@ class StrategyPanel(private val host: MainActivity, private val onChange: () -> 
 
     private fun buy(c: StrategyCard) = act {
         val price = c.priceLamports ?: return@act "no price"
-        val pr = proof("market", "buy:${c.asset}:$price") ?: return@act status
-        val prep = StrategyApi.post("market-prepare-buy", buildJsonObject { put("proof", pr); put("asset", c.asset); put("priceLamports", price) })
-        if (!StrategyApi.ok(prep)) return@act StrategyApi.reason(prep)
-        val sig = host.wallet.signServerTxs(host.sender, StrategyApi.txs(prep)).getOrElse { return@act WalletError.text(ctx, it) }
-        val conf = confirm("market-confirm-buy", buildJsonObject { put("asset", c.asset); put("sig", sig) })
-        if (!StrategyApi.ok(conf)) return@act StrategyApi.reason(conf)
         val w = host.wallet
-        host.store.upsert(
-            net.solardepin.solarchik.agents.OwnedAgent(
-                asset = c.asset, skuId = "strategy-nft", tier = "pro", name = c.name, owner = w.address, cluster = "devnet",
-                sig = sig, mintedAt = System.currentTimeMillis(), status = net.solardepin.solarchik.agents.OwnedAgent.STATUS_VERIFIED,
-            ),
-        )
-        ctx.getString(R.string.sm_bought, Fmt.short(sig))
+        val o = flows().buy(w.address, c.asset, price)
+        if (!o.ok) return@act outcomeText(o)
+        rememberBought(host, c.asset, c.name, w.address, o.sig)
+        ctx.getString(R.string.sm_bought, Fmt.short(o.sig))
     }
 
     /** Judge onboarding: public devnet airdrop first, then the server's rate-limited faucet. */
@@ -280,7 +267,26 @@ class StrategyPanel(private val host: MainActivity, private val onChange: () -> 
         if (air.isSuccess) return@act ctx.getString(R.string.sm_airdrop_ok, Fmt.short(air.getOrThrow()))
         val pr = proof("faucet", "devnet") ?: return@act status
         val r = StrategyApi.post("faucet-drip", buildJsonObject { put("proof", pr) })
-        if (StrategyApi.ok(r)) ctx.getString(R.string.sm_faucet_ok, Fmt.short((r["sig"] as JsonPrimitive).content))
+        if (StrategyApi.ok(r)) faucetText(ctx, r)
         else ctx.getString(R.string.sm_faucet_bad, StrategyApi.reason(r))
+    }
+
+    companion object {
+        /** Server faucet answer: `via:"airdrop"` means the server asked the public devnet faucet for us. */
+        fun faucetText(ctx: android.content.Context, r: JsonObject): String {
+            val sig = Fmt.short((r["sig"] as? JsonPrimitive)?.content.orEmpty())
+            val via = (r["via"] as? JsonPrimitive)?.content
+            return ctx.getString(if (via == "airdrop") R.string.sm_airdrop_srv_ok else R.string.sm_faucet_ok, sig)
+        }
+
+        /** A bought Strategy NFT joins "my agents" at once (verified on chain by the confirm route). */
+        fun rememberBought(host: MainActivity, asset: String, name: String, owner: String, sig: String) {
+            host.store.upsert(
+                net.solardepin.solarchik.agents.OwnedAgent(
+                    asset = asset, skuId = "strategy-nft", tier = "pro", name = name, owner = owner, cluster = "devnet",
+                    sig = sig, mintedAt = System.currentTimeMillis(), status = net.solardepin.solarchik.agents.OwnedAgent.STATUS_VERIFIED,
+                ),
+            )
+        }
     }
 }

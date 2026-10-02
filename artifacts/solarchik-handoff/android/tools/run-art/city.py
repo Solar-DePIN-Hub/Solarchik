@@ -1,4 +1,6 @@
 """Solarpunk city skyline layers for the native runner (layered atmospheric silhouettes).
+0.21.7: no member thinner than ~1.8 units (antenna masts, cranes, turbines), no rooftop cables or
+hook lines: hairlines drew as stray black lines in the sky on tablets.
 Each layer is an alpha mask (white + alpha): the game tints it per time of day, and a
 matching window-light mask fades in at dusk. Horizontally seamless (buildings wrap).
 Units: world units; rendered at 2 px/unit with 3x supersampling."""
@@ -70,7 +72,8 @@ def building(L, x, base, w, h, rnd, kind, detail, lit, wins):
     elif kind == 'spire':
         L.rect(x, top + h * 0.1, w, h * 0.9)
         L.poly([(x + w * 0.1, top + h * 0.1), (x + w * 0.5, top - h * 0.12), (x + w * 0.9, top + h * 0.1)])
-        L.line([(x + w * 0.5, top - h * 0.12), (x + w * 0.5, top - h * 0.24)], 0.8)
+        # 0.21.7: a solid tapered mast (a 0.8-unit line read as a stray hairline on tablets)
+        mast(L, x + w * 0.5, top - h * 0.12, h * 0.12, 1.8)
     elif kind == 'dome':
         L.rect(x, top + w * 0.3, w, h - w * 0.3)
         L.ellipse(x + w / 2, top + w * 0.32, w / 2, w * 0.32)
@@ -100,11 +103,11 @@ def building(L, x, base, w, h, rnd, kind, detail, lit, wins):
                 L.ellipse(x + 6 + t * 13 + rnd.uniform(-2, 2), top - 4, rnd.uniform(4, 6), rnd.uniform(4, 6.5))
         elif r < 0.65:   # water tank
             tx = x + w * rnd.uniform(0.2, 0.7)
-            L.rect(tx, top - 9, 1, 9); L.rect(tx + 7, top - 9, 1, 9)
+            L.rect(tx - 0.3, top - 9, 1.8, 9); L.rect(tx + 6.5, top - 9, 1.8, 9)
             L.poly([(tx - 1, top - 9), (tx + 9, top - 9), (tx + 9, top - 18), (tx + 4, top - 21), (tx - 1, top - 18)])
         elif r < 0.8:    # antenna mast
             ax = x + w * rnd.uniform(0.2, 0.8)
-            L.line([(ax, top), (ax, top - rnd.uniform(14, 30))], 1.0)
+            mast(L, ax, top, rnd.uniform(14, 30), 2.4)
         if kind == 'box' and rnd.random() < 0.3:  # balconies with planters
             for yy in range(int(top + 12), int(base - 6), 14):
                 L.rect(x - 1.5, yy, w + 3, 1.6)
@@ -113,23 +116,31 @@ def building(L, x, base, w, h, rnd, kind, detail, lit, wins):
         windows(L, x + 2, top + 4, w - 4, h - 6, cw, ch, gx, gy, lit, rnd)
 
 def crane(L, x, base, h, rnd):
-    L.line([(x, base), (x, base - h)], 1.4)
-    for yy in range(int(base - h), int(base), 6):
-        L.line([(x - 1.2, yy), (x + 1.2, yy + 6)], 0.4)
+    # 0.21.7: every member at least ~2 px wide at 2 px/unit and no hanging hook cable: the old 0.3-1.4
+    # unit lines rendered as thin black hairlines in the sky. The rnd calls stay in the same order so
+    # every building after the cranes keeps its place.
+    L.poly([(x - 1.8, base), (x + 1.8, base), (x + 1.3, base - h), (x - 1.3, base - h)])
     jib = rnd.uniform(40, 70)
-    L.line([(x - 14, base - h), (x + jib, base - h)], 1.2)
-    L.line([(x, base - h - 8), (x + jib * 0.8, base - h)], 0.5)
-    L.line([(x, base - h - 8), (x - 14, base - h)], 0.5)
+    L.rect(x - 14, base - h - 1.2, jib + 14, 2.4)
+    L.poly([(x - 0.9, base - h - 9), (x + 0.9, base - h - 9), (x + 1.2, base - h), (x - 1.2, base - h)])
+    L.line([(x, base - h - 8), (x + jib * 0.8, base - h)], 1.1)
+    L.line([(x, base - h - 8), (x - 14, base - h)], 1.1)
     L.rect(x - 15, base - h - 1, 5, 4)
     hx = x + jib * rnd.uniform(0.4, 0.8)
-    L.line([(hx, base - h), (hx, base - h + rnd.uniform(15, 40))], 0.3)
+    rnd.uniform(15, 40)
+    L.rect(hx - 2, base - h + 1, 4, 3)   # trolley on the jib, no cable
+
+def mast(L, x, top, h, w):
+    """A tapered antenna mast with a small cap: solid enough to read as a shape, not a hairline."""
+    L.poly([(x - w / 2, top), (x + w / 2, top), (x + w * 0.3, top - h), (x - w * 0.3, top - h)])
+    L.rect(x - w * 0.55, top - h - w * 0.6, w * 1.1, w * 0.8)
 
 def turbine(L, x, base, h, rnd, ang):
-    L.poly([(x - 1.2, base), (x + 1.2, base), (x + 0.5, base - h), (x - 0.5, base - h)])
+    L.poly([(x - 1.6, base), (x + 1.6, base), (x + 0.9, base - h), (x - 0.9, base - h)])
     for k in range(3):
         a = ang + k * 2 * math.pi / 3
         bx, by = x + math.cos(a) * h * 0.42, base - h + math.sin(a) * h * 0.42
-        nx, ny = -math.sin(a) * 1.0, math.cos(a) * 1.0
+        nx, ny = -math.sin(a) * 1.4, math.cos(a) * 1.4
         L.poly([(x + nx, base - h + ny), (bx, by), (x - nx, base - h - ny)])
 
 def solar_tower(L, x, base, h):
@@ -193,8 +204,8 @@ def near():
         # cables strung between neighbouring rooftops
         if rnd.random() < 0.5:
             y1 = base - h + 8; y2 = base - rnd.uniform(110, 240) + 8
-            pts = [(x + w + t * (nx - x - w) / 10, y1 + (y2 - y1) * t / 10 + 8 * math.sin(math.pi * t / 10)) for t in range(11)]
-            L.line(pts, 0.7)
+            # 0.21.7: the 0.7-unit cable read as a stray black hairline; the rnd draw above stays for layout
+            pass
         x = nx
     L.save('city_near')
 

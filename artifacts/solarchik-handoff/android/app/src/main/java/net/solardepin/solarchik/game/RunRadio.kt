@@ -21,9 +21,11 @@ import net.solardepin.solarchik.core.StreakRules
 
 /**
  * Port of the web RunRadio: Sol talks during the run (a cheer at the start, a line on a fall,
- * one every ~35 s) and the mic button asks Sol something mid-run. Replies come from the same AI
- * friend worker as the Sol tab (scene "run", run context attached); offline, the line falls back
- * to the runBanter packs. Spoken with the phone's TTS and always shown as a caption.
+ * scripted moments like the last heart, one every ~35 s) and the mic button asks Sol something
+ * mid-run (only while paused; see RunActivity). Every line is live AI (SolChat, scene "run") from a
+ * cue written in the app language, so the reply comes back in that language. Only when Sol is
+ * unreachable does the line fall back to the runBanter packs / scripted strings, tagged "Offline".
+ * Spoken with Sol's neural voice (system TTS offline) and shown as a small caption.
  * UI thread only.
  */
 class RunRadio(
@@ -75,7 +77,7 @@ class RunRadio(
     private fun show(text: String) {
         onCaption(text)
         main.removeCallbacks(clearCaption)
-        main.postDelayed(clearCaption, 4200)
+        main.postDelayed(clearCaption, (2600L + 45L * text.length).coerceAtMost(5200L))
     }
 
     private fun hush() {
@@ -84,11 +86,11 @@ class RunRadio(
         audio?.duck(false)
     }
 
-    private fun speak(text: String) {
+    private fun speak(text: String, offline: Boolean = false) {
         val spoken = SolRules.tidy(text).trim()
         if (spoken.isEmpty()) return
         hush()
-        show(spoken)
+        show(if (offline) context.getString(R.string.run_offline_tag) + " · " + spoken else spoken)
         val ms = (55L * spoken.split(Regex("\\s+")).size + 400).coerceAtMost(9000)
         talkingUntil = System.currentTimeMillis() + ms
         audio?.duck(true)
@@ -101,14 +103,14 @@ class RunRadio(
     private fun talking() = System.currentTimeMillis() < talkingUntil
     private fun inPlayerChat() = chatOpen || System.currentTimeMillis() < banterAfter
 
-    private fun context(h: RunHud) = RunBanter.context(h.meters, h.chapter, h.combo, h.suns, h.hearts)
+    private fun context(h: RunHud) = RunBanter.context(h.meters, h.chapter, h.combo, h.suns, h.hearts, lang)
 
     /** Game events of one step plus the HUD after it. */
     fun push(events: List<Ev>, hud: RunHud) {
         last = hud
         val line = RunBanter.scripted(hud.meters.toDouble(), hud.death, hud.hearts, events, GameSave.GOAL_M, lastHeartSaid)
         if (line == ScriptLine.LAST_HEART) lastHeartSaid = true
-        if (line != null) show(scriptText(line))
+        if (line != null) scripted(line, hud)
         if (hud.phase == Phase.RUNNING && !started) {
             started = true
             banter(BanterKind.GO, hud)
@@ -127,6 +129,23 @@ class RunRadio(
         }
     }
 
+    /** Scripted moment: live AI line from a localized cue; the scripted string only offline. */
+    private fun scripted(line: ScriptLine, hud: RunHud) {
+        if (!live || listening || inPlayerChat()) return
+        val cue = when (line) {
+            ScriptLine.CLOCK_READY -> context.getString(R.string.run_cue_clock_ready, GameSave.GOAL_M)
+            ScriptLine.FIRST_ROOF -> context.getString(R.string.run_cue_first_roof)
+            ScriptLine.LAST_HEART -> context.getString(R.string.run_cue_last_heart)
+        }
+        lastBanter = System.currentTimeMillis()
+        talkingUntil = System.currentTimeMillis() + 2500 // hold other banter until the reply lands
+        scope.launch {
+            val r = runCatching { ask(cue, hud) }.getOrNull()
+            if (inPlayerChat() || paused && line == ScriptLine.LAST_HEART) return@launch
+            if (r != null && !r.fallback && r.text.isNotBlank()) speak(r.text) else speak(scriptText(line), offline = true)
+        }
+    }
+
     private fun scriptText(line: ScriptLine): String = when (line) {
         ScriptLine.CLOCK_READY -> context.getString(R.string.banter_clock_ready, GameSave.GOAL_M)
         ScriptLine.FIRST_ROOF -> context.getString(R.string.banter_first_roof)
@@ -138,18 +157,24 @@ class RunRadio(
         val now = System.currentTimeMillis()
         if (kind != BanterKind.GO && kind != BanterKind.DEAD && now - lastBanter < 32_000) return
         if (talking() && kind != BanterKind.DEAD) return
-        val cue = when (kind) {
-            BanterKind.GO -> "The roof run just started. One short spoken cheer in your usual voice."
-            BanterKind.DEAD -> "We just fell off. One short spoken line, same as in chat."
-            else -> "Run update: ${context(hud)}. One short spoken line in your usual voice."
-        }
+        val cue = cueFor(kind, hud)
         lastBanter = now
         scope.launch {
             val r = runCatching { ask(cue, hud) }.getOrNull()
-            if (inPlayerChat() || paused) return@launch
+            if (inPlayerChat() || paused && kind != BanterKind.DEAD) return@launch
             if (r != null && !r.fallback && r.text.isNotBlank()) speak(r.text)
-            else RunBanter.pick(kind, lang, hud.chapter).takeIf { it.isNotEmpty() }?.let { speak(it) }
+            else RunBanter.pick(kind, lang, hud.chapter).takeIf { it.isNotEmpty() }?.let { speak(it, offline = true) }
         }
+    }
+
+    /** The event in the app language (an English cue made Sol answer a Ukrainian player in English). */
+    private fun cueFor(kind: BanterKind, h: RunHud): String = when (kind) {
+        BanterKind.GO -> context.getString(R.string.run_cue_go)
+        BanterKind.DEAD -> context.getString(R.string.run_cue_dead, h.meters)
+        BanterKind.BONUS -> context.getString(R.string.run_cue_bonus)
+        BanterKind.COMBO -> context.getString(R.string.run_cue_combo, h.combo)
+        BanterKind.HURT -> context.getString(R.string.run_cue_hurt, h.hearts)
+        else -> context.getString(R.string.run_cue_progress, h.meters)
     }
 
     private suspend fun ask(message: String, hud: RunHud?) = chat.ask(

@@ -13,12 +13,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SolChatTest {
-    @Test fun sendsWorkerContractWithAtMostFourHistoryTurns() = runBlocking {
+    @Test fun sendsWorkerContractWithRecentRealTurnsOnly() = runBlocking {
         var sent = ""
-        val chat = SolChat("https://x/v1/chat") { _, body -> sent = body; """{"ok":true,"reply":"Sun is up.","fallback":false}""" }
-        val hist = (1..7).map { ChatTurn(if (it % 2 == 0) "assistant" else "user", "m$it", it.toLong()) } + ChatTurn("assistant", "canned", 9, fallback = true)
+        val chat = SolChat("https://x/v1/chat") { _, body -> sent = body; """{"ok":true,"reply":"Сонце вже встало.","fallback":false}""" }
+        val hist = (1..9).map { ChatTurn(if (it % 2 == 0) "assistant" else "user", "m$it", it.toLong()) } + ChatTurn("assistant", "canned", 10, fallback = true)
         val r = chat.ask("hi", "uk", "p1", "c1", hist)
-        assertEquals("Sun is up.", r.text)
+        assertEquals("Сонце вже встало.", r.text)
         assertFalse(r.fallback)
         val o = Json.parseToJsonElement(sent).jsonObject
         assertEquals("hi", o["message"]!!.jsonPrimitive.content)
@@ -27,15 +27,43 @@ class SolChatTest {
         assertEquals("c1", o["conversationId"]!!.jsonPrimitive.content)
         assertEquals("yard", o["scene"]!!.jsonPrimitive.content)
         val h = o["history"]!!.jsonArray.map { it.jsonObject["content"]!!.jsonPrimitive.content }
-        assertEquals(listOf("m4", "m5", "m6", "m7"), h) // fallback turns are never sent back as context
+        assertEquals(listOf("m4", "m5", "m6", "m7", "m8", "m9"), h) // fallback turns are never sent back as context
+    }
+
+    @Test fun marketFirstThenFriendWhenTheReplyIsInTheWrongLanguage() = runBlocking {
+        val calls = mutableListOf<String>()
+        val chat = SolChat(listOf("https://m/api/native/sol-chat", "https://f/v1/chat")) { url, _ ->
+            calls += url
+            if (url.contains("sol-chat")) """{"ok":true,"reply":"Let us soar! Один заряд лишився.","model":"x"}"""
+            else """{"reply":"Тримайся, ще один стрибок!","fallback":false}"""
+        }
+        val r = chat.ask("Подія: останнє серце", "uk", "p", "c", emptyList(), scene = "run")
+        assertEquals(listOf("https://m/api/native/sol-chat", "https://f/v1/chat"), calls)
+        assertEquals("Тримайся, ще один стрибок!", r.text)
+        assertFalse(r.fallback)
+        // The market body has no companion name (the server reads "name" as the player's name).
+        var marketBody = ""
+        SolChat(listOf("https://m/api/native/sol-chat")) { _, b -> marketBody = b; """{"ok":true,"reply":"Hi there!"}""" }.ask("hi", "en", "p", "c", emptyList())
+        assertFalse(Json.parseToJsonElement(marketBody).jsonObject.containsKey("name"))
+    }
+
+    @Test fun languageGuard() {
+        assertTrue(SolChat.fitsLanguage("Привіт! Pro-агент коштує 0.1 SOL.", "uk"))
+        assertFalse(SolChat.fitsLanguage("Let us soar!", "uk"))
+        assertFalse(SolChat.fitsLanguage("Привіт, відст kupi!", "uk"))
+        assertFalse(SolChat.fitsLanguage("Привет, как дела? Это ты?", "uk"))
+        assertTrue(SolChat.fitsLanguage("Keep going, friend!", "en"))
+        assertFalse(SolChat.fitsLanguage("Привіт!", "en"))
     }
 
     @Test fun fallbackAndOfflineAreFlagged() = runBlocking {
         val fb = SolChat("u") { _, _ -> """{"ok":true,"reply":"I'm here.","provider":"fallback","fallback":true}""" }.ask("hi", "en", "p", "c", emptyList())
         assertTrue(fb.fallback)
         assertFalse(fb.offline)
+        assertEquals(SolChat.offlineLine("en"), fb.text) // canned server text is never shown as Sol's own words
         val off = SolChat("u") { _, _ -> null }.ask("привіт", "uk", "p", "c", emptyList())
         assertTrue(off.offline)
+        assertTrue(off.fallback)
         assertEquals(SolChat.offlineLine("uk"), off.text)
         val broken = SolChat("u") { _, _ -> throw java.io.IOException("no net") }.ask("hi", "en", "p", "c", emptyList())
         assertTrue(broken.offline)

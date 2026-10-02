@@ -1,0 +1,5 @@
+# Baseline profile (0.21.7): AOT-compile the app's own code (run loop, renderer, sprites, screens)
+# so the first run is not JIT-cold. Wildcard rules; ART applies them at install (Play) or at the
+# next background dexopt (sideloads, via androidx.profileinstaller).
+HSPLnet/solardepin/solarchik/**->**(**)**
+Lnet/solardepin/solarchik/**;

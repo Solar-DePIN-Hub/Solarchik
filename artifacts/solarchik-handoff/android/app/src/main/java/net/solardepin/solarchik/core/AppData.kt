@@ -15,6 +15,8 @@ object AppData {
     /** Every SharedPreferences file the app writes. Keep in sync when a new store is added. */
     val PREFS = listOf(
         "solarchik-game",
+        "solarchik-lang",
+        "solarchik-slice",
         "solarchik-agents",
         "solarchik-desk",
         "solarchik-notes",
@@ -40,5 +42,7 @@ object AppData {
             app.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().commit()
             app.deleteSharedPreferences(name)
         }
+        // Sol's cached voice clips (texts Sol said to this player)
+        runCatching { java.io.File(app.cacheDir, "sol-voice").deleteRecursively() }
     }
 }

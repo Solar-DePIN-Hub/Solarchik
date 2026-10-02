@@ -41,6 +41,13 @@ class SolScreen(host: MainActivity) : Screen(host) {
     private var retold: Pair<String, String>? = null // day to text
     private var plainWhy: Int = 0
     private var retelling = false
+    /** Sol's action desk (0.21.7): context, plans, confirmed execution. */
+    internal var actions = net.solardepin.solarchik.ui.SolActionDesk(host)
+    internal var actClient = net.solardepin.solarchik.sol.SolActClient()
+    /** The action waiting for the player's tap. Nothing runs until [confirm]. */
+    var pending: net.solardepin.solarchik.sol.ActionPlan? = null
+        private set
+    private var executing = false
 
     override fun build(): View = page {
         addView(Ui.display(ctx, ctx.getString(R.string.sol_title), 26f))
@@ -175,6 +182,7 @@ class SolScreen(host: MainActivity) : Screen(host) {
         chatList.removeAllViews()
         if (turns.isEmpty()) chatList.addView(Ui.muted(ctx, ctx.getString(R.string.chat_empty), 12f))
         turns.takeLast(8).forEach { chatList.addView(bubbleView(it)) }
+        pending?.let { chatList.addView(actionCard(it)) }
         bubble.text = turns.lastOrNull { it.role == "assistant" && !it.fallback }?.text ?: told ?: tipOfDay(ctx, today)
         micBtn.alpha = if (listening) 1f else 0.9f
         micBtn.background = Ui.rounded(if (listening) Ui.withAlpha(Ui.RED, 0x55) else Ui.withAlpha(Ui.CYAN, 0x22), dp(16).toFloat(), Ui.withAlpha(if (listening) Ui.RED else Ui.CYAN, 0x88), dp(1))
@@ -191,6 +199,12 @@ class SolScreen(host: MainActivity) : Screen(host) {
         col.addView(tv)
         if (t.fallback) col.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.chat_fallback), 10f, Ui.MUTED, 700), 2))
         if (t.local) col.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.chat_rules), 10f, Ui.GOLD, 700), 2))
+        if (t.link.isNotBlank()) col.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.sol_act_explorer), 12f, Ui.CYAN, 800).apply {
+            isClickable = true
+            setPadding(0, dp(6), 0, dp(6))
+            tag = "sol-act-link"
+            setOnClickListener { host.openUrl(t.link) }
+        }, 2))
         wrap.addView(col, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             if (mine) leftMargin = dp(48) else rightMargin = dp(48)
         })
@@ -209,6 +223,10 @@ class SolScreen(host: MainActivity) : Screen(host) {
             speak(rule, auto = true)
             return
         }
+        if (net.solardepin.solarchik.sol.SolActions.looksLikeCommand(msg)) {
+            act(msg, history)
+            return
+        }
         sending = true
         status.text = "…"
         status.visibility = View.VISIBLE
@@ -224,6 +242,150 @@ class SolScreen(host: MainActivity) : Screen(host) {
                 status.visibility = View.GONE
                 render()
             }
+        }
+    }
+
+    /* ---------------- Sol does things (0.21.7) ---------------- */
+
+    private fun say(text: String, link: String = "", speakIt: Boolean = true) {
+        store.add(ChatTurn("assistant", text, System.currentTimeMillis(), link = link, action = true))
+        if (speakIt) speak(text, auto = true)
+    }
+
+    /** Request → structured action (server model, phone fallback) → confirmation card. Executes nothing. */
+    private fun act(msg: String, history: List<ChatTurn>) {
+        sending = true
+        pending = null
+        status.text = "…"
+        status.visibility = View.VISIBLE
+        render()
+        host.scope.launch {
+            try {
+                val c = actions.context()
+                val r = actClient.ask(msg, host.lang, c, history)
+                val action = r.action
+                when {
+                    action == null -> {
+                        if (r.offline) {
+                            // The action route is unreachable and the phone could not read it: plain chat answers.
+                            val chatR = chat.ask(msg, host.lang, store.playerId(), store.conversationId(host.save.today()), history, "yard", currentReport().script)
+                            store.add(ChatTurn("assistant", chatR.text, System.currentTimeMillis(), fallback = chatR.fallback))
+                            if (!chatR.fallback) speak(chatR.text, auto = true)
+                        } else say(r.reply.ifBlank { ctx.getString(R.string.sol_act_unclear) })
+                    }
+                    !action.type.needsConfirm -> say(c.agent(action.agent)?.let { actions.status(it) } ?: ctx.getString(R.string.sol_act_unclear))
+                    else -> {
+                        val plan = net.solardepin.solarchik.sol.SolActions.plan(action, c)
+                        val why = blockedText(plan)
+                        if (why != null) say(why)
+                        else {
+                            pending = plan
+                            say(ctx.getString(R.string.sol_act_ready, planTitle(plan)))
+                        }
+                    }
+                }
+            } finally {
+                sending = false
+                status.visibility = View.GONE
+                render()
+            }
+        }
+    }
+
+    private fun blockedText(p: net.solardepin.solarchik.sol.ActionPlan): String? = when (p.blocked) {
+        null -> null
+        "gone" -> ctx.getString(R.string.sol_act_blocked_gone)
+        "free_used" -> ctx.getString(R.string.sol_act_blocked_free_used)
+        "already_running" -> ctx.getString(R.string.sol_act_blocked_running, p.agent?.name.orEmpty())
+        "already_stopped" -> ctx.getString(R.string.sol_act_blocked_stopped, p.agent?.name.orEmpty())
+        "listed" -> ctx.getString(R.string.sol_act_blocked_listed, p.agent?.name.orEmpty())
+        "same" -> ctx.getString(R.string.sol_act_blocked_same)
+        else -> ctx.getString(R.string.sol_act_blocked_no_nft)
+    }
+
+    private fun planTitle(p: net.solardepin.solarchik.sol.ActionPlan): String = when (p.action.type) {
+        net.solardepin.solarchik.sol.ActType.BUY_STRATEGY -> ctx.getString(R.string.sol_act_title_buy, p.listing?.name.orEmpty())
+        net.solardepin.solarchik.sol.ActType.SET_STRATEGY -> ctx.getString(R.string.sol_act_title_strategy, p.agent?.name.orEmpty())
+        net.solardepin.solarchik.sol.ActType.MINT_FREE -> ctx.getString(R.string.sol_act_title_mint, AgentNames.display(ctx, net.solardepin.solarchik.core.Catalog.skus.first { !it.paidOnly }.name))
+        net.solardepin.solarchik.sol.ActType.START_AGENT -> ctx.getString(R.string.sol_act_title_start, p.agent?.name.orEmpty())
+        net.solardepin.solarchik.sol.ActType.STOP_AGENT -> ctx.getString(R.string.sol_act_title_stop, p.agent?.name.orEmpty())
+        net.solardepin.solarchik.sol.ActType.AGENT_STATUS -> p.agent?.name.orEmpty()
+    }
+
+    private fun changeLabel(k: String): String = ctx.getString(
+        when (k) {
+            "risk" -> R.string.sol_chg_risk
+            "windows" -> R.string.sol_chg_windows
+            "stakeSol" -> R.string.sol_chg_stake
+            "askLo" -> R.string.sol_chg_asklo
+            "askHi" -> R.string.sol_chg_askhi
+            "edgeBps" -> R.string.sol_chg_edge
+            "stopPct" -> R.string.sol_chg_stop
+            "takePct" -> R.string.sol_chg_take
+            else -> R.string.sol_chg_rules
+        },
+    )
+
+    /** The confirmation card: what changes, the price in SOL, the 240 h lock note, Confirm / Cancel. */
+    private fun actionCard(p: net.solardepin.solarchik.sol.ActionPlan): View = Ui.card(ctx, accent = Ui.GOLD, pad = 14).apply {
+        tag = "sol-act-card"
+        addView(Ui.label(ctx, ctx.getString(R.string.sol_act_card), Ui.GOLD))
+        addView(Ui.top(Ui.text(ctx, planTitle(p), 15f, Ui.TEXT, 800), 4))
+        p.listing?.takeIf { p.action.type == net.solardepin.solarchik.sol.ActType.SET_STRATEGY }?.let {
+            addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sol_act_template, it.name), 12f), 4))
+        }
+        p.changes.forEach { (k, from, to) ->
+            val f = if (k == "risk") actions.riskLabel(from) else from
+            val t = if (k == "risk") actions.riskLabel(to) else to
+            addView(Ui.top(Ui.body(ctx, "• ${changeLabel(k)}: $f → $t"), 4))
+        }
+        val price = when (p.action.type) {
+            net.solardepin.solarchik.sol.ActType.BUY_STRATEGY -> ctx.getString(R.string.sol_act_price, Fmt.sol((p.priceLamports ?: 0) / 1e9))
+            net.solardepin.solarchik.sol.ActType.SET_STRATEGY -> ctx.getString(R.string.sol_act_price_strategy)
+            net.solardepin.solarchik.sol.ActType.MINT_FREE -> ctx.getString(R.string.sol_act_price_free)
+            else -> ctx.getString(R.string.sol_act_local)
+        }
+        addView(Ui.top(Ui.text(ctx, price, 13f, Ui.GOLD, 800).apply { tag = "sol-act-price" }, 8))
+        if (p.locksSale) addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.sol_act_lock, net.solardepin.solarchik.agents.StrategyRules.SALE_LOCK_HOURS), 12f, Ui.AMBER, 700).apply { tag = "sol-act-lock" }, 4))
+        if (p.action.type in setOf(net.solardepin.solarchik.sol.ActType.BUY_STRATEGY, net.solardepin.solarchik.sol.ActType.SET_STRATEGY, net.solardepin.solarchik.sol.ActType.MINT_FREE)) {
+            addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sol_act_wallet), 11f), 4))
+        }
+        val row = Ui.row(ctx, gap = 8)
+        row.addView(Ui.weight(Ui.button(ctx, ctx.getString(R.string.sol_act_cancel), Ui.Btn.GHOST) { cancelPending() }.apply { tag = "sol-act-cancel" }))
+        val ok = Ui.button(ctx, ctx.getString(R.string.sol_act_confirm)) { confirm() }.apply { tag = "sol-act-confirm" }
+        Ui.setEnabled(ok, !executing)
+        row.addView(Ui.weight(ok))
+        addView(Ui.top(row, 10))
+    }
+
+    fun cancelPending() {
+        if (pending == null || executing) return
+        pending = null
+        say(ctx.getString(R.string.sol_act_cancelled), speakIt = false)
+        render()
+    }
+
+    /** The ONLY path that executes an action: the player's tap on Confirm. */
+    fun confirm() {
+        val p = pending ?: return
+        if (executing) return
+        executing = true
+        status.text = ctx.getString(R.string.sol_act_working)
+        status.visibility = View.VISIBLE
+        render()
+        host.scope.launch {
+            val r = try {
+                actions.execute(p)
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
+                net.solardepin.solarchik.ui.ActResult(false, ctx.getString(R.string.sol_act_failed, host.errorText(t)))
+            }
+            executing = false
+            pending = null
+            status.visibility = View.GONE
+            say(r.text, r.link)
+            host.renderAll()
+            render()
         }
     }
 

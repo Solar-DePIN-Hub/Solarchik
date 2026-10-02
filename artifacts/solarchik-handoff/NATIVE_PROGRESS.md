@@ -535,3 +535,39 @@ Everything stays native Kotlin (Canvas + SoundPool/MediaPlayer). No engine was a
 - **Checks (merge build on native-full, 0.21.6 / versionCode 71).** `testDebugUnitTest`: 242 tests, 7 skipped (opt-in tools: run shots/video, live route checks), 0 failures. `lintDebug`: 1 warning (the existing IconMissingDensityFolder baseline). `assembleDebug` and `assembleRelease` OK.
 - **APKs (box test key, not production).** `solarchik-0.21.6-release-boxkey.apk` 6,568,728 bytes, sha256 `92f9f30257173325b9fe2294b21eae3821bce612858a5ea139078cb156e5e12f`, signer `CN=Solarchik BOX TEST KEY (not production)`. `solarchik-0.21.6-debug.apk` 10,606,659 bytes, sha256 `eb736b165b38d387042bd4167b40adbf69a8730ea2164f98664514120bb76089`.
 - **Not verified on a device.** No emulator: frames are Robolectric renders and the audio was checked by loudness/spectrogram/loop-seam numbers, not by ear. Haptics, 60 fps pacing and MediaPlayer loop gaps still need a phone.
+
+## 0.21.7 (versionCode 72): Sol does things, live AI voice, floating nav, Slice back, gentler city run
+
+- **Sol actions: chat and voice now DO things (EN/UK).** The server route `POST /api/native/sol-act` (web-fees `3bfde0b`, Vercel `dpl_8bvx9kDmx2vqAQDpXJmN5g5C5s2y`) uses Gemini structured output (JSON schema) to turn a request into at most ONE action: `set_strategy` (risk / windows / "use <market strategy> as a template"), `buy_strategy`, `mint_free`, `start_agent`, `stop_agent`, `agent_status`. The model only ever sees short ids (a1, m1). Targets must exist in the phone's context, risk and windows must be legal spec values, and the route never executes anything. The phone validates everything again (`sol/SolActions.kt` `normalize`). If the route is down, an EN/UK keyword parser (`parseLocal`) reads the same actions offline. `SolScreen` shows a confirmation card (`SolActionsTest` checks it) with what changes (risk Risky → Calm, windows 5/15 → 60), the price in SOL, the 240 h sale-lock note for strategy changes, and the note that the wallet will ask to sign. Only the Confirm tap runs `SolActionDesk.execute`. That uses the same flows as the Agents tab: `agents/StrategyFlows.kt` (now shared with `StrategyPanel`; wallet proof → server-built co-signed txs → wallet signs → server confirm), `Minter`, and the desk start/stop. The result is posted in chat with a devnet Explorer link. Voice input goes through the same path.
+- **Live devnet E2E (2026-10-02, 23:2x Kyiv), `SolActionsIT` (-Pdevnet=1 -Pchat=act).** A throwaway buyer (`5LuMCHok2VCBj7Aumx7kDo7DFL1JW73CqCdd7Sd1n13N`, server faucet drip) went through the real sol-act route, plan, "tap", then StrategyFlows with keypair signing instead of MWA:
+  - "buy the Calm Hourly BTC NFT" → buy 0.05 SOL: `3uGignaiGME68YTrmutt5ZfNvJ8X3qBkuDswZf7LdtGXFzfoeBPAiHmfEm61DKL7oSTLLTjK8gJYBta1srXCqwFH`.
+  - "зміни мого BTC агента на ризиковий 5 хвилин" → strategy v2 (risk calm → risky, windows 60/240 → 5): `35PznYQbnq9B5nnBdvwdc8pF2rwbP4CGwiUoBzsZFncteeXZ8xGaa14M6hAkgKXwLNQZYjVMVnc9Z7hAWy4goLsF`. Sale is locked until 2026-10-12 23:26 Kyiv.
+  - Both are finalized with no error. Log: `/workspace/apk-test/sol-actions-devnet-e2e.log`.
+  - Side effect: the "Calm Hourly BTC" demo listing is now owned by that test wallet and no longer on the market.
+- **Sol chat + voice.** `sol-chat` (hedged gemini-3.6-flash → 3.5-flash-lite → 3.8-flash, about 1 s) is primary and the friend worker is the fallback. A uk reply must be Cyrillic with no Russian letters. Neural voice comes from `sol-voice` (Gemini 3.8 Flash(-Lite) TTS, voice Sulafat, WAV cached in `cacheDir/sol-voice`, newest 80 kept), with system TTS as the offline fallback. Old failure cause: the preview TTS ids hung past the timeout or answered 429. The run radio's scripted moments go through the AI too, and offline lines are tagged "Offline". Rules cards answer only explicit rule questions. There is a daily live yard greeting.
+- **Language:** follow the phone (uk → Ukrainian, any other locale → English) unless a manual choice is set in Settings (Phone / English / Українська). `core/AppLocale.kt`.
+- **Floating nav + Home.** A rounded glass bottom bar: Home · Agents · [Play, raised sun button] · Sol · More. A gold pill slides under the picked tab with overshoot, the icon bounces, there is a haptic tick, and screens slide in from the side of the previous tab. Home gets bold gradient cards: **Call Secretary** (status, opens the secretary section in More), Agents (running count), Slice, Streak. Renders: `/workspace/apk-test/shots-0.21.7/nav-before|nav-after` (EN + UK, every tab).
+- **Slice restored** (lost in the native rewrite; web `SlicePanel`). Agents › Slice shows the 10 xStocks/PreStocks mints with live Jupiter prices (`lite-api.jup.ag/price/v3`, 24 h change), a clearly labelled PAPER portfolio ($1,000 virtual, $50 tickets, prefs `solarchik-slice`, wiped by Delete my data) and "Open Slice site" (slice-solana.netlify.app). No wallet, no transaction.
+- **Run.**
+  - Loading cover until art, GPU upload (warm-up frames) and audio are ready (audio wait capped at 4 s). `RunPreload` decodes sprites at app start, plus a baseline profile (`assets/dexopt/baseline.prof` is in the APK).
+  - The mic permission request pauses the run first.
+  - Hero `HERO_FRAC` 0.156 (was min(h·0.2, 136 px)) with one common sprite scale and a centroid pivot.
+  - Death beat: slow-mo ×0.35 for 1.1 s, then the card.
+  - Caption top-left with 2.6–5.2 s auto-hide; small one-line quest toast.
+  - City tuning (classic unchanged): `CITY_SPEED0` 205, ramp 0.009 to 15 km, then 0.02, cap 410; `CITY_PW` 12; drone box ±18/−24..+4, mite ±20/−28; `CITY_INVULN` 1.8 s; hazard floors: calm to 3 km, drones 4 km, wires 4.5 km, crumble 5.5 km, waves 11 km. `RunBalanceTest`: a jittery bot passes 1000 m on all 6 days.
+- **Audit hand-off.**
+  - `Rpc` retries 429/5xx twice (300/900 ms), then once via `RPC_DEVNET_FALLBACK` = `https://solarchik-market.vercel.app/solana-rpc`. Airdrops are never retried.
+  - Wallet error details come from string resources, and raw wallet/RPC text is never appended (logcat only).
+  - The faucet answer `via:"airdrop"` gets its own line.
+  - UK strings and agent display names are fixed.
+- **Checks.** `testDebugUnitTest`: 271 tests, 8 skipped (opt-in live/tool tests incl. `SolActionsIT`), 0 failures. New: `SolActionsTest` (9), `Fixes0217Test` (10), `Nav0217Test` (5), `RunBalanceTest`. Web: `npm run test:ts` 197/197.
+- **APKs (box test key, not production).**
+  - `solarchik-0.21.7-release-boxkey.apk`: 6,637,775 bytes, sha256 `336a6d4ab8efa798b24f7c0eb83b7802c9bd11dfb7e2a1d139f63a0492761841`, signer `CN=Solarchik BOX TEST KEY (not production)`.
+  - `solarchik-0.21.7-debug.apk`: 10,421,770 bytes, sha256 `afd87de3e792a0d121d934ef5867ee9d09302e4da68176976ab035a1479484fb`.
+- **Not verified on a device.** Robolectric renders only. On a real phone, check:
+  - the MWA prompts from the Sol confirm card (the live E2E signed with a keypair, not MWA);
+  - haptics and the nav animation;
+  - neural voice playback.
+- **Not done.**
+  - Sol actions are not mirrored in the web chat yet; the web route is ready to use.
+  - A native free agent (app collection) cannot get a strategy change until it is moved to the server collection, and the card says so.

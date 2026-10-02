@@ -231,16 +231,18 @@ class RunSimTest {
         assertEquals(1.0, RunSim.cityStormAt(42_000.0), 0.0) // the next cycle storms again
     }
 
-    @Test fun citySpeedRampsHarderAndCapsHigher() {
+    @Test fun citySpeedRampsGentlyThenCaps() {
         val s = RunSim.create(1)
         assertEquals(RunSim.CITY_SPEED0, RunSim.speedAt(s), 0.0)
         s.distance = 5000.0
-        assertEquals(RunSim.CITY_SPEED0 + 105, RunSim.speedAt(s), 1e-9)
+        assertEquals(RunSim.CITY_SPEED0 + 45, RunSim.speedAt(s), 1e-9)
+        // 0.21.7: 1000 m is ~295 units/s (was capped at 410 from ~930 m)
+        s.distance = 10_000.0
+        assertEquals(295.0, RunSim.speedAt(s), 1e-9)
         s.distance = 1e6
         assertEquals(RunSim.CITY_CAP + 16, RunSim.speedAt(s), 1e-9)
-        // the cap is reached before the first boss (~930 m)
-        s.distance = 9400.0
-        assertTrue(RunSim.speedAt(s) >= RunSim.CITY_CAP)
+        s.distance = 15_000.0 + (RunSim.CITY_CAP - 340.0) / RunSim.CITY_RAMP_LATE
+        assertEquals(RunSim.CITY_CAP, RunSim.speedAt(s), 1e-6)
     }
 
     @Test fun fallingCostsAHeartAndRespawnsAtTheCheckpoint() {
@@ -368,6 +370,7 @@ class RunSimTest {
     }
 
     @Test fun cityRoofsWidenGapsButStayJumpable() {
+        var liveDays = 0
         for (mod in DayMod.entries) for (seed in listOf(1, 99, RunSim.daySeed("2026-10-02"), RunSim.daySeed("2027-03-09"))) {
             val s = RunSim.create(seed, mod)
             while (s.spawnX < 40_000) RunSim.spawnChunk(s, s.spawnX, 8)
@@ -388,9 +391,12 @@ class RunSimTest {
             assertTrue(arenas.size >= 3)
             assertTrue(arenas.first().x in 9_800.0..10_600.0)
             assertTrue(roofs.any { it.crumble })
-            assertTrue(roofs.any { it.live })
+            // 0.21.7: cables are rarer before 1500 m; a day may carry only dead (safe) cables
+            assertTrue(roofs.any { it.kind == PlatKind.WIRE })
+            if (roofs.any { it.live }) liveDays++
             assertTrue(s.picks.filter { it.shield }.all { it.x > 6000 })
         }
+        assertTrue("live cables on $liveDays of 20 days", liveDays >= 16)
     }
 
     @Test fun crackedRoofGivesWayAfterLanding() {

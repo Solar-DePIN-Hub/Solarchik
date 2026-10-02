@@ -110,13 +110,22 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
 
         addView(section(R.string.settings_language, R.drawable.ic_nav_yard, Ui.GREEN).apply {
             addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.settings_language_body)), 8))
-            if (Build.VERSION.SDK_INT >= 33) {
-                addView(Ui.top(Ui.button(ctx, ctx.getString(R.string.settings_language_open), Ui.Btn.GHOST) {
-                    runCatching {
-                        host.startActivity(Intent(Settings.ACTION_APP_LOCALE_SETTINGS, Uri.parse("package:" + ctx.packageName)))
+            // In-app picker (0.21.7): stored choice, applied to UI, Sol chat/voice and agent texts.
+            val pick = net.solardepin.solarchik.core.AppLocale.choice(ctx)
+            val r = Ui.row(ctx, gap = 8)
+            listOf(
+                net.solardepin.solarchik.core.AppLocale.FOLLOW to ctx.getString(R.string.settings_language_phone),
+                net.solardepin.solarchik.core.AppLocale.EN to "English",
+                net.solardepin.solarchik.core.AppLocale.UK to "Українська",
+            ).forEach { (code, label) ->
+                r.addView(Ui.weight(Ui.button(ctx, label, if (code == pick) Ui.Btn.PRIMARY else Ui.Btn.GHOST) {
+                    if (code != net.solardepin.solarchik.core.AppLocale.choice(ctx)) {
+                        net.solardepin.solarchik.core.AppLocale.set(ctx, code)
+                        host.recreate()
                     }
-                }, 12))
+                }.apply { tag = "lang-" + code.ifEmpty { "phone" } }))
             }
+            addView(Ui.top(r, 12))
         })
 
         addView(section(R.string.settings_privacy, R.drawable.ic_check, Ui.CYAN).apply {
@@ -256,6 +265,12 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
                 host.requestNotifications(fromUser = true)
             }, 10))
         }
+    }
+
+    /** Home's Secretary card lands here: scroll the secretary section into view (0.21.7). */
+    fun focusSecretary() {
+        if (!this::secretaryBox.isInitialized) return
+        secretaryBox.post { scrollToView(secretaryBox) }
     }
 
     // ---- Call secretary ----

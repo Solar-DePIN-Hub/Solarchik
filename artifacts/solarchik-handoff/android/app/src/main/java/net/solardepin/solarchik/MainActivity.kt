@@ -47,9 +47,10 @@ import net.solardepin.solarchik.wallet.WalletError
 /** Single activity: five native tabs over one MWA sender. No WebView anywhere. */
 class MainActivity : ComponentActivity() {
     enum class Tab(val label: Int, val icon: Int) {
+        // 0.21.7 nav: Home · Agents · [Play] · Sol · More, Play raised in the middle.
         YARD(R.string.nav_yard, R.drawable.ic_nav_yard),
-        RUN(R.string.nav_run, R.drawable.ic_nav_run),
         AGENTS(R.string.nav_agents, R.drawable.ic_nav_agents),
+        RUN(R.string.nav_run, R.drawable.ic_nav_run),
         SOL(R.string.nav_sol, R.drawable.ic_nav_sol),
         SETTINGS(R.string.nav_settings, R.drawable.ic_nav_settings),
     }
@@ -72,6 +73,9 @@ class MainActivity : ComponentActivity() {
     private val screens = LinkedHashMap<Tab, Screen>()
     private lateinit var content: FrameLayout
     private lateinit var nav: LinearLayout
+    private lateinit var navPill: View
+    private lateinit var playBtn: FrameLayout
+    private val navCells = HashMap<Tab, View>()
     private lateinit var toastView: TextView
     private val navItems = HashMap<Tab, Pair<ImageView, TextView>>()
     private val main = Handler(Looper.getMainLooper())
@@ -154,6 +158,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** App language (phone language, or the player's pick in Settings). */
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(net.solardepin.solarchik.core.AppLocale.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         sender = ActivityResultSender(this)
@@ -165,6 +174,9 @@ class MainActivity : ComponentActivity() {
         Ui.init(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(buildRoot())
+        // 0.21.7: decode and scale the run art in the background while the player is in the app,
+        // so the run opens straight into the countdown instead of a black surface.
+        runCatching { val g = net.solardepin.solarchik.game.RunGarage(this); net.solardepin.solarchik.game.run.RunPreload.start(this, g.robot, g.skin) }
         select(startTab(savedInstanceState?.getString("tab"), intent?.getStringExtra(EXTRA_TAB)))
     }
 
@@ -235,24 +247,44 @@ class MainActivity : ComponentActivity() {
         content = FrameLayout(this)
         root.addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
+        // Floating glass bar (0.21.7): rounded, translucent, a gold pill that slides to the picked tab,
+        // Play raised in the middle as the sun button.
+        val bar = FrameLayout(this).apply {
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Ui.withAlpha(Ui.blend(Ui.blend(Ui.BG, Ui.SURFACE2, 0.9f), Ui.GOLD, 0.05f), 0xFA), Ui.withAlpha(Ui.blend(Ui.BG, Ui.SURFACE, 0.9f), 0xFA)),
+            ).apply {
+                cornerRadius = dp(30).toFloat()
+                setStroke(dp(1), Ui.withAlpha(Ui.GOLD, 0x3A))
+            }
+            elevation = dp(18).toFloat()
+            clipChildren = false
+            clipToPadding = false
+            tag = "nav-bar"
+        }
+        navPill = View(this).apply {
+            background = Ui.rounded(Ui.withAlpha(Ui.GOLD, 0x24), dp(22).toFloat(), Ui.withAlpha(Ui.GOLD, 0x55), dp(1))
+            tag = "nav-pill"
+        }
+        bar.addView(navPill, FrameLayout.LayoutParams(0, dp(54), Gravity.CENTER_VERTICAL))
         nav = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = android.graphics.drawable.LayerDrawable(
-                arrayOf(
-                    android.graphics.drawable.ColorDrawable(Ui.withAlpha(Ui.SURFACE, 0xF5)),
-                ),
-            )
-            elevation = dp(12).toFloat()
+            clipChildren = false
+            clipToPadding = false
+            setPadding(dp(6), 0, dp(6), 0)
         }
-        val line = View(this).apply { setBackgroundColor(Ui.STROKE) }
-        for (tab in Tab.entries) nav.addView(navItem(tab), LinearLayout.LayoutParams(0, dp(68), 1f))
-        val navWrap = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(line, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
-            addView(nav, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            setBackgroundColor(Ui.withAlpha(Ui.SURFACE, 0xF5))
+        for (tab in Tab.entries) nav.addView(if (tab == Tab.RUN) playItem() else navItem(tab), LinearLayout.LayoutParams(0, dp(66), 1f))
+        bar.addView(nav, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(66)))
+        val navWrap = FrameLayout(this).apply {
+            clipChildren = false
+            clipToPadding = false
+            addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(66)).apply {
+                leftMargin = dp(14); rightMargin = dp(14); bottomMargin = dp(10); topMargin = dp(24)
+            })
         }
+        root.clipChildren = false
         root.addView(navWrap, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        nav.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> movePill(current, animate = false) }
 
         toastView = Ui.text(this, "", 14f, Ui.TEXT, 700).apply {
             background = Ui.rounded(Ui.SURFACE2, dp(16).toFloat(), Ui.withAlpha(Ui.GOLD, 0x66), dp(1))
@@ -263,7 +295,7 @@ class MainActivity : ComponentActivity() {
         root.addView(
             toastView,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM).apply {
-                leftMargin = dp(16); rightMargin = dp(16); bottomMargin = dp(84)
+                leftMargin = dp(16); rightMargin = dp(16); bottomMargin = dp(104)
             },
         )
 
@@ -272,11 +304,15 @@ class MainActivity : ComponentActivity() {
             topInset = bars.top
             bottomInset = bars.bottom
             navWrap.setPadding(0, 0, 0, bars.bottom)
-            (toastView.layoutParams as FrameLayout.LayoutParams).bottomMargin = dp(84) + bars.bottom
+            (toastView.layoutParams as FrameLayout.LayoutParams).bottomMargin = dp(104) + bars.bottom
             screens.values.forEach { it.applyInsets() }
             insets
         }
         return root
+    }
+
+    private fun tick(v: View) {
+        v.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
     }
 
     private fun navItem(tab: Tab): View {
@@ -284,29 +320,90 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             isClickable = true
-            background = Ui.ripple(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT), dp(20).toFloat(), 0x22F5C542)
+            background = Ui.ripple(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT), dp(22).toFloat(), 0x22F5C542)
             setOnClickListener {
-                it.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                tick(it)
                 select(tab, animate = true)
             }
             contentDescription = getString(tab.label)
+            tag = "nav-" + tab.name.lowercase()
         }
-        val icon = ImageView(this).apply {
-            setImageResource(tab.icon)
-            setPadding(dp(14), dp(4), dp(14), dp(4))
-        }
+        val icon = ImageView(this).apply { setImageResource(tab.icon) }
         val label = Ui.text(this, getString(tab.label), 11f, Ui.MUTED, 800).apply {
             gravity = Gravity.CENTER
             maxLines = 1
         }
-        col.addView(icon, LinearLayout.LayoutParams(dp(56), dp(30)))
-        col.addView(label, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+        col.addView(icon, LinearLayout.LayoutParams(dp(26), dp(26)))
+        col.addView(label, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(3) })
         navItems[tab] = icon to label
+        navCells[tab] = col
         return col
+    }
+
+    /** Play: the raised sun button in the middle of the bar. */
+    private fun playItem(): View {
+        val tab = Tab.RUN
+        val cell = FrameLayout(this).apply {
+            clipChildren = false
+            clipToPadding = false
+            contentDescription = getString(tab.label)
+            tag = "nav-run"
+        }
+        playBtn = FrameLayout(this).apply {
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.parseColor("#FFE07A"), Ui.GOLD, Color.parseColor("#F29A2E")),
+            ).apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setStroke(dp(3), Ui.BG)
+            }
+            elevation = dp(14).toFloat()
+            isClickable = true
+            foreground = Ui.ripple(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT), dp(32).toFloat(), 0x33FFFFFF)
+            setOnClickListener {
+                tick(it)
+                select(tab, animate = true)
+            }
+        }
+        val icon = ImageView(this).apply { setImageResource(tab.icon); setColorFilter(Ui.INK) }
+        playBtn.addView(icon, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER))
+        cell.addView(playBtn, FrameLayout.LayoutParams(dp(60), dp(60), Gravity.CENTER_HORIZONTAL or Gravity.TOP).apply { topMargin = -dp(22) })
+        val label = Ui.text(this, getString(tab.label), 11f, Ui.GOLD, 900).apply { gravity = Gravity.CENTER; maxLines = 1 }
+        cell.addView(label, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply { bottomMargin = dp(8) })
+        navItems[tab] = icon to label
+        navCells[tab] = cell
+        return cell
+    }
+
+    /** The gold pill slides under the picked tab; on Play it hides and the sun button glows instead. */
+    private fun movePill(tab: Tab, animate: Boolean) {
+        if (!this::navPill.isInitialized) return
+        val cell = navCells[tab] ?: return
+        if (cell.width == 0) return
+        val w = cell.width - dp(10)
+        if (navPill.layoutParams.width != w) {
+            navPill.layoutParams = (navPill.layoutParams as FrameLayout.LayoutParams).apply { width = w }
+        }
+        val x = (nav.left + cell.left + dp(5)).toFloat()
+        val show = tab != Tab.RUN
+        if (animate) {
+            navPill.animate().translationX(x).alpha(if (show) 1f else 0f).setDuration(260)
+                .setInterpolator(android.view.animation.OvershootInterpolator(0.9f)).start()
+        } else {
+            navPill.translationX = x
+            navPill.alpha = if (show) 1f else 0f
+        }
+    }
+
+    private fun bounce(v: View) {
+        v.animate().cancel()
+        v.scaleX = 0.82f; v.scaleY = 0.82f
+        v.animate().scaleX(1f).scaleY(1f).setDuration(320).setInterpolator(android.view.animation.OvershootInterpolator(3f)).start()
     }
 
     fun select(tab: Tab, animate: Boolean = false) {
         val changed = current != tab
+        val from = current
         if (screens.containsKey(current) && changed) screens[current]?.onHide()
         current = tab
         val screen = screens.getOrPut(tab) { create(tab) }
@@ -314,19 +411,31 @@ class MainActivity : ComponentActivity() {
         content.addView(screen.view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         screen.applyInsets()
         if (animate && changed) {
+            // Slide from the side of the tab we came from, with a soft fade.
+            val dir = if (tab.ordinal > from.ordinal) 1 else -1
             screen.view.alpha = 0f
-            screen.view.translationY = dp(10).toFloat()
-            screen.view.animate().alpha(1f).translationY(0f).setDuration(160).start()
+            screen.view.translationX = dp(28).toFloat() * dir
+            screen.view.animate().alpha(1f).translationX(0f).setDuration(220)
+                .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
         } else {
             screen.view.alpha = 1f
+            screen.view.translationX = 0f
             screen.view.translationY = 0f
         }
         for ((t, pair) in navItems) {
             val on = t == tab
+            if (t == Tab.RUN) {
+                pair.second.setTextColor(if (on) Ui.GOLD else Ui.withAlpha(Ui.GOLD, 0xB0))
+                continue
+            }
             pair.first.setColorFilter(if (on) Ui.GOLD else Ui.MUTED)
-            pair.first.background = if (on) Ui.rounded(Ui.withAlpha(Ui.GOLD, 0x24), dp(15).toFloat()) else null
             pair.second.setTextColor(if (on) Ui.GOLD else Ui.MUTED)
         }
+        if (this::playBtn.isInitialized) {
+            playBtn.animate().scaleX(if (tab == Tab.RUN) 1.08f else 1f).scaleY(if (tab == Tab.RUN) 1.08f else 1f).setDuration(200).start()
+        }
+        movePill(tab, animate && changed)
+        if (animate && changed) navItems[tab]?.first?.let { bounce(if (tab == Tab.RUN && this::playBtn.isInitialized) playBtn else it) }
         screen.onShow()
     }
 
