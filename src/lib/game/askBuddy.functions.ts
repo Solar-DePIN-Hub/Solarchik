@@ -27,7 +27,8 @@ const VIBE_LINE: Record<PetVibe, string> = {
 
 const CHAT_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.6-flash"] as const;
 const TTS_MODELS = ["gemini-2.5-flash-preview-tts", "gemini-3.1-flash-tts-preview"] as const;
-const STT_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest"] as const;
+const STT_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.6-flash"] as const;
+const XAI_STT_MODEL = "grok-voice-transcribe-2.0";
 
 type HistoryItem = { role: "user" | "buddy"; text: string };
 
@@ -378,6 +379,39 @@ async function hearGemini(audio: string, mime: string): Promise<string | null> {
   return null;
 }
 
+function audioExt(mime: string): string {
+  if (mime.includes("wav")) return "wav";
+  if (mime.includes("mpeg") || mime.includes("mp3")) return "mp3";
+  if (mime.includes("ogg")) return "ogg";
+  if (mime.includes("mp4") || mime.includes("m4a") || mime.includes("aac")) return "m4a";
+  return "webm";
+}
+
+// Fallback when every Gemini audio call fails (live grok.me hearBuddy returned ok:false for WAV,
+// WebM/Opus and MP3 on 2026-10-02 while chat and TTS worked). xAI REST STT: POST /v1/stt multipart.
+async function hearXai(audio: string, mime: string): Promise<string | null> {
+  const key = xaiApiKey();
+  if (!key) return null;
+  try {
+    const cleanMime = mime.split(";")[0] || "audio/webm";
+    const form = new FormData();
+    form.append("model", XAI_STT_MODEL);
+    form.append("file", new Blob([Buffer.from(audio, "base64")], { type: cleanMime }), `speech.${audioExt(cleanMime)}`);
+    const res = await fetch("https://api.x.ai/v1/stt", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { text?: unknown };
+    const text = typeof json?.text === "string" ? clip(json.text, CHAT_MAX_LEN) : "";
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
 export const askBuddy = createServerFn({ method: "POST" })
   .validator((input: unknown) => validate(input))
   .handler(async ({ data }): Promise<AskBuddyResult> => {
@@ -436,7 +470,7 @@ export const hearBuddy = createServerFn({ method: "POST" })
     try {
       const bin = Buffer.from(data.audio, "base64");
       if (bin.byteLength < 200 || bin.byteLength > 900_000) return { ok: false };
-      const text = await hearGemini(data.audio, data.mime);
+      const text = (await hearGemini(data.audio, data.mime)) || (await hearXai(data.audio, data.mime));
       if (!text) return { ok: false };
       return { ok: true, text };
     } catch {
