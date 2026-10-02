@@ -1429,7 +1429,8 @@ function WorkPanel() {
 				className: "mt-3 flex flex-col gap-2",
 				children: owned.map((nft) => /* @__PURE__ */ jsx(OwnedRow, {
 					nft,
-					onList: () => listForSale(nft.asset)
+					onList: () => listForSale(nft.asset),
+					onMarket: () => setTab("store")
 				}, nft.asset))
 			})] }),
 			/* @__PURE__ */ jsxs("div", { children: [/* @__PURE__ */ jsx("h3", {
@@ -1458,9 +1459,33 @@ function WorkPanel() {
 		]
 	});
 }
-function OwnedRow({ nft, onList }) {
+function OwnedRow({ nft, onList, onMarket }) {
+	const mintCollection = useAgents((s) => s.mintCollection);
 	const gate = listEligible(nft);
 	const price = quoteResaleSol(nft);
+	// The built-in demo desk is not an NFT: nothing to list. Server-collection Strategy NFTs sell on the
+	// Strategy NFT market (Store -> Market; no lock until the first strategy change), not on the old local shelf.
+	const demoDesk = nft.asset === "local-dex-arb";
+	const strategyNft = Boolean(mintCollection && nft.coreCollection === mintCollection);
+	if (demoDesk || strategyNft) return /* @__PURE__ */ jsxs("li", {
+		className: "rounded-lg border border-border bg-elevated p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between",
+		"data-testid": demoDesk ? "owned-demo-desk" : "owned-strategy-nft",
+		children: [/* @__PURE__ */ jsxs("div", {
+			className: "min-w-0",
+			children: [/* @__PURE__ */ jsx("div", {
+				className: "text-sm font-medium",
+				children: nft.name
+			}), /* @__PURE__ */ jsx("p", {
+				className: "mt-1 text-xs text-muted break-words",
+				children: demoDesk ? "Вбудований демо-стіл, не NFT. Симуляція на живих спредах." : "NFT стратегії. Продаж — у Магазині → Ринок. Свіжий мінт можна виставити одразу; зміна стратегії закриває продаж на 240 год."
+			})]
+		}), demoDesk ? null : /* @__PURE__ */ jsx(Button, {
+			variant: "ghost",
+			size: "sm",
+			onClick: onMarket,
+			children: "Відкрити ринок"
+		})]
+	});
 	return /* @__PURE__ */ jsxs("li", {
 		className: "rounded-lg border border-border bg-elevated p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between",
 		children: [/* @__PURE__ */ jsxs("div", {

@@ -534,3 +534,14 @@ describe("prediction brain: honest model label and player language", () => {
     assert.match(store, /locale: typeof document !== "undefined" \? document\.documentElement\.lang : undefined,\n\s+focus: ask\.focus/);
   });
 });
+
+describe("Take and work (live audit, Oct 2026)", () => {
+  const store = readFileSync(new URL("./store.ts", import.meta.url), "utf8");
+  it("starts the freshly minted agent instead of leaving it idle", () => {
+    const buy = store.slice(store.indexOf("async buyLiveSku(id)"), store.indexOf("armArb() {"));
+    assert.match(buy, /get\(\)\.runAsset\(nft\.asset\);\n\s+return true;/);
+  });
+  it("does not ask the server to fire for the built-in demo desk (not an NFT)", () => {
+    assert.match(store, /step\.arbFire && !arbFlight && nft\.asset !== LOCAL_DEX_ASSET\)/);
+  });
+});

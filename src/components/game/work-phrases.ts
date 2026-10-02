@@ -221,6 +221,10 @@ export const WORK_EN: Record<string, string> = {
   "Інтервал DCA, сек": "DCA interval, sec",
   "Адреса отримувача": "Recipient address",
   "Взяти і працювати": "Take and work",
+  "Вбудований демо-стіл, не NFT. Симуляція на живих спредах.": "Built-in demo desk, not an NFT. Simulation on live spreads.",
+  "NFT стратегії. Продаж — у Магазині → Ринок. Свіжий мінт можна виставити одразу; зміна стратегії закриває продаж на 240 год.":
+    "Strategy NFT. Sell it in Store → Market. A fresh mint can be listed at once; a strategy change locks sale for 240 h.",
+  "Відкрити ринок": "Open market",
   "Дрібні живі угоди": "Small live trades",
   "Очікуваний USDC: ": "Expected USDC: ",
   "Повернути Polygon": "Return Polygon",

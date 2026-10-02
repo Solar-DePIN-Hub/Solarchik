@@ -861,6 +861,8 @@ function clearPendingPro() {
   }
 }
 
+const LOCAL_DEX_ASSET = "local-dex-arb";
+
 /** Sign with the room key, then let the server decide. The browser holds no arb secret. */
 async function signedArbFire(dir: "A" | "B", rawSymbol: string, asset: string) {
   const kp = await loadKeypair();
@@ -4013,6 +4015,9 @@ export const useAgents = create<AgentsState>((set, get) => ({
         }),
       }));
       get().persist();
+      // "Take and work": the new agent takes the shift now. Agents otherwise pick NFTs only when work starts,
+      // and the arb desk is usually already working, so a fresh mint used to sit idle ("waiting for a class 1 NFT").
+      get().runAsset(nft.asset);
       return true;
     } catch (e) {
       set({
@@ -4272,7 +4277,9 @@ export const useAgents = create<AgentsState>((set, get) => ({
         decider:
           kind !== "prediction" ? "rule" : brainFlight ? "wait" : get().betCalls >= BET_CAP ? "capped" : "grok",
       });
-      if (kind === "dex" && step.arbFire && !arbFlight) {
+      // The built-in demo desk (local-dex-arb) is not an NFT, so the server has nothing to check and would only
+      // answer "no agent NFT" on every edge; its simulated line is already in the log. Real class 2 NFTs go to the server.
+      if (kind === "dex" && step.arbFire && !arbFlight && nft.asset !== LOCAL_DEX_ASSET) {
         arbFlight = true;
         const dir = step.arbFire.dir;
         const symbol = step.arbFire.symbol;
