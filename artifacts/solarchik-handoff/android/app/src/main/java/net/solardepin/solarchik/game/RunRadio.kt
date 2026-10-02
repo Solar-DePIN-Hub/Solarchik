@@ -299,17 +299,39 @@ class RunRadio(
         asking++
         show(text)
         audio?.play("tick")
+        net.solardepin.solarchik.sol.SolLatency.sent(voice = true)
         scope.launch {
             try {
-                val r = runCatching { ask(text, last) }.getOrNull()
+                // 0.21.9: the answer is spoken while it streams (first clause / sentence), not after the whole reply
+                val v = voice()
+                v.beginStream()
+                var streamed = ""
+                net.solardepin.solarchik.sol.SolLatency.request(0)
+                val r = runCatching {
+                    brain.ask(text, lang, "run", runActContext(), store.turns().takeLast(6), last?.let { runContext(it) }.orEmpty()) { soFar ->
+                        if (streamed.isEmpty()) net.solardepin.solarchik.sol.SolLatency.firstToken()
+                        if (!SolChat.fitsLanguage(soFar, if (lang == "uk") "uk" else "en")) return@ask
+                        streamed = soFar
+                        show(soFar)
+                        duckFor(soFar)
+                        v.feed(soFar, lang, final = false)
+                    }
+                }.getOrNull()
                 val action = r?.action
                 if (action != null && action.type.needsConfirm) {
+                    if (streamed.isNotBlank()) v.feed(streamed, lang, final = true)
                     SolHandoff.put(text, action)
                     answer(context.getString(R.string.run_action_later))
                 } else {
                     val said = Policy.caption(r?.reply, lang)
-                    if (said != null) answer(said)
-                    else if (r == null || r.offline) { audio?.play("hurt"); answer(SolChat.offlineLine(lang)) }
+                    if (said != null && streamed.isNotBlank() && said.startsWith(streamed.trim().take(24))) {
+                        val spoken = SolRules.tidy(said).trim()
+                        show(spoken); duckFor(spoken)
+                        v.feed(spoken, lang, final = true)
+                    } else if (said != null) {
+                        if (streamed.isNotBlank()) v.feed(streamed, lang, final = true)
+                        answer(said)
+                    } else if (r == null || r.offline) { audio?.play("hurt"); answer(SolChat.offlineLine(lang)) }
                 }
             } finally {
                 asking--

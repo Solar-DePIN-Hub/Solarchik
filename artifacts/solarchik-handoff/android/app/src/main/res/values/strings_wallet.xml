@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.21.9: built-in devnet wallet (when no Mobile Wallet Adapter wallet app is installed) -->
+    <string name="lw_name">Built-in devnet wallet</string>
+    <string name="lw_offer_title">No wallet app on this device</string>
+    <string name="lw_offer_body">Seed Vault, Phantom or Solflare isn\'t installed. You can use the built-in devnet wallet instead: a key is created on this device and stored encrypted (Android Keystore), then filled with free devnet test SOL. Mints and buys are real devnet transactions you can check in Solana Explorer. Devnet SOL has no real value.</string>
+    <string name="lw_offer_use">Use built-in devnet wallet</string>
+    <string name="lw_offer_install">Install Phantom</string>
+    <string name="lw_funding">Creating the built-in wallet and getting free devnet SOL…</string>
+    <string name="lw_ready">Built-in devnet wallet ready: %1$s SOL (devnet)</string>
+    <string name="lw_ready_unfunded">Built-in wallet created, but the devnet faucet didn\'t answer (%1$s). Try “Get devnet SOL” in More › Wallet.</string>
+    <string name="lw_pill">Built-in · devnet</string>
+    <string name="lw_app_pill">Wallet app</string>
+    <string name="lw_note">The key lives only on this device, encrypted by Android Keystore. Devnet test SOL only: it can\'t receive or spend real SOL. “Delete my data” erases the key.</string>
+    <string name="lw_balance">Real devnet SOL (on-chain)</string>
+    <string name="lw_paper_note">Separate from this: the agents\' paper purse (1 SOL) in Agents › Agent desk is simulated, nothing is sent on-chain.</string>
+    <string name="lw_none_app">Connect Seed Vault, Phantom or Solflare (Mobile Wallet Adapter).</string>
+    <string name="lw_none_builtin">No wallet app found on this device. Use the built-in devnet wallet to mint and buy agents with free devnet test SOL.</string>
+    <string name="lw_get_sol">Get devnet SOL</string>
+    <string name="lw_switch_app">Use a wallet app instead</string>
+    <string name="err_d_no_devnet_sol">the built-in wallet has no devnet SOL yet, tap “Get devnet SOL” in More › Wallet</string>
+    <string name="err_d_local_key">the built-in wallet key is unavailable on this device</string>
+    <string name="lw_enough">The built-in wallet already has enough devnet SOL for a Pro buy.</string>
+    <string name="voice_lat_voice">Last voice question, from your last word: text recognized %1$s · request sent %2$s · first word %3$s · first sound %4$s</string>
+    <string name="voice_lat_text">Last typed question, from the send tap: request sent %1$s · first word %2$s · first sound %3$s</string>
+</resources>

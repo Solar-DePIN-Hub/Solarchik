@@ -26,10 +26,14 @@ object AppData {
         "solarchik.player",
         "solarchik.secretary",
         "seeker-wallet",
+        // 0.21.9
+        "solarchik.calls",
+        "solarchik.calls.remind",
+        "solarchik-local-wallet",
     )
 
     /** Background jobs that would otherwise keep ticking with old state. */
-    val WORKS = listOf("solarchik-desk", "solarchik-notes")
+    val WORKS = listOf("solarchik-desk", "solarchik-notes", "solarchik-calls-poll")
 
     const val PRIVACY_URL = "https://github.com/Solar-DePIN-Hub/Solarchik/blob/native-full/PRIVACY.md"
 
@@ -47,5 +51,7 @@ object AppData {
         runCatching { java.io.File(app.cacheDir, "sol-voice").deleteRecursively() }
         runCatching { java.io.File(app.cacheDir, "sol-voice-oa").deleteRecursively() }
         net.solardepin.solarchik.sol.SolHandoff.take()
+        // the built-in devnet wallet's Keystore key goes too (its devnet SOL is test money)
+        runCatching { net.solardepin.solarchik.wallet.LocalKey.delete(app) }
     }
 }

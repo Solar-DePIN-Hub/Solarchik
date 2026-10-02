@@ -90,6 +90,42 @@ object ScreenApi {
         return parseInbox(code, body)
     }
 
+    /** 0.21.9: the secretary's calls for [userId] (GET /inbox, with call ids, status, summary, duration). */
+    fun calls(userId: String): List<CallItem>? {
+        val (code, body) = request("GET", "$BASE/inbox?userId=${enc(userId)}", null)
+        return CallInbox.parse(userId, code, body)
+    }
+
+    /** One call with its transcript (GET /call). */
+    fun call(userId: String, callId: String): CallDetail? {
+        val (code, body) = request("GET", "$BASE/call?userId=${enc(userId)}&callId=${enc(callId)}", null)
+        return CallInbox.parseDetail(userId, code, body)
+    }
+
+    /** Block or unblock a caller for this player (POST /block): the secretary rejects blocked numbers, never charged. */
+    fun block(userId: String, number: String, blocked: Boolean): List<String>? {
+        val (code, body) = request("POST", "$BASE/block", JSONObject().put("userId", userId).put("number", number).put("blocked", blocked).toString())
+        return parseNumbers(code, body)
+    }
+
+    fun blocked(userId: String): List<String>? {
+        val (code, body) = request("GET", "$BASE/block?userId=${enc(userId)}", null)
+        return parseNumbers(code, body)
+    }
+
+    fun parseNumbers(code: Int, body: String): List<String>? {
+        if (code !in 200..299) return null
+        val a = parse(body).optJSONArray("numbers") ?: return emptyList()
+        return (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() }
+    }
+
+    /** POST /call-claim: the next call to the demo line (3 min) lands in this player's Calls. Returns the armed seconds. */
+    fun claim(userId: String): Int? {
+        val (code, body) = request("POST", "$BASE/call-claim", JSONObject().put("userId", userId).toString())
+        if (code !in 200..299) return null
+        return parse(body).optInt("armedSec", 0).takeIf { it > 0 }
+    }
+
     fun parseBalance(code: Int, body: String): Double? {
         if (code !in 200..299) return null
         val v = parse(body).optDouble("usd", Double.NaN)

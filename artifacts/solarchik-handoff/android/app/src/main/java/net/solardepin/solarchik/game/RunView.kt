@@ -378,6 +378,7 @@ class RunView(context: Context, private val listener: Listener? = null) :
                 acc += dt
                 var steps = 0
                 while (acc >= RunSim.TICK && steps < 3) {
+                    prevX = s.x; prevY = s.y; prevPhase = s.runPhase
                     val inp = Input(input.take(), input.jumpHeld, input.takeSlide(), input.slideHeld)
                     val events = RunSim.step(s, RunSim.TICK, inp)
                     afterStep(s, events)
@@ -412,7 +413,20 @@ class RunView(context: Context, private val listener: Listener? = null) :
                 if (s != null) {
                     renderer.sunTargetX = sunTargetX
                     renderer.sunTargetY = sunTargetY
-                    renderer.draw(canvas, canvas.width, canvas.height, s, drawClock)
+                    // 0.21.9 ("two robots"): the sim steps at a fixed 60 Hz but the screen does not. Frames got
+                    // 0, 1 or 2 steps, so the robot and the scrolling city stood still for a frame and then jumped,
+                    // which the eye reads as a doubled, ghosting robot (worse on 90/120 Hz tablets). The hero
+                    // and camera are drawn between the last two steps, by the leftover fraction of a tick.
+                    val a = if (paused || s.phase != Phase.RUNNING) 1.0 else Interp.alpha(acc, RunSim.TICK)
+                    val cx = s.x; val cy = s.y; val cp = s.runPhase
+                    if (a < 1.0 && Interp.continuous(prevX, cx, prevY, cy)) {
+                        s.x = Interp.lerp(prevX, cx, a); s.y = Interp.lerp(prevY, cy, a); s.runPhase = Interp.lerp(prevPhase, cp, a)
+                    }
+                    try {
+                        renderer.draw(canvas, canvas.width, canvas.height, s, drawClock)
+                    } finally {
+                        s.x = cx; s.y = cy; s.runPhase = cp
+                    }
                 }
             } finally {
                 holder.unlockCanvasAndPost(canvas)
@@ -421,6 +435,11 @@ class RunView(context: Context, private val listener: Listener? = null) :
             if (spent < 8) try { Thread.sleep(8 - spent) } catch (_: InterruptedException) { break }
         }
     }
+
+    // last sim step's start: the hero / camera are drawn between this and the current state
+    private var prevX = 0.0
+    private var prevY = 0.0
+    private var prevPhase = 0.0
 
     private fun afterStep(s: RunState, events: List<Ev>) {
         if (events.isNotEmpty()) {
@@ -442,6 +461,15 @@ class RunView(context: Context, private val listener: Listener? = null) :
             }
         }
     }
+}
+
+/** Render interpolation between two fixed sim steps (0.21.9 double-robot fix). */
+object Interp {
+    /** Fraction of a tick left in the accumulator, 0..1. */
+    fun alpha(acc: Double, tick: Double): Double = (acc / tick).coerceIn(0.0, 1.0)
+    fun lerp(a: Double, b: Double, t: Double): Double = a + (b - a) * t
+    /** A restart / respawn / bonus warp is drawn as is, never smeared across the screen. */
+    fun continuous(px: Double, x: Double, py: Double, y: Double): Boolean = kotlin.math.abs(x - px) < 60 && kotlin.math.abs(y - py) < 120
 }
 
 /** When the game thread may create a run: never before the assets are warm (0.21.7 lag fix). */

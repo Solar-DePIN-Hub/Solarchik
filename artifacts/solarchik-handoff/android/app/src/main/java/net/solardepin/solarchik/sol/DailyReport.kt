@@ -44,7 +44,7 @@ object DailyReport {
             lines += ctx.getString(R.string.report_fees, sol(s.feesCharged), sol(s.feesOwed), sol(waived))
         }
         lines += ctx.resources.getQuantityString(R.plurals.report_streak_days, streak, streak) + " " +
-            ctx.getString(if (signedToday) R.string.report_signed else R.string.report_unsigned)
+            ctx.getString(if (signedToday) R.string.report_signed else R.string.report_unsigned, net.solardepin.solarchik.core.SolarchikConfig.RUN_GOAL_M)
         if (runMeters > 0) lines += ctx.getString(R.string.report_run, runMeters)
         lines += when (progress) {
             is FeeProgress.Active -> ctx.getString(R.string.report_window_active, (progress.leftMs / 3600_000L).toInt())

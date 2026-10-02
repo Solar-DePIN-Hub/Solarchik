@@ -179,7 +179,7 @@
     <string name="settings_about_body">Version %1$s · Solana Mobile Stack · MWA 2.0 · Metaplex Core</string>
 
     <!-- Wallet errors -->
-    <string name="err_no_wallet">No wallet app found. Install or open Seed Vault, Phantom or Solflare, then try again.</string>
+    <string name="err_no_wallet">No wallet app found. Install Seed Vault, Phantom or Solflare, or use the built-in devnet wallet (More › Wallet).</string>
     <string name="err_declined">The wallet did not sign. Nothing was sent.</string>
     <string name="err_network">Network problem. Check the connection and try again.</string>
     <string name="err_failed">Wallet error: %1$s</string>
@@ -208,8 +208,8 @@
     <string name="track_devnet_hint">Devnet: your minted NFTs, sized from your devnet balance. Owed Free-tier fees are paid to the treasury in devnet SOL.</string>
     <string name="desk_running">%1$d running</string>
     <string name="desk_idle">Nothing running</string>
-    <string name="desk_purse_paper">Paper purse %1$s SOL</string>
-    <string name="desk_purse_devnet">Devnet balance %1$s SOL</string>
+    <string name="desk_purse_paper">Paper purse %1$s SOL · simulated</string>
+    <string name="desk_purse_devnet">Real devnet balance %1$s SOL</string>
     <string name="desk_today">Today: %1$s / %2$s SOL used · losses in a row %3$d/%4$d</string>
     <string name="desk_pnl">Realized P&amp;L %1$s SOL</string>
     <string name="desk_start">Start</string>
@@ -267,7 +267,7 @@
     <string name="report_positions">Closed positions: %1$d, in profit: %2$d. P&amp;L %3$s SOL.</string>
     <string name="report_fees">Fees charged %1$s, owed %2$s, waived %3$s SOL.</string>
     <string name="report_signed">Today is signed.</string>
-    <string name="report_unsigned">Today is not signed yet.</string>
+    <string name="report_unsigned">Today\'s CLOCK IN isn\'t signed yet: run %1$d m and tap “Sign today”.</string>
     <string name="report_run">Roof run today: %1$d m.</string>
     <string name="report_window_active">Fee-free window: %1$d h left.</string>
     <string name="report_window_ready">A fee-free window is ready to start.</string>
@@ -701,10 +701,10 @@
     <string name="desk_not_owned_pill">Not owned</string>
     <string name="desk_get_agent">Get this agent</string>
     <string name="offer_title">Get %1$s</string>
-    <string name="offer_body">You don\'t own this agent yet. Mint it free or buy Pro — after the wallet approves, it starts on paper right away.</string>
+    <string name="offer_body">You don\'t own this agent yet. Mint it free or buy Pro: once the wallet approves, it starts on paper right away. No wallet app? The built-in devnet wallet works too.</string>
     <string name="offer_mint_free">Mint free &amp; start</string>
     <string name="offer_buy_pro">Buy Pro · %1$s SOL &amp; start</string>
-    <string name="sol_act_ready_acquire">You don\'t own %1$s yet — pick Mint free or Buy Pro on the card below; it starts right after the wallet approves.</string>
+    <string name="sol_act_ready_acquire">You don\'t own the “%1$s” agent yet. Pick Mint free or Buy Pro on the card below; it starts right after the wallet approves.</string>
     <string name="settings_sol_voice">Sol\'s voice</string>
     <string name="settings_sol_voice_body">Sol speaks with an OpenAI voice (gpt-4o-mini-tts) streamed from our server; replies start in about a second. Without internet the phone\'s own voice is used.</string>
     <string name="settings_sol_voice_preview">Play a sample</string>

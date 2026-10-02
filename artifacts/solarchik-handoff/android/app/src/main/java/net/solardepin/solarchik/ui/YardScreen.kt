@@ -118,6 +118,21 @@ class YardScreen(host: MainActivity) : Screen(host) {
     // ---------------- Home cards (0.21.7): Secretary first, then Agents · Slice · Streak ----------------
 
     private lateinit var secState: TextView
+    private lateinit var callsState: TextView
+    private lateinit var callsBadge: TextView
+
+    /** Calls card: unread badge and the last call (from the local cache; MainActivity refreshes it). */
+    fun renderCalls() {
+        if (!this::callsState.isInitialized) return
+        val items = net.solardepin.solarchik.screen.CallInbox.cached(ctx)
+        val unread = net.solardepin.solarchik.screen.CallInbox.unread(items, net.solardepin.solarchik.screen.CallInbox.seenAt(ctx))
+        val last = items.firstOrNull()
+        callsState.text = if (last == null) ctx.getString(R.string.home_calls_empty)
+        else ctx.getString(R.string.home_calls_last, last.who.ifBlank { ctx.getString(R.string.calls_unknown) }, net.solardepin.solarchik.screen.CallText.time(last.at))
+        callsBadge.visibility = if (unread > 0) View.VISIBLE else View.GONE
+        callsBadge.text = ctx.resources.getQuantityString(R.plurals.home_calls_new, unread, unread)
+        callsBadge.contentDescription = callsBadge.text
+    }
     private lateinit var agentsState: TextView
     private lateinit var sliceState: TextView
     private lateinit var streakState: TextView
@@ -150,6 +165,27 @@ class YardScreen(host: MainActivity) : Screen(host) {
         top.addView(Ui.text(ctx, "›", 26f, android.graphics.Color.WHITE, 900))
         sec.addView(top)
         addView(sec)
+        // 0.21.9: Calls — the secretary's call archive, with an unread badge (one tap from Home)
+        val calls = bold(intArrayOf(android.graphics.Color.parseColor("#13B4A6"), android.graphics.Color.parseColor("#2C7BFF")), "home-calls") { host.openCalls() }
+        val ctop = Ui.row(ctx, gap = 12).apply { gravity = Gravity.CENTER_VERTICAL }
+        ctop.addView(Ui.iconBadge(ctx, R.drawable.ic_call, android.graphics.Color.WHITE, 40))
+        ctop.addView(Ui.weight(Ui.column(ctx).apply {
+            addView(Ui.text(ctx, ctx.getString(R.string.home_calls_title), 18f, android.graphics.Color.WHITE, 900))
+            callsState = Ui.text(ctx, "", 12f, Ui.withAlpha(android.graphics.Color.WHITE, 0xDD), 700).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END }
+            addView(Ui.top(callsState, 2))
+        }))
+        callsBadge = Ui.text(ctx, "", 13f, Ui.INK, 900).apply {
+            gravity = Gravity.CENTER
+            background = Ui.rounded(Ui.GOLD, dp(14).toFloat())
+            setPadding(dp(9), dp(3), dp(9), dp(3))
+            minWidth = dp(28)
+            tag = "home-calls-badge"
+            visibility = View.GONE
+        }
+        ctop.addView(callsBadge)
+        ctop.addView(Ui.text(ctx, "›", 26f, android.graphics.Color.WHITE, 900))
+        calls.addView(ctop)
+        addView(calls)
         val row = Ui.row(ctx, gap = 10)
         fun tile(colors: IntArray, tag: String, icon: Int, title: Int, onTap: () -> Unit): TextView {
             val t = bold(colors, tag, onTap)
@@ -176,6 +212,7 @@ class YardScreen(host: MainActivity) : Screen(host) {
 
     private fun renderHome() {
         if (!this::secState.isInitialized) return
+        renderCalls()
         val sup = net.solardepin.solarchik.screen.Secretary.supported()
         val on = sup && net.solardepin.solarchik.screen.PlayerIds.screeningOn(ctx) && net.solardepin.solarchik.screen.Secretary.holdsRole(ctx)
         val state = ctx.getString(when { !sup -> R.string.home_sec_unsupported; on -> R.string.home_sec_on; else -> R.string.home_sec_off })

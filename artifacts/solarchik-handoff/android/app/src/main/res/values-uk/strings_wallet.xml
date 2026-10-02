@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="lw_name">Вбудований devnet-гаманець</string>
+    <string name="lw_offer_title">На пристрої немає гаманця</string>
+    <string name="lw_offer_body">Seed Vault, Phantom чи Solflare не встановлено. Можеш скористатися вбудованим devnet-гаманцем: ключ створюється на цьому пристрої й зберігається зашифрованим (Android Keystore), а потім поповнюється безкоштовними тестовими devnet SOL. Мінт і купівля — справжні транзакції в devnet, їх видно в Solana Explorer. Devnet SOL не мають реальної вартості.</string>
+    <string name="lw_offer_use">Вбудований devnet-гаманець</string>
+    <string name="lw_offer_install">Встановити Phantom</string>
+    <string name="lw_funding">Створюю вбудований гаманець і отримую безкоштовні devnet SOL…</string>
+    <string name="lw_ready">Вбудований devnet-гаманець готовий: %1$s SOL (devnet)</string>
+    <string name="lw_ready_unfunded">Вбудований гаманець створено, але devnet-кран не відповів (%1$s). Спробуй «Отримати devnet SOL» у Ще › Гаманець.</string>
+    <string name="lw_pill">Вбудований · devnet</string>
+    <string name="lw_app_pill">Застосунок-гаманець</string>
+    <string name="lw_note">Ключ є лише на цьому пристрої, зашифрований Android Keystore. Тільки тестові devnet SOL: справжні SOL сюди не надходять і звідси не витрачаються. «Видалити мої дані» стирає ключ.</string>
+    <string name="lw_balance">Справжні devnet SOL (у мережі)</string>
+    <string name="lw_paper_note">Окремо від цього: паперовий гаманець агентів (1 SOL) в Агенти › Пульт агентів — симуляція, у мережу нічого не надсилається.</string>
+    <string name="lw_none_app">Підключи Seed Vault, Phantom чи Solflare (Mobile Wallet Adapter).</string>
+    <string name="lw_none_builtin">На пристрої немає застосунку-гаманця. Скористайся вбудованим devnet-гаманцем, щоб мінтити й купувати агентів за безкоштовні тестові devnet SOL.</string>
+    <string name="lw_get_sol">Отримати devnet SOL</string>
+    <string name="lw_switch_app">Підключити застосунок-гаманець</string>
+    <string name="err_d_no_devnet_sol">у вбудованому гаманці ще немає devnet SOL, натисни «Отримати devnet SOL» у Ще › Гаманець</string>
+    <string name="err_d_local_key">ключ вбудованого гаманця недоступний на цьому пристрої</string>
+    <string name="lw_enough">У вбудованому гаманці вже вистачає devnet SOL на купівлю Pro.</string>
+    <string name="voice_lat_voice">Останнє голосове питання, від твого останнього слова: текст розпізнано %1$s · запит надіслано %2$s · перше слово %3$s · перший звук %4$s</string>
+    <string name="voice_lat_text">Останнє написане питання, від натискання «Надіслати»: запит надіслано %1$s · перше слово %2$s · перший звук %3$s</string>
+</resources>

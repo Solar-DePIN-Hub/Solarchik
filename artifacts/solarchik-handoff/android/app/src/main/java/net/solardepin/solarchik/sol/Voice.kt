@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,15 +66,34 @@ class SolVoice(context: Context) {
 
     /** Adds [text] after what is already queued (RunRadio: player answers are never dropped). */
     fun enqueue(text: String, lang: String) {
-        sentences(text).forEach { queue.trySend(it to lang) }
+        val busy = speaking || worker?.isActive == true
+        sentences(SpeechText.speakable(text, lang)).forEachIndexed { i, line ->
+            queue.trySend(line to lang)
+            // 0.21.9: a line that has to wait behind another one is fetched now, so it starts without a gap
+            if (busy || i > 0) prefetchLine(line, lang)
+        }
         ensureWorker()
+    }
+
+    /** In-flight prefetches by cache key: [playLine] waits for one instead of fetching the same line twice. */
+    private val inflight = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<java.io.File?>>()
+
+    private fun prefetchLine(line: String, lang: String) {
+        val v = OpenAiVoice.voice(app)
+        val k = OpenAiVoice.key(line, lang, v)
+        if (inflight.containsKey(k) || OpenAiVoice.cached(app, line, lang, v) != null) return
+        val d = scope.async(Dispatchers.IO) { try { OpenAiVoice.fetchToCache(app, line, lang, v) } finally { inflight.remove(k) } }
+        inflight[k] = d
     }
 
     /** Streaming reply: [soFar] is the whole text so far; complete sentences are queued as they arrive. */
     fun feed(soFar: String, lang: String, final: Boolean) {
         if (soFar.length < fedChars) fedChars = 0
         val rest = soFar.substring(fedChars)
-        val cut = if (final) rest.length else lastSentenceEnd(rest)
+        var cut = if (final) rest.length else lastSentenceEnd(rest)
+        // 0.21.9: the first words of a reply start speaking at the first clause (", " / " — " after
+        // ~30 chars) instead of waiting for the whole first sentence
+        if (cut <= 0 && !final && fedChars == 0) cut = firstClauseEnd(rest)
         if (cut <= 0) return
         val chunk = rest.substring(0, cut)
         fedChars += cut
@@ -100,8 +120,12 @@ class SolVoice(context: Context) {
         var firstAudio = -1L
         val v = OpenAiVoice.voice(app)
         val g = gen
+        inflight[OpenAiVoice.key(line, lang, v)]?.let { runCatching { it.await() } }
+        if (gen != g) return
         val ok = withContext(Dispatchers.IO) {
-            OpenAiVoice.play(app, line, lang, v, alive = { gen == g }, onTrack = { track = it }) { if (firstAudio < 0) firstAudio = android.os.SystemClock.elapsedRealtime() - t0 }
+            OpenAiVoice.play(app, line, lang, v, alive = { gen == g }, onTrack = { track = it }) {
+                if (firstAudio < 0) { firstAudio = android.os.SystemClock.elapsedRealtime() - t0; SolLatency.firstAudio(app) }
+            }
         }
         if (gen != g) return
         track = null
@@ -109,10 +133,12 @@ class SolVoice(context: Context) {
         val file = NeuralVoice.clip(app, line, lang)
         if (file != null) {
             note("gemini", android.os.SystemClock.elapsedRealtime() - t0)
+            SolLatency.firstAudio(app)
             playFile(file)
             return
         }
         note("system", android.os.SystemClock.elapsedRealtime() - t0)
+        SolLatency.firstAudio(app)
         val sys = system ?: SystemVoice(app).also { system = it }
         if (!sys.speakAndWait(line, lang)) missingLanguage = lang
     }
@@ -142,12 +168,13 @@ class SolVoice(context: Context) {
     /** Warm the cache for a line that is likely to be spoken soon (OpenAI voice). */
     fun prefetch(text: String, lang: String) {
         val v = OpenAiVoice.voice(app)
-        scope.launch(Dispatchers.IO) { sentences(text).forEach { OpenAiVoice.fetchToCache(app, it, lang, v) } }
+        scope.launch(Dispatchers.IO) { sentences(SpeechText.speakable(text, lang)).forEach { OpenAiVoice.fetchToCache(app, it, lang, v) } }
     }
 
     fun stop() {
         gen++
         while (queue.tryReceive().isSuccess) { /* drop queued lines */ }
+        inflight.clear()
         worker?.cancel()
         worker = null
         speaking = false
@@ -175,6 +202,14 @@ class SolVoice(context: Context) {
             var last = 0
             for (m in END.findAll(text)) if (m.groupValues[1].isNotEmpty()) last = m.range.last + 1
             return last
+        }
+
+        private val CLAUSE = Regex("(,|;|:|\\s[—–-])\\s")
+
+        /** Index just past the first clause break at or after 30 chars (0 when none yet). Decimal commas ("0,1") have no space and never count. */
+        fun firstClauseEnd(text: String): Int {
+            for (m in CLAUSE.findAll(text)) if (m.range.first >= 30) return m.range.last + 1
+            return 0
         }
 
         /** Speakable sentences (short fragments are merged into the next one). */
@@ -432,29 +467,73 @@ private class SystemVoice(context: Context) {
     fun shutdown() = runCatching { tts.shutdown() }
 }
 
-/** One-shot speech recognition. Callbacks arrive on the main thread. */
+/**
+ * One-shot speech recognition. Callbacks arrive on the main thread.
+ *
+ * 0.21.9 (voice gap): the recognizer is asked for a short end-of-speech silence (700 ms) and the reply no
+ * longer waits for its final result: [END_GRACE_MS] after onEndOfSpeech the last partial is used, and a
+ * partial that stays unchanged for [STABLE_MS] (≥ 2 words) also ends the turn. Stages go to [SolLatency].
+ */
 class SolEars(private val context: Context) {
     private var rec: SpeechRecognizer? = null
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private var finished = true
+    private var lastPartial = ""
+    private var lastPartialAt = 0L
+    private var endTimer: Runnable? = null
+    private var stableTimer: Runnable? = null
 
     fun available(): Boolean = SpeechRecognizer.isRecognitionAvailable(context)
 
     fun listen(lang: String, onPartial: (String) -> Unit, onDone: (String?) -> Unit) {
         stop()
+        finished = false
+        lastPartial = ""
+        lastPartialAt = 0L
         val r = SpeechRecognizer.createSpeechRecognizer(context)
         rec = r
+        fun finish(text: String?) {
+            if (finished) return
+            finished = true
+            clearTimers()
+            if (!text.isNullOrBlank()) SolLatency.sttFinal()
+            onDone(text)
+            stop()
+        }
+        fun speechEnd() {
+            // t0 = when the last new word arrived (closest the app can see to "the player stopped talking")
+            if (SolLatency.current?.let { it.voice && it.stt < 0 } != true) SolLatency.speechEnded(lastPartialAt.takeIf { it > 0 })
+        }
         r.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
-            override fun onError(error: Int) { onDone(null); stop() }
+            override fun onEndOfSpeech() {
+                speechEnd()
+                SolLatency.endOfSpeech()
+                endTimer?.let { main.removeCallbacks(it) }
+                endTimer = Runnable { if (lastPartial.isNotBlank()) finish(lastPartial) }.also { main.postDelayed(it, END_GRACE_MS) }
+            }
+            override fun onError(error: Int) {
+                // "no match" / timeout after we already heard words: use them instead of dropping the turn
+                if (lastPartial.isNotBlank()) { speechEnd(); finish(lastPartial) } else finish(null)
+            }
             override fun onResults(results: Bundle?) {
-                onDone(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull())
-                stop()
+                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.takeIf { it.isNotBlank() } ?: lastPartial
+                speechEnd()
+                finish(text.ifBlank { null })
             }
             override fun onPartialResults(partial: Bundle?) {
-                partial?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let(onPartial)
+                val p = partial?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim().orEmpty()
+                if (p.isEmpty() || finished) return
+                if (p != lastPartial) { lastPartial = p; lastPartialAt = android.os.SystemClock.elapsedRealtime() }
+                onPartial(p)
+                stableTimer?.let { main.removeCallbacks(it) }
+                val seen = p
+                stableTimer = Runnable {
+                    if (!finished && lastPartial == seen && seen.split(Regex("\\s+")).size >= 2) { speechEnd(); finish(seen) }
+                }.also { main.postDelayed(it, STABLE_MS) }
             }
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
@@ -465,11 +544,30 @@ class SolEars(private val context: Context) {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, tag)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, SILENCE_MS)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, SILENCE_MS)
         })
     }
 
+    private fun clearTimers() {
+        endTimer?.let { main.removeCallbacks(it) }
+        stableTimer?.let { main.removeCallbacks(it) }
+        endTimer = null
+        stableTimer = null
+    }
+
     fun stop() {
+        clearTimers()
+        finished = true
         rec?.let { runCatching { it.cancel(); it.destroy() } }
         rec = null
+    }
+
+    companion object {
+        const val SILENCE_MS = 700L
+        /** After onEndOfSpeech, wait this long for the final result, then use the last partial. */
+        const val END_GRACE_MS = 350L
+        /** A partial unchanged this long ends the turn even if the recognizer has not noticed the silence. */
+        const val STABLE_MS = 1_300L
     }
 }

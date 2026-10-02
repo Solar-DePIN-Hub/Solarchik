@@ -2135,7 +2135,9 @@ class RunRenderer(
             val landing = s.grounded && !sliding && clock - landAt in 0.0..0.09
             val slideSq = if (sliding) 0.15 else squash
             val slideRot = if (sliding) 0.0 else rot
-            drawHero(c, hx, hy, heroH, s.runPhase, s.grounded, slideSq, if (sliding) 0.0 else stretch, s.vy, slideRot, 1.0, shadow = true, hurt = hurt, clock = clock,
+            // 0.21.9: no offset dark silhouette behind the robot any more (with the old frame stepping it read as
+            // a second robot); the contact shadow on the roof above grounds it instead
+            drawHero(c, hx, hy, heroH, s.runPhase, s.grounded, slideSq, if (sliding) 0.0 else stretch, s.vy, slideRot, 1.0, shadow = false, hurt = hurt, clock = clock,
                 sliding = sliding, landing = landing, rimCol = if (city) pal[P_RIM] else 0, rimA = if (city) 0.85 else 0.0)
             if (s.shield > 0) {
                 // shield bubble (native: the web shows the shield only in the HUD)

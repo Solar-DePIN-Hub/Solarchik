@@ -167,6 +167,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         sender = ActivityResultSender(this)
         wallet = SolanaWallet(this)
+        // 0.21.9: no wallet app (judges' tablets) -> offer the built-in devnet wallet instead of failing
+        wallet.offerBuiltIn = { offerBuiltInWallet() }
         save = GameSave(this)
         store = AgentStore(this)
         minter = Minter(wallet, store)
@@ -195,6 +197,72 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         screens[current]?.onShow()
         startTicker()
+        pollCalls()
+    }
+
+    private var callsPolling = false
+
+    /** 0.21.9: new secretary notes -> notification + Home badge (on resume and every 60 s while open). */
+    fun pollCalls() {
+        if (!tickerEnabled || callsPolling) return
+        callsPolling = true
+        scope.launch {
+            runCatching { kotlinx.coroutines.withContext(Dispatchers.IO) { net.solardepin.solarchik.screen.CallNotes.check(this@MainActivity) } }
+            callsPolling = false
+            (screens[Tab.YARD] as? YardScreen)?.renderCalls()
+            if (current == Tab.SETTINGS) screens[current]?.render()
+        }
+    }
+
+    fun openCalls() = net.solardepin.solarchik.ui.CallsActivity.open(this)
+
+    /**
+     * 0.21.9: asked by [SolanaWallet] when a mint / buy / CLOCK IN needs a wallet and no MWA wallet app is
+     * installed. Accept = create the Keystore-sealed devnet key and fund it, then the action continues.
+     */
+    private suspend fun offerBuiltInWallet(): Boolean {
+        if (isFinishing || isDestroyed) return false
+        val yes = kotlinx.coroutines.suspendCancellableCoroutine<Boolean> { cont ->
+            var done = false
+            fun finish(v: Boolean) { if (!done) { done = true; if (cont.isActive) cont.resumeWith(Result.success(v)) } }
+            val d = android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.lw_offer_title)
+                .setMessage(R.string.lw_offer_body)
+                .setPositiveButton(R.string.lw_offer_use) { _, _ -> finish(true) }
+                .setNeutralButton(R.string.lw_offer_install) { _, _ ->
+                    val pkg = "app.phantom"
+                    runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg"))) }
+                        .onFailure { openUrl("https://play.google.com/store/apps/details?id=$pkg") }
+                    finish(false)
+                }
+                .setNegativeButton(android.R.string.cancel) { _, _ -> finish(false) }
+                .setOnCancelListener { finish(false) }
+                .show()
+            cont.invokeOnCancellation { runCatching { d.dismiss() } }
+        }
+        if (!yes) return false
+        setupBuiltInWallet()
+        return true
+    }
+
+    @Volatile private var funding = false
+
+    /** Creates (or reuses) the built-in devnet wallet and fills it from the devnet faucet. */
+    suspend fun setupBuiltInWallet(): Result<String> {
+        wallet.useBuiltIn()
+        renderAll()
+        if (funding) return Result.success("")
+        funding = true
+        toast(getString(R.string.lw_funding))
+        val r = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            net.solardepin.solarchik.wallet.LocalFunding.fund(wallet, SolanaWallet.LOCAL_MIN_LAMPORTS)
+        }
+        funding = false
+        val bal = wallet.balanceSol().getOrNull()
+        r.onSuccess { toast(getString(R.string.lw_ready, net.solardepin.solarchik.ui.Fmt.sol(bal ?: 0.0))) }
+            .onFailure { toast(getString(R.string.lw_ready_unfunded, it.message ?: "?")) }
+        renderAll()
+        return r
     }
 
     override fun onPause() {
@@ -209,7 +277,9 @@ class MainActivity : ComponentActivity() {
         ticker?.cancel()
         if (!tickerEnabled) return
         ticker = scope.launch {
+            var n = 0
             while (true) {
+                if (n++ % 2 == 1) pollCalls()
                 if (desk.state().anyRunning) {
                     val report = runCatching { desk.tick() }.getOrNull()
                     if (report != null) {

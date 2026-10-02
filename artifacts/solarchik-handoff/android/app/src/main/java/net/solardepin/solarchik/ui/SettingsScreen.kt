@@ -42,7 +42,6 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     private var secLangBusy = false
     private var secBusy = false
     private var refreshAfterPay = false
-    private var voicemails: List<ScreenApi.Voicemail>? = null
     private lateinit var fwdInput: android.widget.EditText
     private lateinit var fwdStatus: TextView
     private val fwdOnButtons = mutableListOf<View>()
@@ -182,6 +181,13 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             else -> ""
         }
         voiceBox.addView(Ui.top(Ui.muted(ctx, if (engine.isEmpty()) ctx.getString(R.string.voice_last_none) else ctx.getString(R.string.voice_last, engine, if (ms >= 0) "$ms" else "—"), 11f).apply { tag = "voice-last" }, 8))
+        // 0.21.9: the last Sol turn timed stage by stage (voice gap diagnostics a judge can read)
+        net.solardepin.solarchik.sol.SolLatency.stored(ctx)?.let { t ->
+            val sec = net.solardepin.solarchik.sol.SolLatency::sec
+            val line = if (t.voice) ctx.getString(R.string.voice_lat_voice, sec(t.stt), sec(t.request), sec(t.token), sec(t.audio))
+            else ctx.getString(R.string.voice_lat_text, sec(t.request), sec(t.token), sec(t.audio))
+            voiceBox.addView(Ui.top(Ui.muted(ctx, line, 11f).apply { tag = "voice-lat" }, 4))
+        }
     }
 
     private fun previewSolVoice() {
@@ -277,19 +283,34 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         head.addView(Ui.pill(ctx, w.clusterName, if (w.mainnet) Ui.GREEN else Ui.CYAN))
         walletBox.addView(head)
         if (!w.connected) {
-            walletBox.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.settings_wallet_none)), 10))
-            walletBox.addView(Ui.top(Ui.button(ctx, ctx.getString(R.string.wallet_connect), Ui.Btn.PRIMARY, R.drawable.ic_wallet) { connect() }, 14))
+            // 0.21.9: without a wallet app the built-in devnet wallet is the main path, not an error toast
+            val hasApp = w.hasWalletApp()
+            walletBox.addView(Ui.top(Ui.muted(ctx, ctx.getString(if (hasApp) R.string.lw_none_app else R.string.lw_none_builtin)), 10))
+            val app = Ui.button(ctx, ctx.getString(R.string.wallet_connect), if (hasApp) Ui.Btn.PRIMARY else Ui.Btn.SECONDARY, R.drawable.ic_wallet) { connect() }
+            val local = Ui.button(ctx, ctx.getString(R.string.lw_offer_use), if (hasApp) Ui.Btn.SECONDARY else Ui.Btn.PRIMARY, R.drawable.ic_gift) {
+                host.scope.launch { host.setupBuiltInWallet(); refreshBalance() }
+            }
+            walletBox.addView(Ui.top(if (hasApp) app else local, 14))
+            walletBox.addView(Ui.top(if (hasApp) local else app, 10))
+            walletBox.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.lw_paper_note), 12f), 12))
             return
         }
-        walletBox.addView(Ui.top(Ui.text(ctx, w.address, 13f, Ui.CYAN, 700).apply { setOnClickListener { copy(w.address) } }, 12))
+        walletBox.addView(Ui.top(Ui.pill(ctx, ctx.getString(if (w.isLocal) R.string.lw_pill else R.string.lw_app_pill), if (w.isLocal) Ui.CYAN else Ui.GOLD, R.drawable.ic_wallet), 12))
+        walletBox.addView(Ui.top(Ui.text(ctx, w.address, 13f, Ui.CYAN, 700).apply { setOnClickListener { copy(w.address) } }, 10))
         val balRow = Ui.row(ctx)
-        balRow.addView(Ui.weight(Ui.label(ctx, ctx.getString(R.string.settings_balance))))
+        balRow.addView(Ui.weight(Ui.label(ctx, ctx.getString(if (w.mainnet) R.string.settings_balance else R.string.lw_balance))))
         balRow.addView(Ui.text(ctx, balance?.let { ctx.getString(R.string.sol_unit, Fmt.sol(it)) } ?: "—", 22f, Ui.TEXT, 900).apply {
             setOnClickListener { refreshBalance() }
         })
         walletBox.addView(Ui.top(balRow, 12))
+        if (w.isLocal) walletBox.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.lw_note), 12f).apply { setLineSpacing(0f, 1.2f) }, 8))
+        if (!w.mainnet) walletBox.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.lw_paper_note), 12f), 8))
         if (!w.mainnet) {
-            val label = if (airdropping) ctx.getString(R.string.settings_airdrop_busy) else ctx.getString(R.string.settings_airdrop, Fmt.sol(SolarchikConfig.AIRDROP_SOL))
+            val label = when {
+                airdropping -> ctx.getString(R.string.settings_airdrop_busy)
+                w.isLocal -> ctx.getString(R.string.lw_get_sol)
+                else -> ctx.getString(R.string.settings_airdrop, Fmt.sol(SolarchikConfig.AIRDROP_SOL))
+            }
             val b = Ui.button(ctx, label, Ui.Btn.SECONDARY, R.drawable.ic_gift) { airdrop() }
             Ui.setEnabled(b, !airdropping)
             walletBox.addView(Ui.top(b, 14))
@@ -298,10 +319,11 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         actions.addView(Ui.weight(Ui.button(ctx, ctx.getString(R.string.open_explorer), Ui.Btn.GHOST) {
             host.openUrl(host.explorerAddress(w.address, w.clusterName))
         }))
-        actions.addView(Ui.weight(Ui.button(ctx, ctx.getString(R.string.settings_disconnect), Ui.Btn.GHOST) {
+        actions.addView(Ui.weight(Ui.button(ctx, ctx.getString(if (w.isLocal) R.string.lw_switch_app else R.string.settings_disconnect), Ui.Btn.GHOST) {
             w.forget()
             balance = null
             host.renderAll()
+            if (w.hasWalletApp()) connect()
         }))
         walletBox.addView(Ui.top(actions, 10))
     }
@@ -331,7 +353,13 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     private fun renderSecretary() {
         val box = secretaryBox
         box.removeAllViews()
-        box.addView(Ui.muted(ctx, ctx.getString(R.string.sec_body)).apply { setLineSpacing(0f, 1.3f) })
+        // 0.21.9: the call archive first — Vadym looked here for his test call and found nothing
+        val unread = net.solardepin.solarchik.screen.CallInbox.unreadCount(ctx)
+        box.addView(Ui.button(ctx, if (unread > 0) ctx.getString(R.string.sec_calls_open_new, unread) else ctx.getString(R.string.sec_calls_open), Ui.Btn.PRIMARY, R.drawable.ic_call) {
+            host.openCalls()
+        }.apply { tag = "sec-calls" })
+        box.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sec_calls_hint), 12f), 6))
+        box.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sec_body)).apply { setLineSpacing(0f, 1.3f) }, 14))
         if (!Secretary.supported()) {
             box.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.sec_needs_android10), 13f, Ui.AMBER, 700), 10))
             return
@@ -427,18 +455,6 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             if (detail.isNotBlank()) box.addView(Ui.top(Ui.muted(ctx, detail, 12f), 2))
         }
 
-        box.addView(Ui.top(Ui.label(ctx, ctx.getString(R.string.sec_voicemails)), 14))
-        val vm = voicemails
-        when {
-            vm == null -> box.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sec_voicemails_tap), 12f).apply {
-                setOnClickListener { refreshSecretary() }
-            }, 6))
-            vm.isEmpty() -> box.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sec_voicemails_empty), 12f), 6))
-            else -> vm.take(5).forEach { v ->
-                box.addView(Ui.top(Ui.body(ctx, Fmt.time(v.at) + " · " + v.caller.ifBlank { "—" }), 8))
-                box.addView(Ui.top(Ui.muted(ctx, v.text, 12f), 2))
-            }
-        }
     }
 
     /**
@@ -632,11 +648,10 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         host.scope.launch {
             val bal = withContext(Dispatchers.IO) { ScreenApi.balanceInfo(userId) }
             val lang = withContext(Dispatchers.IO) { ScreenApi.lang(userId) }
-            val vm = withContext(Dispatchers.IO) { ScreenApi.inbox(userId) }
+            withContext(Dispatchers.IO) { runCatching { net.solardepin.solarchik.screen.CallInbox.refresh(ctx) } }
             if (bal != null) { secBal = bal; secCredit = bal.usd; Secretary.setLastBalance(ctx, bal) }
             else host.toast(ctx.getString(R.string.sec_offline))
             if (lang != null && !secLangBusy) Secretary.setLang(ctx, lang)
-            if (vm != null) voicemails = vm
             secLoading = false
             render()
         }
@@ -658,7 +673,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         host.scope.launch {
             host.wallet.airdrop()
                 .onSuccess {
-                    host.toast(ctx.getString(R.string.settings_airdrop_ok))
+                    host.toast(ctx.getString(if (it.isEmpty() && host.wallet.isLocal) R.string.lw_enough else R.string.settings_airdrop_ok))
                     delay(4000)
                     host.wallet.balanceSol().onSuccess { b -> balance = b }
                 }

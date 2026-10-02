@@ -63,6 +63,8 @@ class WalletError(val kind: Kind, detail: String = "", val signOnlyMayHelp: Bool
                 m == "Wallet returned no transaction" -> net.solardepin.solarchik.R.string.err_d_no_tx
                 m == "Server sent no transaction" -> net.solardepin.solarchik.R.string.err_d_server_no_tx
                 m == "Wallet signed without a message" -> net.solardepin.solarchik.R.string.err_d_no_message
+                m == "Built-in wallet has no devnet SOL" -> net.solardepin.solarchik.R.string.err_d_no_devnet_sol
+                m == "Built-in wallet key is unavailable" -> net.solardepin.solarchik.R.string.err_d_local_key
                 m.startsWith("Transaction failed on chain") -> return ctx.getString(net.solardepin.solarchik.R.string.err_d_chain, m.substringAfter(":", "").trim().take(60))
                 else -> 0
             }
@@ -108,7 +110,86 @@ class StickyBlockhash(private val fetch: suspend () -> ByteArray) {
 }
 
 class SolanaWallet(context: Context) {
+    private val app = context.applicationContext
     private val prefs = context.applicationContext.getSharedPreferences("seeker-wallet", Context.MODE_PRIVATE)
+
+    /**
+     * 0.21.9: the built-in devnet wallet ([LocalKey]) is in use. Chosen by the player when no wallet app
+     * (Seed Vault, Phantom, Solflare) is installed; Mobile Wallet Adapter stays the preferred path.
+     */
+    val isLocal: Boolean get() = prefs.getString("kind", "") == KIND_LOCAL && LocalKey.exists(app)
+
+    /**
+     * Asked when an action needs a wallet, none is connected and no MWA wallet app is installed (or MWA
+     * reports none). MainActivity shows the "built-in devnet wallet" offer, creates and funds the key, and
+     * returns true when the built-in wallet is ready. Null in tests and background work: no offer.
+     */
+    @Volatile var offerBuiltIn: (suspend () -> Boolean)? = null
+
+    internal fun app(): Context = app
+
+    /** Is a Mobile Wallet Adapter wallet app installed? (`solana-wallet:` association intent) */
+    fun hasWalletApp(): Boolean = walletAppCheck(app)
+
+    /** Switches to the built-in devnet wallet (creates the key once). Returns its address. */
+    fun useBuiltIn(): String {
+        val addr = LocalKey.create(app)
+        adapter.authToken = null
+        prefs.edit().putString("kind", KIND_LOCAL).putString("address", addr).remove("auth").apply()
+        return addr
+    }
+
+    /** Local wallet now, or offered now because there is no wallet app. False = use MWA. */
+    private suspend fun useLocal(): Boolean {
+        if (isLocal) return true
+        if (connected) return false
+        if (hasWalletApp()) return false
+        return offerBuiltIn?.invoke() == true && isLocal
+    }
+
+    /** MWA said "no wallet": offer the built-in wallet before giving up. */
+    private suspend fun offerAfterNoWallet(): Boolean = !connected && offerBuiltIn?.invoke() == true && isLocal
+
+    private fun localKey(): org.sol4k.Keypair =
+        LocalKey.keypair(app) ?: throw WalletError(WalletError.Kind.FAILED, "Built-in wallet key is unavailable")
+
+    /** Sends a locally signed tx and waits until it is confirmed (or fails on chain). */
+    private suspend fun sendConfirmed(raw: ByteArray): String {
+        val sig = rpc.sendTransaction(raw)
+        var seen: String? = null
+        for (i in 0 until 40) {
+            seen = runCatching { rpc.signatureStatus(sig) }.getOrNull()
+            if (seen == "confirmed" || seen == "finalized") return sig
+            if (seen == "failed") error("Transaction failed on chain: $sig")
+            kotlinx.coroutines.delay(if (i < 10) 700L else 1500L)
+        }
+        error("Not confirmed yet: $sig")
+    }
+
+    /** Built-in wallet: top up from the devnet faucet when the balance is below [minLamports]. */
+    suspend fun ensureLocalFunds(minLamports: Long): Boolean {
+        if (!isLocal) return true
+        val have = runCatching { rpc.balanceLamports(address) }.getOrElse { return false }
+        if (have >= minLamports) return true
+        return LocalFunding.fund(this, minLamports).isSuccess
+    }
+
+    private suspend fun localSignAndSend(build: suspend (payer: PublicKey, blockhash: ByteArray) -> LegacyTx): Result<SentTx> = runCatching {
+        val kp = localKey()
+        // The built-in wallet starts with faucet SOL; below a Pro buy's cost it tops up first (a refusal is
+        // not fatal: a free mint needs far less).
+        runCatching { ensureLocalFunds(LOCAL_MIN_LAMPORTS) }
+        val tx = build(kp.publicKey, rpc.latestBlockhash())
+        tx.partialSign(kp)
+        SentTx(kp.publicKey.toBase58(), sendConfirmed(tx.serialize()), clusterName)
+    }.recoverCatching { throw localFailure(it) }
+
+    /** "insufficient lamports" / "no record of a prior credit" from the RPC = the built-in wallet is empty. */
+    private fun localFailure(t: Throwable): Throwable {
+        val m = (t.message ?: "").lowercase()
+        if (m.contains("insufficient") || m.contains("prior credit")) return WalletError(WalletError.Kind.FAILED, NO_DEVNET_SOL)
+        return buildFailure(t)
+    }
 
     init {
         migrateFrom01951(context.applicationContext)
@@ -134,10 +215,14 @@ class SolanaWallet(context: Context) {
             adapter.rpcCluster = rpcCluster()
         }
 
-    val mainnet: Boolean get() = isSeeker && !forceDevnet
+    /** The built-in wallet is devnet only, always. */
+    val mainnet: Boolean get() = isSeeker && !forceDevnet && !isLocal
     val clusterName: String get() = if (mainnet) "mainnet" else "devnet"
     val rpcUrl: String get() = if (mainnet) SolarchikConfig.RPC_MAINNET else SolarchikConfig.RPC_DEVNET
-    val rpc: Rpc get() = Rpc(rpcUrl)
+    val rpc: Rpc get() = rpcOverride ?: Rpc(rpcUrl)
+
+    /** Tests: a scripted RPC instead of the public devnet/mainnet node. */
+    @Volatile internal var rpcOverride: Rpc? = null
 
     /** Last connected account (base58) or blank. */
     val address: String get() = prefs.getString("address", "").orEmpty()
@@ -170,10 +255,13 @@ class SolanaWallet(context: Context) {
     /** Forgets the session on this phone. The wallet app keeps its own list. */
     fun forget() {
         adapter.authToken = null
-        prefs.edit().remove("auth").remove("address").apply()
+        // the built-in key itself stays (it may hold devnet SOL and agents); "Use built-in wallet" brings it back
+        prefs.edit().remove("auth").remove("address").remove("kind").apply()
+        adapter.rpcCluster = rpcCluster()
     }
 
     suspend fun connect(sender: ActivityResultSender): Result<WalletSession> {
+        if (useLocal()) return Result.success(WalletSession(address, ""))
         adapter.rpcCluster = rpcCluster()
         return when (val result = adapter.connect(sender)) {
             is TransactionResult.Success -> {
@@ -181,9 +269,11 @@ class SolanaWallet(context: Context) {
                 val key = accountKey(auth) ?: return Result.failure(WalletError(WalletError.Kind.FAILED, "Wallet connected without account"))
                 val addr = Base58.encode(key)
                 remember(auth.authToken, addr)
+                prefs.edit().remove("kind").apply()
                 Result.success(WalletSession(addr, auth.authToken ?: ""))
             }
-            is TransactionResult.NoWalletFound -> Result.failure(WalletError(WalletError.Kind.NO_WALLET))
+            is TransactionResult.NoWalletFound ->
+                if (offerAfterNoWallet()) Result.success(WalletSession(address, "")) else Result.failure(WalletError(WalletError.Kind.NO_WALLET))
             is TransactionResult.Failure -> Result.failure(fail(result))
         }
     }
@@ -197,6 +287,7 @@ class SolanaWallet(context: Context) {
         sender: ActivityResultSender,
         build: suspend (payer: PublicKey, blockhash: ByteArray) -> LegacyTx,
     ): Result<SentTx> {
+        if (useLocal()) return localSignAndSend(build)
         val client = rpc
         val hash = StickyBlockhash { client.latestBlockhash() }
         val first = signAndSendOnce(sender, client, hash, build)
@@ -309,6 +400,7 @@ class SolanaWallet(context: Context) {
 
     /** Devnet only. Never called on mainnet. */
     suspend fun airdrop(): Result<String> = runCatching {
+        if (isLocal) return LocalFunding.fund(this, LOCAL_MIN_LAMPORTS)
         check(!mainnet) { "airdrop is devnet only" }
         val addr = address
         require(addr.isNotBlank()) { "not connected" }
@@ -323,11 +415,27 @@ class SolanaWallet(context: Context) {
         day: String = LocalDate.now(ZoneOffset.UTC).toString(),
     ): Result<ClockProof> {
         val memo = "solarchik clock $day ${meters}m s$streak ${GameSave.dayModOf(day)}"
+        if (useLocal()) return localMemo(memo)
         val sent = sendMemo(sender, memo)
         if (sent.isSuccess) return sent
         val err = sent.exceptionOrNull()
         if (stopAfter(err)) return Result.failure(err ?: WalletError(WalletError.Kind.DECLINED))
         return signMessage(sender, memo)
+    }
+
+    /** CLOCK IN with the built-in wallet: a devnet memo tx (or a detached signature when it has no SOL for the fee). */
+    private suspend fun localMemo(memo: String): Result<ClockProof> = runCatching {
+        val kp = localKey()
+        val addr = kp.publicKey.toBase58()
+        ensureLocalFunds(10_000L)
+        val sent = runCatching {
+            val raw = LocalKey.signSlot(MemoTx.build(kp.publicKey.bytes(), rpc.latestBlockhash(), memo), kp)
+            sendConfirmed(raw)
+        }
+        sent.fold(
+            onSuccess = { ClockProof(addr, it, clusterName, "tx", "") },
+            onFailure = { ClockProof(addr, Base58.encode(kp.sign(memo.encodeToByteArray())), clusterName, "message", "") },
+        )
     }
 
     private suspend fun sendMemo(sender: ActivityResultSender, memo: String): Result<ClockProof> {
@@ -362,6 +470,12 @@ class SolanaWallet(context: Context) {
      */
     suspend fun signServerTxs(sender: ActivityResultSender, txs: List<ByteArray>): Result<String> {
         if (txs.isEmpty()) return Result.failure(WalletError(WalletError.Kind.FAILED, "Server sent no transaction"))
+        if (useLocal()) return runCatching {
+            val kp = localKey()
+            var last = ""
+            for (raw in txs) last = sendConfirmed(LocalKey.signSlot(raw, kp))
+            last
+        }.recoverCatching { throw localFailure(it) }
         adapter.rpcCluster = rpcCluster()
         val result = try {
             adapter.transact(sender) { _ ->
@@ -400,6 +514,10 @@ class SolanaWallet(context: Context) {
 
     private suspend fun signMessage(sender: ActivityResultSender, message: String): Result<ClockProof> {
         val bytes = message.encodeToByteArray()
+        if (useLocal()) return runCatching {
+            val kp = localKey()
+            ClockProof(kp.publicKey.toBase58(), Base58.encode(kp.sign(bytes)), clusterName, "message", "")
+        }
         val cluster = clusterName
         return when (
             val result = adapter.transact(sender) { auth ->
@@ -424,6 +542,20 @@ class SolanaWallet(context: Context) {
             }
             is TransactionResult.NoWalletFound -> Result.failure(WalletError(WalletError.Kind.NO_WALLET))
             is TransactionResult.Failure -> Result.failure(fail(result))
+        }
+    }
+
+    companion object {
+        const val KIND_LOCAL = "local"
+        const val NO_DEVNET_SOL = "Built-in wallet has no devnet SOL"
+        /** A Pro buy is 0.1 SOL + rent + fee: the built-in wallet tops up below this. */
+        const val LOCAL_MIN_LAMPORTS = 115_000_000L
+
+        /** Test seam for [hasWalletApp]. */
+        @Volatile var walletAppCheck: (Context) -> Boolean = { ctx ->
+            val probe = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("solana-wallet:/v1/associate/local?association=probe&port=1"))
+                .addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+            runCatching { ctx.packageManager.queryIntentActivities(probe, 0).isNotEmpty() }.getOrDefault(false)
         }
     }
 

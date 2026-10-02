@@ -21,6 +21,12 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <!-- 0.21.9: is a Mobile Wallet Adapter wallet installed? (else the built-in devnet wallet is offered) -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="solana-wallet" />
+        </intent>
         <!-- 0.21.8: is a Solana Pay wallet installed? (else the top-up offers Phantom / Solflare + QR) -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
@@ -64,6 +70,12 @@
             android:theme="@style/Theme.Solarchik.Run"
             android:screenOrientation="sensorLandscape"
             tools:ignore="DiscouragedApi,LockedOrientationActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode|density" />
+        <activity
+            android:name=".ui.CallsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Solarchik"
+            android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode|density" />
         <service
             android:name=".screen.IncomingScreenService"

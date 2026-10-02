@@ -1,5 +1,7 @@
 package net.solardepin.solarchik.ui
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -35,28 +37,92 @@ class SolActionDesk(
     private val api: suspend (String, JsonObject) -> JsonObject = { r, b -> StrategyApi.post(r, b) },
 ) {
     private val ctx get() = host
-    private var cache: Pair<Long, ActContext>? = null
+    /**
+     * 0.21.9: the network half of the context (strategy cards, market listings). Building it used to run
+     * before every Sol request, sequentially, and a cold Vercel start made it 2+ s on its own (a big part of
+     * the 4–6 s voice gap). Now it is fetched in parallel, capped, prewarmed when the Sol tab opens or the mic
+     * starts, and a stale copy (≤ [STALE_MS]) answers at once while a fresh one loads in the background.
+     * The local half (desk run state, owned records) is rebuilt on every call, so it is never stale.
+     */
+    private data class NetPart(val at: Long, val complete: Boolean, val cards: Map<String, StrategyCard?>, val market: List<ActListing>)
+    @Volatile private var remote: NetPart? = null
+    @Volatile private var refreshing = false
 
-    fun invalidate() { cache = null }
+    /** Last context build: how long the network part took and whether a cached copy was used (latency log). */
+    @Volatile var lastBuildMs: Long = -1
+        private set
+
+    fun invalidate() { remote = remote?.copy(at = 0) }
+
+    private fun devnetAssets(): List<OwnedAgent> {
+        val w = host.wallet
+        if (!w.connected || w.clusterName != "devnet") return emptyList()
+        return host.store.agentsFor(w.address, "devnet").filter { it.status != OwnedAgent.STATUS_MISSING }
+    }
+
+    private suspend fun fetchNet(capMs: Long): NetPart = kotlinx.coroutines.coroutineScope {
+        val w = host.wallet
+        val assets = devnetAssets()
+        val cards = assets.map { a ->
+            a.asset to async {
+                kotlinx.coroutines.withTimeoutOrNull(capMs) {
+                    runCatching { api("strategy-info", buildJsonObject { put("asset", a.asset) }) }.getOrNull()
+                        ?.takeIf { StrategyApi.ok(it) }?.let { StrategyCard.parse(it) }
+                }
+            }
+        }
+        val market = async {
+            kotlinx.coroutines.withTimeoutOrNull(capMs) {
+                runCatching { StrategyCard.parseMarket(api("market-list", JsonObject(emptyMap()))) }.getOrNull()
+            }
+        }
+        val cardMap = cards.associate { (id, d) -> id to d.await() }
+        val m = market.await()
+        val listings = m.orEmpty().filter { it.priceLamports != null && !(w.connected && it.owner == w.address) }
+            .map { ActListing(it.asset, it.name, it.priceLamports ?: 0, it.spec) }
+        NetPart(System.currentTimeMillis(), m != null && cardMap.values.none { it == null }, cardMap, listings)
+    }
+
+    private fun refreshLater() {
+        if (refreshing) return
+        refreshing = true
+        host.scope.launch {
+            try { remote = fetchNet(REFRESH_CAP_MS) } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) {} finally { refreshing = false }
+        }
+    }
+
+    /** Warm the network part ahead of a request (Sol tab opened, mic started). */
+    fun prewarm() {
+        val n = remote
+        if (n == null || !n.complete || System.currentTimeMillis() - n.at >= CACHE_MS) refreshLater()
+    }
+
+    private suspend fun netPart(): NetPart {
+        val n = remote
+        val now = System.currentTimeMillis()
+        val missing = n != null && devnetAssets().any { it.asset !in n.cards }
+        if (n != null && n.complete && !missing && now - n.at < CACHE_MS) return n
+        if (n != null && now - n.at < STALE_MS) { refreshLater(); return n }
+        return fetchNet(FIRST_CAP_MS).also { remote = it; if (!it.complete) refreshLater() }
+    }
 
     suspend fun context(): ActContext {
-        cache?.takeIf { System.currentTimeMillis() - it.first < CACHE_MS }?.let { return it.second }
+        val t0 = System.currentTimeMillis()
+        val n = netPart()
+        lastBuildMs = System.currentTimeMillis() - t0
         val w = host.wallet
         val desk = host.desk.state()
         val agents = mutableListOf<ActAgent>()
-        if (w.connected && w.clusterName == "devnet") {
-            for (a in host.store.agentsFor(w.address, "devnet").filter { it.status != OwnedAgent.STATUS_MISSING }) {
-                val info = runCatching { api("strategy-info", buildJsonObject { put("asset", a.asset) }) }.getOrNull()
-                val card = info?.takeIf { StrategyApi.ok(it) }?.let { StrategyCard.parse(it) }
-                val run = desk.run(a.asset)
-                agents += ActAgent(
-                    id = a.asset, name = card?.name?.ifBlank { null } ?: a.name, running = run?.running == true,
-                    strategyNft = card?.hasChain == true && card.spec != null, spec = card?.spec, listed = card?.listed == true,
-                    unlockSec = card?.unlockSec ?: 0, trades = run?.let { it.wins + it.losses } ?: card?.perf?.trades,
-                    pnlSol = run?.pnl ?: card?.perf?.realizedSol, skuId = a.skuId, tier = a.tier, track = Track.DEVNET,
-                    aprSince = card?.perf?.aprSince,
-                )
-            }
+        for (a in devnetAssets()) {
+            val card = n.cards[a.asset]
+            val run = desk.run(a.asset)
+            agents += ActAgent(
+                id = a.asset, name = card?.name?.ifBlank { null } ?: a.name, running = run?.running == true,
+                strategyNft = card?.hasChain == true && card.spec != null, spec = card?.spec, listed = card?.listed == true,
+                unlockSec = card?.unlockSec ?: 0, trades = run?.let { it.wins + it.losses } ?: card?.perf?.trades,
+                pnlSol = run?.pnl ?: card?.perf?.realizedSol, skuId = a.skuId, tier = a.tier, track = Track.DEVNET,
+                aprSince = card?.perf?.aprSince,
+            )
         }
         val records = host.store.agents()
         for (sku in Catalog.skus) {
@@ -71,12 +137,11 @@ class SolActionDesk(
                 owned = net.solardepin.solarchik.agents.Ownership.ownsSku(records, sku.id),
             )
         }
-        val market = runCatching { StrategyCard.parseMarket(api("market-list", JsonObject(emptyMap()))) }.getOrDefault(emptyList())
-            .filter { it.priceLamports != null && !(w.connected && it.owner == w.address) }
-            .map { ActListing(it.asset, it.name, it.priceLamports ?: 0, it.spec) }
+        val mine = agents.map { it.id }.toSet()
+        val market = n.market.filter { it.id !in mine }
         val freeSku = Catalog.skus.firstOrNull { !it.paidOnly }
         val canMint = freeSku != null && !w.mainnet && host.minter.canMint(freeSku, AgentTier.FREE) == null
-        return ActContext(agents, market, canMint).also { cache = System.currentTimeMillis() to it }
+        return ActContext(agents, market, canMint)
     }
 
     fun riskLabel(r: String): String = when (r) {
@@ -177,5 +242,10 @@ class SolActionDesk(
 
     companion object {
         private const val CACHE_MS = 45_000L
+        /** A cached network part this old still answers at once (refreshed in the background). */
+        private const val STALE_MS = 15 * 60_000L
+        /** No cache yet: wait at most this long for cards and market before asking Sol without them. */
+        private const val FIRST_CAP_MS = 1_200L
+        private const val REFRESH_CAP_MS = 8_000L
     }
 }

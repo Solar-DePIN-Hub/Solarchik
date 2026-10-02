@@ -14,6 +14,9 @@ class SolarchikApp : Application() {
         super.onCreate()
         Notes.createChannel(this)
         runCatching { Notes.schedule(this) }
+        // 0.21.9: secretary call notes (background poll every 15 min; the open app polls every 60 s)
+        runCatching { net.solardepin.solarchik.screen.CallNotes.createChannel(this) }
+        runCatching { net.solardepin.solarchik.screen.CallNotes.schedule(this) }
         // Background desk ticks (DeskWorker) announce closes; the open app shows them on screen.
         DeskHooks.afterTick = { ctx, report -> runCatching { DeskNotes.onTick(ctx, report) } }
     }

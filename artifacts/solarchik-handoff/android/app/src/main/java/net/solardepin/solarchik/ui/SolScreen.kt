@@ -135,7 +135,12 @@ class SolScreen(host: MainActivity) : Screen(host) {
 
     override fun onShow() {
         render()
-        if (MainActivity.tickerEnabled) retellOnce()
+        if (MainActivity.tickerEnabled) {
+            retellOnce()
+            // 0.21.9: warm the agent/market context and the worker connection before the first question
+            actions.prewarm()
+            net.solardepin.solarchik.sol.SolLatency.prewarmWorker()
+        }
         takeHandoff()
     }
 
@@ -231,9 +236,10 @@ class SolScreen(host: MainActivity) : Screen(host) {
         return wrap
     }
 
-    fun send(raw: String) {
+    fun send(raw: String, voice: Boolean = false) {
         val msg = raw.trim()
         if (msg.isEmpty() || sending) return
+        net.solardepin.solarchik.sol.SolLatency.sent(voice)
         val history = store.turns()
         store.add(ChatTurn("user", msg, System.currentTimeMillis()))
         input.setText("")
@@ -275,7 +281,9 @@ class SolScreen(host: MainActivity) : Screen(host) {
         host.scope.launch {
             try {
                 val c = actions.context()
+                net.solardepin.solarchik.sol.SolLatency.request(actions.lastBuildMs)
                 val r = brain.ask(msg, host.lang, "yard", c, history, currentReport().script.take(500)) { soFar ->
+                    if (streamed.isEmpty()) net.solardepin.solarchik.sol.SolLatency.firstToken()
                     streamed = soFar
                     status.text = soFar
                     v?.feed(soFar, host.lang, final = false)
@@ -320,6 +328,7 @@ class SolScreen(host: MainActivity) : Screen(host) {
             } finally {
                 sending = false
                 status.visibility = View.GONE
+                if (v == null) net.solardepin.solarchik.sol.SolLatency.done(host)
                 render()
             }
         }
@@ -484,6 +493,7 @@ class SolScreen(host: MainActivity) : Screen(host) {
             val e = ears ?: SolEars(host).also { ears = it }
             if (!e.available()) { host.toast(ctx.getString(R.string.chat_mic_off)); return@withPermission }
             voice?.stop()
+            if (MainActivity.tickerEnabled) { actions.prewarm(); net.solardepin.solarchik.sol.SolLatency.prewarmWorker() }
             listening = true
             status.text = ctx.getString(R.string.chat_listening)
             status.visibility = View.VISIBLE
@@ -492,7 +502,7 @@ class SolScreen(host: MainActivity) : Screen(host) {
                 listening = false
                 status.visibility = View.GONE
                 render()
-                if (!said.isNullOrBlank()) send(said)
+                if (!said.isNullOrBlank()) send(said, voice = true)
             }
         }
     }
