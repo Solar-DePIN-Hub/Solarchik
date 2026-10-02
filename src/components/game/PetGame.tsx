@@ -609,7 +609,7 @@ export function PetGame({ save, t, now: nowProp, onBack, onSetup, onChat, onSecr
         </div>
       </div>
 
-      {!deskOpen && (
+      {!deskOpen && !act && (
         <button
           type="button"
           className="pet-work-btn"
@@ -627,7 +627,7 @@ export function PetGame({ save, t, now: nowProp, onBack, onSetup, onChat, onSecr
         </button>
       )}
 
-      {!deskOpen && (
+      {!deskOpen && !act && (
         <button
           type="button"
           onPointerDown={(e) => {
