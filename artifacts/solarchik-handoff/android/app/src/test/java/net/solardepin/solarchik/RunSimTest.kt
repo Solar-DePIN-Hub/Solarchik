@@ -267,9 +267,35 @@ class RunSimTest {
         assertTrue(s.clockOpen)
         assertTrue(Ev.CLOCK in ev)
         assertTrue("meters ${s.meters}", s.meters in 1200..1201) // first step at/over 12000 units
+        // CLOCK IN is a reward moment, not a stop: the run keeps going (no freeze, no vy reset)
         val x = s.x
-        repeat(30) { RunSim.step(s, RunSim.TICK, Input()) }
-        assertEquals("frozen after the goal", x, s.x, 0.0)
+        var again = 0
+        repeat(60) { if (Ev.CLOCK in RunSim.step(s, RunSim.TICK, Input())) again++ }
+        assertTrue("the run keeps moving after the goal", s.x > x + 100)
+        assertEquals(Phase.RUNNING, s.phase)
+        assertTrue(s.clockOpen)
+        assertEquals("CLOCK fires once", 0, again)
+    }
+
+    @Test fun clockInKeepsTheJumpGoing() {
+        // crossing the goal mid-air must not kill the jump (the web used to zero vy and freeze)
+        val s = emptyRoof()
+        s.x = 11_990.0; s.distance = s.x; s.invuln = 99.0
+        s.vy = -400.0; s.grounded = false; s.y = 150.0
+        var vyAtClock = 0.0
+        var n = 0
+        while (!s.clockOpen && n++ < 30) { RunSim.step(s, RunSim.TICK, Input(jumpHeld = true)); vyAtClock = s.vy }
+        assertTrue(s.clockOpen)
+        assertTrue("vy $vyAtClock", vyAtClock < -200)
+    }
+
+    @Test fun autopilotRunsPastTheGoal() {
+        // the daily run continues after CLOCK IN, into the storm and night chapters
+        val s = RunSim.create(RunSim.daySeed("2026-10-02"), DayMod.CALM, goalMeters = 1200)
+        var guard = 0
+        while (s.meters < 1700 && s.phase != Phase.DEAD && guard++ < 60 * 300) RunSim.step(s, RunSim.TICK, Autopilot.input(s))
+        assertTrue("bot ended at ${s.meters} m", s.meters >= 1700)
+        assertTrue(s.clockOpen)
     }
 
     @Test fun dayPhasesCycle() {
@@ -343,7 +369,7 @@ object Autopilot {
     private const val HORIZON = 66
 
     fun input(s: RunState): Input {
-        if (s.phase != Phase.RUNNING || s.clockOpen) { plan.clear(); return Input() }
+        if (s.phase != Phase.RUNNING) { plan.clear(); return Input() }
         if (greedy) {
             // go out of the way for a shield when a safe plan grabs it
             val spd = RunSim.speedAt(s)
@@ -402,7 +428,6 @@ object Autopilot {
         val total = HORIZON + seq.size
         for (i in 0 until total) {
             val ev = RunSim.step(c, RunSim.TICK, seq.getOrElse(i) { Input() })
-            if (c.clockOpen) return total
             if (c.hearts < hearts || Ev.HURT in ev || c.phase == Phase.DEAD) return i
         }
         return total

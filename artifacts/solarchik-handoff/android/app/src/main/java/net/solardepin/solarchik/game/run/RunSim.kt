@@ -149,6 +149,9 @@ class RunState(val seed: Int, val mod: DayMod, val goalMeters: Int) {
     /** Seconds spent in RUNNING (drives the ghost tape). */
     var runTime = 0.0
     val ghost = ArrayList<GhostSample>()
+    /** Native stats for daily quests (not in the web state; no effect on play). */
+    var grinds = 0
+    var unders = 0
 
     /** Whole meters as the web HUD shows them (distance / 10, rounded). */
     val meters: Int get() = Math.round(distance / 10.0).toInt()
@@ -187,9 +190,9 @@ object RunSim {
     const val GHOST_MAX = 480
 
     // particle colours (web hex strings as ARGB)
-    private const val C_DUST = 0xFFE8D9B0.toInt()
+    const val C_DUST = 0xFFE8D9B0.toInt()
     private const val C_BLUE = 0xFF5AA8FF.toInt()
-    private const val C_GOLD = 0xFFFFD24A.toInt()
+    const val C_GOLD = 0xFFFFD24A.toInt()
     private const val C_SLIDE = 0xFFC9D8FF.toInt()
     private const val C_SHIELD = 0xFF7EC8FF.toInt()
     private const val C_HIT = 0xFFE0564A.toInt()
@@ -199,11 +202,11 @@ object RunSim {
     private const val C_RING = 0xFFFFE27A.toInt()
     private const val C_WIND = 0xFFEFE2C4.toInt()
     private const val C_GRIND = 0xFF9AD0FF.toInt()
-    private const val C_HEAT_Y = 0xFFFFE34A.toInt()
+    const val C_HEAT_Y = 0xFFFFE34A.toInt()
     private const val C_HEAT_B = 0xFF3D7CFF.toInt()
-    private const val C_LAND = 0xFFCBB07A.toInt()
+    const val C_LAND = 0xFFCBB07A.toInt()
     private const val C_LAND_RING = 0xE6F3E2C4.toInt()
-    private const val C_SUN = 0xFFFFB703.toInt()
+    const val C_SUN = 0xFFFFB703.toInt()
     private const val C_STREAK = 0xFFFFFDF8.toInt()
     private const val C_CLEAN = 0xFFD6F5A3.toInt()
 
@@ -686,7 +689,7 @@ object RunSim {
             return events
         }
 
-        if (s.clockOpen) return events
+        // CLOCK IN at the goal is a reward moment, not a stop: the run keeps going.
 
         if (s.hitstop > 0) {
             s.hitstop -= dt
@@ -732,7 +735,6 @@ object RunSim {
                 s.clockOpen = true
                 s.shake = 1.0
                 s.hitstop = max(s.hitstop, 0.08)
-                s.vy = 0.0
                 s.announce = ""
                 s.announceLife = 0.0
                 s.pops.add(Pop(s.x, s.y - 88, s.goalMeters.toString(), 0.7))
@@ -879,6 +881,7 @@ object RunSim {
                     s.checkX = land.x + min(40.0, land.w * 0.2)
                     s.checkY = land.y
                     events.add(if (wire) Ev.GRIND else Ev.LAND)
+                    if (wire) s.grinds += 1
                     emit(s.particles, s.x, s.y, 8, if (wire) C_SHIELD else C_LAND, 80.0, 90.0)
                     emitRing(s.particles, s.x, s.y, if (wire) C_SHIELD else C_LAND_RING)
                     if (wire) {
@@ -972,6 +975,7 @@ object RunSim {
                     events.add(Ev.NEAR)
                     s.score += 22
                     s.pops.add(Pop(e.x, e.y - 36, "UNDER", 0.5))
+                    s.unders += 1
                 }
                 if (!s.grounded && s.vy >= 0 && pb.b < eb.t && pb.r > eb.l && pb.l < eb.r && !e.near) {
                     e.near = true
