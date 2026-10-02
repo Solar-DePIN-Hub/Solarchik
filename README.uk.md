@@ -150,6 +150,8 @@ ETH, DOGE, XRP та інші без Solana-виводу не входять. І�
 - Живий сайт: https://solarchik-market.vercel.app (лише devnet).
 - Що симульовано: арбітраж — СИМУЛЯЦІЯ на живих спредах; прогнози — paper / devnet на справжніх цінах Polymarket; живі гроші вимкнено (`LIVE_TRADING_ENABLED`). Рішення агента прогнозів — Grok, а якщо його немає — Gemini (на цьому деплої ключа xAI немає, тож відповідає Gemini, і стіл так і підписує).
 - Хронологія: почато 19 вересня 2026; великий коміт 30 вересня імпортує код, зроблений у Grok Build у вересні 2026; старий окремий прототип Solarchik для Telegram (липень 2026) не є частиною цієї заявки; проєкт також подано на MunichTech (вересень 2026).
+- Результати Strategy NFT ончейн: сервер веде живі (devnet-ставки) відкриття і закриття прогнозів у своїй базі (Postgres на Neon, підключено інтеграцією Vercel як `POSTGRES_URL`; `DATABASE_URL` теж працює) і після кожного закриття пише угоди / вінрейт / PnL / APR в атрибути NFT ключем сервера. Живий доказ з публічного деплою (2 жовтня 2026): позиція на NFT Market Test відкрита і закрита через `/api/native/position-open` / `position-close`, запис результатів сервером — [tx](https://explorer.solana.com/tx/4z8UG2F5LBbqtUdYkznxFrjFuwovRncjox83pqyXpZDhsByvqfqocxmrVAcnosxF6K2Nm5StN4etifXJiYTD6p71?cluster=devnet). Паперові угоди не записуються.
+- Кнопка «Отримати devnet SOL»: спершу публічний airdrop devnet, потім кран сервера (0.2 SOL, раз на гаманець на добу). Якщо гаманець крана майже порожній, сервер просить devnet-airdrop для гаманця гравця; якщо й devnet обмежений, стіл прямо так і пише і радить faucet.solana.com.
 - Повний список адрес NFT і транзакцій devnet — в англійському [README.md](README.md#for-judges).
 
 ## Що ще не здано на Solana Mobile
