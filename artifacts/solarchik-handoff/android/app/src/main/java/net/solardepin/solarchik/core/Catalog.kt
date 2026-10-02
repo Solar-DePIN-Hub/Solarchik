@@ -19,7 +19,10 @@ enum class AgentClass(val id: Int, val role: String, val titleRes: Int, val shor
     }
 }
 
-/** One base strategy. Each base comes as FREE (`id`) and PRO (`id-pro`), like web catalog.ts withTiers. */
+/**
+ * One base strategy. Each base comes as FREE (`id`) and PRO (`id-pro`), like web catalog.ts withTiers,
+ * except a [paidOnly] base (Combo), which is sold only as PRO: no free mint exists for it.
+ */
 data class AgentSku(
     val id: String,
     val name: String,
@@ -29,7 +32,10 @@ data class AgentSku(
     val blurbRes: Int,
     val artRes: Int,
     val accent: Int,
+    val paidOnly: Boolean = false,
 ) {
+    /** The tier actually sold for a picked tier: a paid-only base is always PRO. */
+    fun tierFor(picked: String): String = if (paidOnly) AgentTier.PRO else picked
     fun skuId(tier: String): String = if (tier == AgentTier.PRO) "$id-pro" else id
     fun nameFor(tier: String): String =
         (if (tier == AgentTier.PRO) "$name Pro" else name).take(SolarchikConfig.CORE_NAME_MAX)
@@ -41,13 +47,16 @@ object Catalog {
         AgentSku("sku-pred-alpha", "Bitcoin Windows #11", AgentClass.PREDICTION, "c", R.string.sku_alpha_blurb, R.drawable.robot_ember, 0xFFFF9F43.toInt()),
         AgentSku("sku-pred-events", "Events Scout #04", AgentClass.PREDICTION, "e", R.string.sku_events_blurb, R.drawable.robot_prism, 0xFFA78BFA.toInt()),
         AgentSku("sku-pred-weather", "Weather Station", AgentClass.PREDICTION, "w", R.string.sku_weather_blurb, R.drawable.robot_frost, 0xFF7AD1FF.toInt()),
-        AgentSku("sku-combo-prime", "Combo Prime", AgentClass.COMBO, "cew", R.string.sku_combo_blurb, R.drawable.robot_sunflower, 0xFFF5C542.toInt()),
+        AgentSku("sku-combo-prime", "Combo Prime", AgentClass.COMBO, "cew", R.string.sku_combo_blurb, R.drawable.robot_sunflower, 0xFFF5C542.toInt(), paidOnly = true),
         AgentSku("sku-dex-arb", "Backpack SOL Desk", AgentClass.DEX, "dex", R.string.sku_arb_blurb, R.drawable.robot_midnight, 0xFF5BD69A.toInt()),
     )
 
     private val proIds = skus.map { "${it.id}-pro" }.toSet()
 
     /** Port of web offerFor: (tier, price). */
+    /** Free ids that are never sold (web PAID_ONLY_BASE_SKUS). */
+    val paidOnlyFreeIds: Set<String> = skus.filter { it.paidOnly }.map { it.id }.toSet()
+
     fun offerFor(id: String): Pair<String, Double> =
         if (id in proIds) AgentTier.PRO to SolarchikConfig.PRO_PRICE_SOL else AgentTier.FREE to 0.0
 

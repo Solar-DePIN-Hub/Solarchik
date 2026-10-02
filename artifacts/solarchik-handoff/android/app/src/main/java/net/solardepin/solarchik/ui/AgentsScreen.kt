@@ -251,7 +251,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         if (track == Track.PAPER) {
             return Catalog.skus.map { sku ->
                 val key = "paper:${sku.id}"
-                st.run(key) ?: AgentRun(key, sku.id, AgentTier.FREE, sku.name, Track.PAPER)
+                st.run(key) ?: AgentRun(key, sku.id, sku.tierFor(AgentTier.FREE), sku.name, Track.PAPER)
             }
         }
         if (!w.connected) return emptyList()
@@ -409,6 +409,8 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
     }
 
     private fun skuCard(sku: AgentSku): View = Ui.card(ctx, accent = sku.accent).apply {
+        // Combo is paid only: its card is always Pro, even with the Free tab picked.
+        val tier = sku.tierFor(this@AgentsScreen.tier)
         val row = Ui.row(ctx, gap = 14).apply { gravity = Gravity.TOP }
         val artBox = FrameLayout(ctx).apply {
             background = Ui.rounded(Ui.withAlpha(sku.accent, 0x1E), dp(18).toFloat())
@@ -419,6 +421,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         val pills = Ui.row(ctx, gap = 6)
         pills.addView(Ui.pill(ctx, ctx.getString(sku.agentClass.shortRes), sku.accent))
         pills.addView(Ui.pill(ctx, ctx.getString(if (tier == AgentTier.PRO) R.string.tier_pro else R.string.tier_free), if (tier == AgentTier.PRO) Ui.GOLD else Ui.CYAN, filled = tier == AgentTier.PRO))
+        if (sku.paidOnly) pills.addView(Ui.pill(ctx, ctx.getString(R.string.tier_paid_only), Ui.GOLD))
         col.addView(pills)
         col.addView(Ui.top(Ui.text(ctx, sku.nameFor(tier), 17f, Ui.TEXT, 800), 8))
         col.addView(Ui.top(Ui.muted(ctx, ctx.getString(sku.blurbRes)), 4))
@@ -432,6 +435,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
             busy -> ctx.getString(R.string.mint_busy)
             block == MintError.Kind.FREE_USED -> ctx.getString(R.string.mint_free_used)
             block == MintError.Kind.PRO_MAINNET_OFF -> ctx.getString(R.string.mint_pro_off)
+            block == MintError.Kind.PAID_ONLY -> ctx.getString(R.string.mint_err_paid_only)
             tier == AgentTier.PRO -> ctx.getString(R.string.mint_pro, Fmt.sol(sku.priceSol(tier)))
             else -> ctx.getString(R.string.mint_free)
         }
@@ -454,7 +458,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
 
     private fun mint(sku: AgentSku) {
         if (busySku != null) return
-        val chosen = tier
+        val chosen = sku.tierFor(tier)
         busySku = sku.skuId(chosen)
         render()
         host.scope.launch {

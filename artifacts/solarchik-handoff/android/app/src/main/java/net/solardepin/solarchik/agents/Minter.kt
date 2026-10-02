@@ -18,7 +18,7 @@ import org.sol4k.Keypair
 import org.sol4k.PublicKey
 
 class MintError(val kind: Kind, detail: String = "") : Exception(detail.ifBlank { kind.name }) {
-    enum class Kind { FREE_USED, PRO_MAINNET_OFF, TOO_BIG, WALLET_CHANGED }
+    enum class Kind { FREE_USED, PRO_MAINNET_OFF, TOO_BIG, WALLET_CHANGED, PAID_ONLY }
 }
 
 /** Builds and sends Metaplex Core strategy NFT mints through MWA. */
@@ -45,6 +45,8 @@ class Minter(
 ) {
 
     fun canMint(sku: AgentSku, tier: String): MintError.Kind? {
+        // Combo is paid only: never a free mint, whatever the UI picked.
+        if (tier == AgentTier.FREE && sku.paidOnly) return MintError.Kind.PAID_ONLY
         if (tier == AgentTier.PRO && wallet.mainnet && !SolarchikConfig.MAINNET_PAID_MINT) return MintError.Kind.PRO_MAINNET_OFF
         if (tier == AgentTier.FREE && wallet.connected && store.freeClaimed(wallet.address, wallet.clusterName)) return MintError.Kind.FREE_USED
         return null
@@ -65,6 +67,7 @@ class Minter(
      * Free mint from the same wallet fails on chain too: reinstall, second phone, any cluster.
      */
     internal suspend fun mintFree(sender: ActivityResultSender, sku: AgentSku): Result<OwnedAgent> {
+        if (sku.paidOnly) return Result.failure(MintError(MintError.Kind.PAID_ONLY))
         val owner = wallet.address
         val sig = freeSeed(sender, owner).getOrElse { return Result.failure(it) }
         val asset = FreeAsset.keypair(owner, sig) ?: return Result.failure(MintError(MintError.Kind.WALLET_CHANGED))
@@ -95,6 +98,7 @@ class Minter(
         asset: Keypair,
         freeOwner: String = "",
     ): Result<OwnedAgent> {
+        if (tier == AgentTier.FREE && sku.paidOnly) return Result.failure(MintError(MintError.Kind.PAID_ONLY))
         val assetId = asset.publicKey.toBase58()
         var pending: OwnedAgent? = null
         val sent = send(sender) { payer, blockhash ->

@@ -375,6 +375,7 @@ class MainActivity : ComponentActivity() {
             MintError.Kind.PRO_MAINNET_OFF -> getString(R.string.mint_err_pro_off)
             MintError.Kind.TOO_BIG -> getString(R.string.mint_err_big)
             MintError.Kind.WALLET_CHANGED -> getString(R.string.mint_err_wallet_changed)
+            MintError.Kind.PAID_ONLY -> getString(R.string.mint_err_paid_only)
         }
         else -> WalletError.text(this, t)
     }

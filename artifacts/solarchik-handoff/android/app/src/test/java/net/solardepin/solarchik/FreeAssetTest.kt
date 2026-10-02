@@ -108,4 +108,41 @@ class FreeAssetTest {
         assertEquals(MintError.Kind.WALLET_CHANGED, (res.exceptionOrNull() as? MintError)?.kind)
         assertTrue(store.agents().isEmpty())
     }
+
+    // ---- Combo is paid only ----
+
+    private val combo get() = Catalog.skus.single { it.id == "sku-combo-prime" }
+
+    @Test fun comboIsSoldOnlyAsPro() {
+        assertTrue(combo.paidOnly)
+        assertEquals(AgentTier.PRO, combo.tierFor(AgentTier.FREE))
+        assertEquals("sku-combo-prime-pro", combo.skuId(combo.tierFor(AgentTier.FREE)))
+        assertTrue(combo.priceSol(AgentTier.PRO) > 0.0)
+        assertEquals(setOf("sku-combo-prime"), Catalog.paidOnlyFreeIds)
+        // Every other base keeps its Free variant.
+        Catalog.skus.filter { it.id != combo.id }.forEach { assertEquals(AgentTier.FREE, it.tierFor(AgentTier.FREE)) }
+    }
+
+    @Test fun freeComboMintIsRefusedOnEveryPathAndNothingIsSent() = runBlocking {
+        val store = AgentStore(ctx)
+        val sends = mutableListOf<String>()
+        val m = minter(store, existing = null, sends = sends)
+        assertEquals(MintError.Kind.PAID_ONLY, m.canMint(combo, AgentTier.FREE))
+        assertNotEquals(MintError.Kind.PAID_ONLY, m.canMint(combo, AgentTier.PRO))
+        val viaMint = m.mint(sender(), combo, AgentTier.FREE)
+        assertEquals(MintError.Kind.PAID_ONLY, (viaMint.exceptionOrNull() as? MintError)?.kind)
+        val viaFree = m.mintFree(sender(), combo)
+        assertEquals(MintError.Kind.PAID_ONLY, (viaFree.exceptionOrNull() as? MintError)?.kind)
+        val viaWith = m.mintWith(sender(), combo, AgentTier.FREE, Keypair.generate())
+        assertEquals(MintError.Kind.PAID_ONLY, (viaWith.exceptionOrNull() as? MintError)?.kind)
+        assertTrue("nothing sent", sends.isEmpty())
+        assertTrue("nothing recorded", store.agents().isEmpty())
+        assertTrue("a refused Combo does not use up the free slot", !store.freeClaimed(addr, "mainnet"))
+    }
+
+    @Test fun freeNonComboStillMints() = runBlocking {
+        val store = AgentStore(ctx)
+        val res = minter(store, existing = null).mintFree(sender(), Catalog.skus.first { !it.paidOnly })
+        assertTrue(res.exceptionOrNull()?.toString(), res.isSuccess)
+    }
 }

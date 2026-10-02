@@ -88,6 +88,8 @@
     <string name="mint_pro_off">Pro на mainnet — скоро</string>
     <string name="mint_ok">Збито %1$s. Перевіряю в мережі…</string>
     <string name="mint_verified">%1$s у мережі й твій.</string>
+    <string name="mint_err_paid_only">Combo лише платний (Pro). Безкоштовного Combo немає.</string>
+    <string name="tier_paid_only">Лише Pro</string>
     <string name="mint_err_free" formatted="false">Цей гаманець уже має безкоштовного агента. Pro — 0% комісії.</string>
     <string name="mint_err_wallet_changed">Гаманець підписав іншим акаунтом. Підключи гаманець знову і спробуй ще раз.</string>
     <string name="mint_err_pro_off">Платний Pro на mainnet поки вимкнено. Увімкни devnet у Налаштуваннях.</string>
