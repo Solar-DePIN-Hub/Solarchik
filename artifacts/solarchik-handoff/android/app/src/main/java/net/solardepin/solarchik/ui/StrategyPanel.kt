@@ -9,6 +9,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import net.solardepin.solarchik.wallet.WalletError
 import net.solardepin.solarchik.MainActivity
 import net.solardepin.solarchik.R
 import net.solardepin.solarchik.agents.StrategyApi
@@ -191,7 +192,7 @@ class StrategyPanel(private val host: MainActivity, private val onChange: () -> 
         val w = host.wallet
         val ts = System.currentTimeMillis()
         val signed = w.signText(host.sender, StrategyRules.proofMessage(action, w.address, ts, extra)).getOrElse {
-            say(ctx.getString(R.string.sm_wallet_refused, it.message ?: ""))
+            say(WalletError.text(ctx, it))
             return null
         }
         return StrategyApi.proof(signed.address, ts, signed.signature)
@@ -207,7 +208,7 @@ class StrategyPanel(private val host: MainActivity, private val onChange: () -> 
         busy = true
         say(ctx.getString(R.string.sm_working))
         host.scope.launch {
-            val msg = runCatching { work() }.getOrElse { it.message ?: "error" }
+            val msg = runCatching { work() }.getOrElse { WalletError.text(ctx, it) }
             busy = false
             say(msg)
             load(force = true)
@@ -232,7 +233,7 @@ class StrategyPanel(private val host: MainActivity, private val onChange: () -> 
         val pr = proof("strategy", "${c.asset}:$hash") ?: return@act status
         val prep = StrategyApi.post("strategy-prepare", buildJsonObject { put("proof", pr); put("asset", c.asset); put("spec", clean) })
         if (!StrategyApi.ok(prep)) return@act StrategyApi.reason(prep)
-        val sig = host.wallet.signServerTxs(host.sender, StrategyApi.txs(prep)).getOrElse { return@act it.message ?: "wallet" }
+        val sig = host.wallet.signServerTxs(host.sender, StrategyApi.txs(prep)).getOrElse { return@act WalletError.text(ctx, it) }
         val version = (prep["version"] as JsonPrimitive).content.toInt()
         val conf = confirm("strategy-confirm", buildJsonObject { put("asset", c.asset); put("version", version); put("sig", sig) })
         if (StrategyApi.ok(conf)) ctx.getString(R.string.sm_saved, Fmt.short(sig), StrategyRules.SALE_LOCK_HOURS) else StrategyApi.reason(conf)
@@ -243,7 +244,7 @@ class StrategyPanel(private val host: MainActivity, private val onChange: () -> 
         val pr = proof("market", "list:${c.asset}:$lamports") ?: return@act status
         val prep = StrategyApi.post("market-prepare-list", buildJsonObject { put("proof", pr); put("asset", c.asset); put("priceLamports", lamports) })
         if (!StrategyApi.ok(prep)) return@act StrategyApi.reason(prep)
-        val sig = host.wallet.signServerTxs(host.sender, StrategyApi.txs(prep)).getOrElse { return@act it.message ?: "wallet" }
+        val sig = host.wallet.signServerTxs(host.sender, StrategyApi.txs(prep)).getOrElse { return@act WalletError.text(ctx, it) }
         val conf = confirm("market-confirm-list", buildJsonObject { put("asset", c.asset) })
         if (StrategyApi.ok(conf)) ctx.getString(R.string.sm_listed, Fmt.short(sig)) else StrategyApi.reason(conf)
     }
@@ -259,7 +260,7 @@ class StrategyPanel(private val host: MainActivity, private val onChange: () -> 
         val pr = proof("market", "buy:${c.asset}:$price") ?: return@act status
         val prep = StrategyApi.post("market-prepare-buy", buildJsonObject { put("proof", pr); put("asset", c.asset); put("priceLamports", price) })
         if (!StrategyApi.ok(prep)) return@act StrategyApi.reason(prep)
-        val sig = host.wallet.signServerTxs(host.sender, StrategyApi.txs(prep)).getOrElse { return@act it.message ?: "wallet" }
+        val sig = host.wallet.signServerTxs(host.sender, StrategyApi.txs(prep)).getOrElse { return@act WalletError.text(ctx, it) }
         val conf = confirm("market-confirm-buy", buildJsonObject { put("asset", c.asset); put("sig", sig) })
         if (!StrategyApi.ok(conf)) return@act StrategyApi.reason(conf)
         val w = host.wallet

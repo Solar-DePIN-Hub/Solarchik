@@ -547,7 +547,6 @@
     <string name="sm_unlist">Unlist</string>
     <string name="sm_price">Price, SOL</string>
     <string name="sm_list">List for sale</string>
-    <string name="sm_wallet_refused">The wallet did not sign: %1$s</string>
     <string name="sm_need_devnet">Connect a wallet on devnet first.</string>
     <string name="sm_working">Working…</string>
     <string name="sm_saved">Strategy written · %1$s · sale lock %2$d h</string>

@@ -48,6 +48,19 @@ class JudgesBuildTest {
         assertEquals(routes.toSet(), called)
     }
 
+    @Test fun serverTextsFollowPhoneLanguage() {
+        assertEquals("uk", StrategyApi.lang(java.util.Locale("uk", "UA")))
+        assertEquals("en", StrategyApi.lang(java.util.Locale.US))
+        assertEquals("en", StrategyApi.lang(java.util.Locale.GERMANY))
+        val b = StrategyApi.withLang(JsonObject(emptyMap()), java.util.Locale.US)
+        assertEquals("en", (b["lang"] as JsonPrimitive).content)
+    }
+
+    @Test @Config(qualifiers = "uk") fun ukClassTitlesAreUkrainian() {
+        assertEquals("Агент прогнозів", ctx.getString(R.string.class_pred_title))
+        assertEquals("Комбо-агент", ctx.getString(R.string.class_combo_title))
+    }
+
     /** Opt-in (-PliveAgents=1): each route answers JSON on the live server (a refusal for an empty body is fine; 404 is not). */
     @Test fun liveServerHasEveryRoute() = runBlocking {
         assumeTrue(System.getProperty("solarchik.liveAgents") == "1")
@@ -57,6 +70,7 @@ class JudgesBuildTest {
             assertNotNull("$r: no ok field in $body", ok)
             if (r == "market-list") assertTrue("market-list must list", ok == true)
             else assertTrue("$r: $body", ok == true || (body["reason"] != null && !StrategyApi.reason(body).startsWith("server ")))
+            if (StrategyApi.lang() == "en") assertFalse("$r: Ukrainian reason for an English phone: $body", Regex("[А-Яа-яІіЇїЄєҐґ]").containsMatchIn(StrategyApi.reason(body)))
         }
     }
 }
