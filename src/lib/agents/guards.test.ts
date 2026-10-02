@@ -20,7 +20,10 @@ import {
   COSIGN_LAUNCH_SEC,
   COSIGN_SLOT_MS,
   PRO_LAMPORTS,
+  COMBO_PAID_ONLY,
   checkProPaymentTx,
+  freeComboRefusal,
+  isComboAttrs,
   legacyMintFitsPayment,
   freeAssetLabel,
   mintModeFor,
@@ -37,6 +40,9 @@ import {
   feeMemo,
 } from "./payment-rules.ts";
 import { ARB_TREASURY, PAY_WALLET } from "../game/pay.ts";
+import { liveCatalog } from "./catalog.ts";
+import { PAID_ONLY_BASE_SKUS, PRO_PRICE_SOL, offerFor } from "./fees.config.ts";
+import { attrList } from "./core-attrs.ts";
 import { Keypair } from "@solana/web3.js";
 import { backpackFromFile, backpackFromText, derivedKeypair, keypairFromText } from "./secret-key.server.ts";
 import { encodeBase58 } from "./base58.ts";
@@ -397,5 +403,67 @@ describe("payment checks", () => {
   it("fee memo and server ref use the same cleaned row id", () => {
     assert.equal(feeMemo("a b/c?d"), `solarchik-fee:${cleanRowId("a b/c?d")}`);
     assert.equal(cleanRowId("x".repeat(100)).length, 64);
+  });
+});
+
+describe("Combo is paid only", () => {
+  it("the store has no free Combo; every Combo SKU is Pro at the Pro price", () => {
+    const skus = liveCatalog();
+    const combos = skus.filter((s) => s.nft.classId === 3);
+    assert.ok(combos.length >= 1, "a Combo is still sold");
+    for (const sku of combos) {
+      assert.equal(sku.nft.tier, "pro", sku.id);
+      assert.equal(sku.priceSol, PRO_PRICE_SOL, sku.id);
+      assert.ok(sku.priceSol > 0);
+    }
+    assert.equal(skus.find((s) => s.id === "sku-combo-prime"), undefined, "no free Combo SKU id");
+    assert.ok(skus.some((s) => s.id === "sku-combo-prime-pro"));
+    assert.ok(PAID_ONLY_BASE_SKUS.has("sku-combo-prime"));
+    assert.equal(offerFor("sku-combo-prime-pro").tier, "pro");
+    // Free SKUs are never a combo.
+    for (const sku of skus.filter((s) => s.nft.tier === "free")) {
+      assert.notEqual(sku.nft.classId, 3, sku.id);
+      assert.equal(sku.priceSol, 0, sku.id);
+    }
+  });
+
+  it("combo attributes are recognised (role=combo, or old class 4)", () => {
+    const combo = liveCatalog().find((s) => s.id === "sku-combo-prime-pro")!;
+    assert.equal(isComboAttrs(attrList(combo.nft)), true);
+    assert.equal(isComboAttrs(new Map([["class", "4"]])), true);
+    assert.equal(isComboAttrs(new Map([["class", "3"], ["role", "combo"]])), true);
+    assert.equal(isComboAttrs(new Map([["class", "1"], ["role", "pred"]])), false);
+    assert.equal(isComboAttrs(new Map([["class", "2"], ["role", "dex"]])), false);
+    // Old class 3 without role=combo was the social bot, not a combo.
+    assert.equal(isComboAttrs(new Map([["class", "3"]])), false);
+  });
+
+  it("a free combo mint or re-issue is refused; Pro combo and free non-combo pass", () => {
+    assert.equal(freeComboRefusal("free", true), COMBO_PAID_ONLY);
+    assert.equal(freeComboRefusal("pro", true), null);
+    assert.equal(freeComboRefusal("free", false), null);
+    assert.equal(freeComboRefusal("pro", false), null);
+  });
+
+  it("the server checks it on every path: catalog mint, re-issue, and the co-signed builder", () => {
+    const src = readFileSync(new URL("./mint.server.ts", import.meta.url), "utf8");
+    const mint = src.slice(src.indexOf("export async function prepareMintOnServer"), src.indexOf("export type PrepareReissueResult"));
+    const reissue = src.slice(src.indexOf("export async function prepareReissueOnServer"), src.indexOf("async function serialize"));
+    const builder = src.slice(src.indexOf("export async function buildCosigned"), src.indexOf("export async function prepareMintOnServer"));
+    // Mint: refused before any slot, proof spend or payment check.
+    assert.ok(mint.indexOf("freeComboRefusal(tier, sku.nft.classId === 3)") > 0);
+    assert.ok(mint.indexOf("freeComboRefusal") < mint.indexOf("mintModeFor"));
+    assert.ok(mint.indexOf("freeComboRefusal") < mint.indexOf("claimMintSlot"));
+    // Pro (including Pro combo) still needs a verified on-chain payment.
+    assert.match(mint, /verifyProPayment\(paySig, wallet, false\)/);
+    // Re-issue without a Pro payment would be free: refused for combos.
+    assert.ok(reissue.indexOf("freeComboRefusal(tier, isComboAttrs(old.attrs))") > 0);
+    assert.ok(reissue.indexOf("freeComboRefusal") < reissue.indexOf("buildCosigned"));
+    // The builder is the last gate for any co-signed tx.
+    assert.ok(builder.includes("freeComboRefusal(tier, isComboAttrs(input.attributes))"));
+    // Browser store also refuses before any money or mint.
+    const store = readFileSync(new URL("./store.ts", import.meta.url), "utf8");
+    const buy = store.slice(store.indexOf("async buyLiveSku(id)"));
+    assert.ok(buy.indexOf("sku.nft.classId === 3") < buy.indexOf("callMintStatus"));
   });
 });

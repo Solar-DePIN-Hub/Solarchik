@@ -1,5 +1,5 @@
-import { TRAIN_GOAL_DAYS } from "./classes";
-import { offerFor } from "./fees.config";
+import { TRAIN_GOAL_DAYS } from "./classes.ts";
+import { PAID_ONLY_BASE_SKUS, offerFor } from "./fees.config.ts";
 import type { AgentNft, LiveSku, PredLane, PredictionFocus } from "./types";
 
 const VAULT = "MarketVault111111111111111111111111111";
@@ -36,7 +36,7 @@ function pred(focus: PredictionFocus, market: string, lanes: PredLane[], edgeBps
   };
 }
 
-/** Path 1: ready-to-run agents. Free is one per wallet. Pro is paid and fee-free. */
+/** Path 1: ready-to-run agents. Free is one per wallet. Pro is paid and fee-free. Combo is Pro only. */
 export function liveCatalog(): LiveSku[] {
   const now = Date.now();
   const base: LiveSku[] = [
@@ -119,7 +119,7 @@ export function liveCatalog(): LiveSku[] {
 }
 
 function withTiers(rows: LiveSku[]): LiveSku[] {
-  const free = rows.map((sku) => {
+  const free = rows.filter((sku) => !PAID_ONLY_BASE_SKUS.has(sku.id)).map((sku) => {
     const offer = offerFor(sku.id);
     return { ...sku, priceSol: offer.priceSol, nft: { ...sku.nft, tier: offer.tier } };
   });

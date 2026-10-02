@@ -3849,6 +3849,10 @@ export const useAgents = create<AgentsState>((set, get) => ({
     const sku = liveCatalog().find((s) => s.id === id);
     if (!sku) return false;
     const tier = sku.nft.tier === "free" ? "free" : "pro";
+    if (tier === "free" && sku.nft.classId === 3) {
+      set({ notice: "Combo лише платний (Pro): безкоштовно не мінтиться і не переноситься. Нічого не списано." });
+      return false;
+    }
     if (tier === "free" && get().nfts.some((n) => n.owner === wallet.pubkey && n.tier === "free")) {
       set({ notice: "Безкоштовний агент уже є. Pro без комісії з прибутку." });
       return false;

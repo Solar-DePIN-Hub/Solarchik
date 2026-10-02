@@ -1,4 +1,4 @@
-import { WORK_GOAL_SEC, workedSecOf } from "./classes";
+import { WORK_GOAL_SEC, workedSecOf } from "./classes.ts";
 import type { AgentNft } from "./types";
 
 /** On-chain Attributes for a Solarchik Core agent. Shared by the browser mint/update and the server co-signed mint. */

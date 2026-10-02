@@ -21,6 +21,19 @@ export function proMemo(roomWallet: string): string {
   return `solarchik-pro:${roomWallet}`;
 }
 
+/** Combo agent by its attributes (new: role=combo; old combos were class 4). */
+export function isComboAttrs(attrs: ReadonlyMap<string, string> | readonly { key: string; value: string }[]): boolean {
+  const map = attrs instanceof Map ? attrs : new Map((attrs as readonly { key: string; value: string }[]).map((a) => [a.key, a.value]));
+  return map.get("role") === "combo" || map.get("class") === "4";
+}
+
+export const COMBO_PAID_ONLY = "Combo лише платний (Pro): безкоштовно не мінтиться і не переноситься. Нічого не списано.";
+
+/** Combo is paid only: a free tier mint or re-issue of a combo is refused (null = allowed). */
+export function freeComboRefusal(tier: MintTier, combo: boolean): string | null {
+  return tier === "free" && combo ? COMBO_PAID_ONLY : null;
+}
+
 /** Tier lives in the asset URI. Only the collection update authority (the server) can change it. */
 export function mintUri(tier: MintTier): string {
   return `urn:solarchik:agent:${tier}`;

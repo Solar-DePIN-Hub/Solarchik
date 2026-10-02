@@ -17,6 +17,8 @@ import {
   CLIENT_SLOT_MS,
   checkProPaymentTx,
   freeAssetLabel,
+  freeComboRefusal,
+  isComboAttrs,
   legacyMintFitsPayment,
   mintModeFor,
   mintUri,
@@ -163,6 +165,9 @@ export async function buildCosigned(input: {
   attributes: Attr[];
 }): Promise<{ ok: true; asset: string; collection: string; txs: string[] } | { ok: false; reason: string }> {
   const { authority, wallet, tier, assetKey } = input;
+  // Last gate for every co-signed path (mint, re-issue): never a free combo.
+  const comboNo = freeComboRefusal(tier, isComboAttrs(input.attributes));
+  if (comboNo) return { ok: false, reason: comboNo };
   const umi: Umi = createUmi(input.rpcUrl ?? devnetUrl());
   const serverSigner = createSignerFromKeypair(umi, umi.eddsa.createKeypairFromSecretKey(authority.secretKey));
   const colKp = serverCollectionKeypair(authority);
@@ -227,6 +232,8 @@ export async function prepareMintOnServer(input: { proof: WalletProof | null; sk
   const sku = liveCatalog().find((s) => s.id === skuId);
   if (!sku) return { ok: false, reason: "Немає такого агента." };
   const tier: MintTier = sku.nft.tier === "free" ? "free" : "pro";
+  const comboNo = freeComboRefusal(tier, sku.nft.classId === 3);
+  if (comboNo) return { ok: false, reason: comboNo };
   const authority = mintAuthority();
   const decided = mintModeFor(tier, { hasKey: authority !== null, store: arbStore(), dev: Boolean(import.meta.env.DEV) });
   if (decided.mode === "closed") return { ok: false, reason: decided.reason };
@@ -332,6 +339,8 @@ export async function prepareReissueOnServer(input: { proof: WalletProof | null;
   if (!old.attrs.has("class")) return { ok: false, reason: "Це не агент Solarchik." };
 
   const tier: MintTier = paySig ? "pro" : "free";
+  const comboNo = freeComboRefusal(tier, isComboAttrs(old.attrs));
+  if (comboNo) return { ok: false, reason: comboNo };
   if (tier === "pro") {
     const paid = await verifyProPayment(paySig, wallet, true);
     if (!paid.ok) return paid;

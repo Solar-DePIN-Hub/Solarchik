@@ -503,6 +503,7 @@ export const WORK_EN: Record<string, string> = {
   "Не вдалося прочитати NFT ончейн.": "Could not read the NFT on-chain.",
   "Цей NFT уже в колекції сервера.": "This NFT is already in the server collection.",
   "Це не агент Solarchik.": "This is not a Solarchik agent.",
+  "Combo лише платний (Pro): безкоштовно не мінтиться і не переноситься. Нічого не списано.": "Combo is paid only (Pro): it cannot be minted or migrated for free. Nothing charged.",
   "Безкоштовний агент уже є. Для Pro додай підпис оплати Pro.": "You already have a free agent. For Pro, add the Pro payment signature.",
   "Не вдалося перевірити гаманець ончейн.": "Could not check the wallet on-chain.",
   "Немає NFT.": "No NFT.",
