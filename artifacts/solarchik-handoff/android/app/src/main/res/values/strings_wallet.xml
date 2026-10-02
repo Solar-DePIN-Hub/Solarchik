@@ -17,7 +17,7 @@
     <string name="lw_none_app">Connect Seed Vault, Phantom or Solflare (Mobile Wallet Adapter).</string>
     <string name="lw_none_builtin">No wallet app found on this device. Use the built-in devnet wallet to mint and buy agents with free devnet test SOL.</string>
     <string name="lw_get_sol">Get devnet SOL</string>
-    <string name="lw_switch_app">Use a wallet app instead</string>
+    <string name="lw_switch_app">Other wallet app</string>
     <string name="err_d_no_devnet_sol">the built-in wallet has no devnet SOL yet, tap “Get devnet SOL” in More › Wallet</string>
     <string name="err_d_local_key">the built-in wallet key is unavailable on this device</string>
     <string name="lw_enough">The built-in wallet already has enough devnet SOL for a Pro buy.</string>

@@ -16,7 +16,7 @@
     <string name="lw_none_app">Підключи Seed Vault, Phantom чи Solflare (Mobile Wallet Adapter).</string>
     <string name="lw_none_builtin">На пристрої немає застосунку-гаманця. Скористайся вбудованим devnet-гаманцем, щоб мінтити й купувати агентів за безкоштовні тестові devnet SOL.</string>
     <string name="lw_get_sol">Отримати devnet SOL</string>
-    <string name="lw_switch_app">Підключити застосунок-гаманець</string>
+    <string name="lw_switch_app">Інший гаманець</string>
     <string name="err_d_no_devnet_sol">у вбудованому гаманці ще немає devnet SOL, натисни «Отримати devnet SOL» у Ще › Гаманець</string>
     <string name="err_d_local_key">ключ вбудованого гаманця недоступний на цьому пристрої</string>
     <string name="lw_enough">У вбудованому гаманці вже вистачає devnet SOL на купівлю Pro.</string>

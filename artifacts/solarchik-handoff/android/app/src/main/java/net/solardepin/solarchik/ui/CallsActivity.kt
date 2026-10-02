@@ -317,9 +317,6 @@ class CallsActivity : ComponentActivity() {
         column.addView(Ui.card(this, pad = 16).apply {
             addView(Ui.label(this@CallsActivity, getString(R.string.calls_note_label), Ui.GOLD))
             addView(Ui.top(Ui.text(this@CallsActivity, CallText.summary(this@CallsActivity, it), 16f, Ui.TEXT, 700).apply { setTextIsSelectable(true); setLineSpacing(0f, 1.2f); tag = "call-note" }, 6))
-            if (it.intent.isNotBlank() && it.text.isNotBlank() && it.text != it.intent) {
-                addView(Ui.top(Ui.muted(this@CallsActivity, it.text, 12f).apply { setTextIsSelectable(true) }, 8))
-            }
         })
 
         // post-call actions
@@ -330,10 +327,10 @@ class CallsActivity : ComponentActivity() {
         val r1 = Ui.row(this, gap = 8)
         val back = Ui.button(this, getString(R.string.calls_call_back), Ui.Btn.PRIMARY, R.drawable.ic_call) { dial(num) }.apply { tag = "call-back" }
         Ui.setEnabled(back, num.isNotBlank())
-        r1.addView(Ui.weight(back))
+        actions.addView(Ui.top(back, 10))
         val remindAt = CallNotes.Reminders.at(this, it.key)
         r1.addView(Ui.weight(Ui.button(this, getString(if (remindAt > 0) R.string.calls_remind_change else R.string.calls_remind), Ui.Btn.SECONDARY, R.drawable.ic_timer) { askRemind(it) }.apply { tag = "call-remind" }))
-        actions.addView(Ui.top(r1, 10))
+        actions.addView(Ui.top(r1, 8))
         if (remindAt > 0) {
             actions.addView(Ui.top(Ui.row(this, gap = 8).apply {
                 gravity = Gravity.CENTER_VERTICAL

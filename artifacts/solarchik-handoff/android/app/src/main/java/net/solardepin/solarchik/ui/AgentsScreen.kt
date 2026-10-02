@@ -296,8 +296,10 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
             pills.addView(Ui.pill(ctx, stLabel, stColor, filled = r.running || r.open != null))
             val ownedPaper = r.track != Track.PAPER || net.solardepin.solarchik.agents.Ownership.ownsSku(host.store.agents(), r.skuId)
             if (r.track == Track.PAPER && r.key.startsWith("paper:")) pills.addView(Ui.pill(ctx, ctx.getString(if (ownedPaper) R.string.desk_owned else R.string.desk_not_owned_pill), if (ownedPaper) Ui.GREEN else Ui.MUTED))
-            pills.addView(Ui.pill(ctx, ctx.getString(if (r.tier == AgentTier.PRO) R.string.tier_pro else R.string.tier_free), if (r.tier == AgentTier.PRO) Ui.GOLD else Ui.CYAN))
+            val tierPill = Ui.pill(ctx, ctx.getString(if (r.tier == AgentTier.PRO) R.string.tier_pro else R.string.tier_free), if (r.tier == AgentTier.PRO) Ui.GOLD else Ui.CYAN)
+            // three pills do not fit the narrow column on a phone ("Безкошт|овний" broke mid-word): tier goes on its own line
             col.addView(pills)
+            if (pills.childCount >= 2) col.addView(Ui.top(tierPill.apply { layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT) }, 6)) else pills.addView(tierPill)
             col.addView(Ui.top(Ui.text(ctx, AgentNames.display(ctx, r.name), 15f, Ui.TEXT, 800), 6))
             sku?.let { col.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.mint_lanes, lanes(it.lanes)), 11f, accent, 700), 2)) }
             r.open?.let { p ->
