@@ -528,7 +528,7 @@ describe("prediction brain: honest model label and player language", () => {
     assert.match(helper, /geminiTalk\(system, user/);
     assert.match(helper, /brain: "Gemini"/);
     assert.match(helper, /brain: "Grok"/);
-    assert.match(src, /brain,\n    \};/);
+    assert.match(src, /brain,\n {4}\};/);
     const store = readFileSync(new URL("./store.ts", import.meta.url), "utf8");
     assert.match(store, /brain: res\.ok \? res\.brain : undefined/);
     assert.match(store, /locale: typeof document !== "undefined" \? document\.documentElement\.lang : undefined,\n\s+focus: ask\.focus/);

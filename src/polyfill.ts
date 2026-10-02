@@ -123,6 +123,148 @@ class SolBuffer extends Uint8Array {
     this.view().setUint32(offset, value, true);
     return offset + 4;
   }
+  // Node Buffer integer API used by @solana/buffer-layout (SystemProgram.transfer, mints) and borsh.
+  readUInt16BE(offset = 0): number {
+    return this.view().getUint16(offset, false);
+  }
+  readUInt32BE(offset = 0): number {
+    return this.view().getUint32(offset, false);
+  }
+  readInt8(offset = 0): number {
+    return this.view().getInt8(offset);
+  }
+  readInt16LE(offset = 0): number {
+    return this.view().getInt16(offset, true);
+  }
+  readInt32LE(offset = 0): number {
+    return this.view().getInt32(offset, true);
+  }
+  readInt32BE(offset = 0): number {
+    return this.view().getInt32(offset, false);
+  }
+  writeUInt16BE(value: number, offset = 0): number {
+    this.view().setUint16(offset, value, false);
+    return offset + 2;
+  }
+  writeUInt32BE(value: number, offset = 0): number {
+    this.view().setUint32(offset, value, false);
+    return offset + 4;
+  }
+  writeInt8(value: number, offset = 0): number {
+    this.view().setInt8(offset, value);
+    return offset + 1;
+  }
+  writeInt16LE(value: number, offset = 0): number {
+    this.view().setInt16(offset, value, true);
+    return offset + 2;
+  }
+  writeInt32LE(value: number, offset = 0): number {
+    this.view().setInt32(offset, value, true);
+    return offset + 4;
+  }
+  writeInt32BE(value: number, offset = 0): number {
+    this.view().setInt32(offset, value, false);
+    return offset + 4;
+  }
+  readUIntLE(offset: number, byteLength: number): number {
+    let val = 0;
+    let mul = 1;
+    for (let i = 0; i < byteLength; i += 1) {
+      val += this[offset + i] * mul;
+      mul *= 0x100;
+    }
+    return val;
+  }
+  readUIntBE(offset: number, byteLength: number): number {
+    let val = 0;
+    for (let i = 0; i < byteLength; i += 1) val = val * 0x100 + this[offset + i];
+    return val;
+  }
+  readIntLE(offset: number, byteLength: number): number {
+    const val = this.readUIntLE(offset, byteLength);
+    const limit = 2 ** (8 * byteLength - 1);
+    return val >= limit ? val - limit * 2 : val;
+  }
+  readIntBE(offset: number, byteLength: number): number {
+    const val = this.readUIntBE(offset, byteLength);
+    const limit = 2 ** (8 * byteLength - 1);
+    return val >= limit ? val - limit * 2 : val;
+  }
+  writeUIntLE(value: number, offset: number, byteLength: number): number {
+    let v = Math.floor(value);
+    for (let i = 0; i < byteLength; i += 1) {
+      this[offset + i] = v % 0x100;
+      v = Math.floor(v / 0x100);
+    }
+    return offset + byteLength;
+  }
+  writeUIntBE(value: number, offset: number, byteLength: number): number {
+    let v = Math.floor(value);
+    for (let i = byteLength - 1; i >= 0; i -= 1) {
+      this[offset + i] = v % 0x100;
+      v = Math.floor(v / 0x100);
+    }
+    return offset + byteLength;
+  }
+  writeIntLE(value: number, offset: number, byteLength: number): number {
+    const v = value < 0 ? value + 2 ** (8 * byteLength) : value;
+    return this.writeUIntLE(v, offset, byteLength);
+  }
+  writeIntBE(value: number, offset: number, byteLength: number): number {
+    const v = value < 0 ? value + 2 ** (8 * byteLength) : value;
+    return this.writeUIntBE(v, offset, byteLength);
+  }
+  readBigUInt64LE(offset = 0): bigint {
+    return this.view().getBigUint64(offset, true);
+  }
+  readBigInt64LE(offset = 0): bigint {
+    return this.view().getBigInt64(offset, true);
+  }
+  writeBigUInt64LE(value: bigint, offset = 0): number {
+    this.view().setBigUint64(offset, BigInt(value), true);
+    return offset + 8;
+  }
+  writeBigInt64LE(value: bigint, offset = 0): number {
+    this.view().setBigInt64(offset, BigInt(value), true);
+    return offset + 8;
+  }
+  readFloatLE(offset = 0): number {
+    return this.view().getFloat32(offset, true);
+  }
+  readDoubleLE(offset = 0): number {
+    return this.view().getFloat64(offset, true);
+  }
+  writeFloatLE(value: number, offset = 0): number {
+    this.view().setFloat32(offset, value, true);
+    return offset + 4;
+  }
+  writeDoubleLE(value: number, offset = 0): number {
+    this.view().setFloat64(offset, value, true);
+    return offset + 8;
+  }
+  readFloatBE(offset = 0): number {
+    return this.view().getFloat32(offset, false);
+  }
+  readDoubleBE(offset = 0): number {
+    return this.view().getFloat64(offset, false);
+  }
+  writeFloatBE(value: number, offset = 0): number {
+    this.view().setFloat32(offset, value, false);
+    return offset + 4;
+  }
+  writeDoubleBE(value: number, offset = 0): number {
+    this.view().setFloat64(offset, value, false);
+    return offset + 8;
+  }
+  equals(other: Uint8Array): boolean {
+    return SolBuffer.compare(this, other) === 0;
+  }
+  slice(start?: number, end?: number): SolBuffer {
+    return this.subarray(start, end) as SolBuffer;
+  }
+  toJSON(): { type: "Buffer"; data: number[] } {
+    return { type: "Buffer", data: [...this] };
+  }
 }
 
 const g = globalThis as typeof globalThis & { Buffer?: typeof SolBuffer; global?: typeof globalThis };

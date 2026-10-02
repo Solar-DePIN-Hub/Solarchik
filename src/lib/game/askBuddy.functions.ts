@@ -327,8 +327,12 @@ async function speakGemini(text: string, voice: PetVoice): Promise<{ audio: stri
   };
   for (const model of TTS_MODELS) {
     try {
-      const { ok, json } = await geminiGenerate(model, body, 18_000);
-      if (!ok) continue;
+      const { ok, status, json } = await geminiGenerate(model, body, 18_000);
+      if (!ok) {
+        // 429 = Gemini TTS quota (preview TTS models have small free-tier limits); the client then uses the device voice.
+        console.warn("speakGemini", model, status);
+        continue;
+      }
       const parts = (json as { candidates?: { content?: { parts?: { inlineData?: { mimeType?: string; data?: string } }[] } }[] })
         ?.candidates?.[0]?.content?.parts;
       const inline = parts?.find((p) => p.inlineData?.data)?.inlineData;
