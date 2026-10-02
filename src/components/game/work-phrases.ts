@@ -1170,4 +1170,5 @@ export const WORK_EN: Record<string, string> = {
   "СИМУЛЯЦІЯ": "SIMULATION",
   "1д": "1d",
   "2д": "2d",
+  "Роботи": "Jobs",
 };

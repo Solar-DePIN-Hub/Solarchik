@@ -1286,7 +1286,7 @@ function RoomPanel() {
 					children: [
 						/* @__PURE__ */ jsx("div", {
 							className: "text-xs uppercase tracking-wide text-muted",
-							children: "Store"
+							children: "Магазин"
 						}),
 						/* @__PURE__ */ jsx("h2", {
 							className: "mt-1 font-medium",
@@ -1526,7 +1526,7 @@ function StorePanel() {
 			/* @__PURE__ */ jsxs("div", { children: [
 				/* @__PURE__ */ jsx("h2", {
 					className: "font-display text-xl leading-tight",
-					children: "Store"
+					children: "Магазин"
 				}),
 				/* @__PURE__ */ jsx("p", {
 					className: "mt-1 max-w-xl text-sm text-muted leading-normal",

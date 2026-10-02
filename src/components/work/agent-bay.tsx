@@ -13,7 +13,7 @@ const ICONS: Record<AgentKind, typeof IconPulse> = {
 };
 
 const TITLES: Record<AgentKind, string> = {
-  prediction: "Prediction",
+  prediction: "Прогнози",
   dex: "Арбітраж",
 };
 
@@ -54,7 +54,7 @@ export function AgentBay({ runtime, nft }: { runtime: AgentRuntime; nft: AgentNf
         <>
           <dl className="grid grid-cols-3 gap-2 text-xs">
             <Stat label="XP" value={String(nft.metrics.xp)} />
-            <Stat label="Jobs" value={String(nft.metrics.jobs)} />
+            <Stat label="Роботи" value={String(nft.metrics.jobs)} />
             <Stat
               label="PnL"
               value={`${nft.metrics.pnlSol >= 0 ? "+" : ""}${nft.metrics.pnlSol.toFixed(3)}`}

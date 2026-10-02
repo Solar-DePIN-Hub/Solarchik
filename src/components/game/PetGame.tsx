@@ -552,7 +552,7 @@ export function PetGame({ save, t, now: nowProp, onBack, onSetup, onChat, onSecr
             onWork();
           }}
         >
-          Work
+          {t("pet.work")}
         </button>
       )}
 
