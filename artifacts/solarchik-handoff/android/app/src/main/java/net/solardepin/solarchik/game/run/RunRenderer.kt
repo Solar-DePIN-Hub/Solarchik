@@ -59,6 +59,23 @@ class RunRenderer(
         textAlign = Paint.Align.CENTER; style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND
     }
     private val rect = RectF()
+    private val outlineCache = java.util.IdentityHashMap<Bitmap, Bitmap>()
+    private val outlinePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+    /** The sprite with a baked dark ink outline ([frac] of its height), cached per bitmap. */
+    private fun outlined(img: Bitmap, frac: Double): Bitmap = outlineCache.getOrPut(img) {
+        val p = max(2, (img.height * frac).toInt())
+        val out = Bitmap.createBitmap(img.width + 2 * p, img.height + 2 * p, Bitmap.Config.ARGB_8888)
+        val cv = Canvas(out)
+        outlinePaint.colorFilter = PorterDuffColorFilter(0xFF1C140E.toInt(), PorterDuff.Mode.SRC_IN)
+        for (k in 0 until 16) {
+            val a = k * PI / 8
+            cv.drawBitmap(img, (p + cos(a) * p).toFloat(), (p + sin(a) * p).toFloat(), outlinePaint)
+        }
+        outlinePaint.colorFilter = null
+        cv.drawBitmap(img, p.toFloat(), p.toFloat(), outlinePaint)
+        out
+    }
     private val path = Path()
     private val path2 = Path()
     private var alpha = 1f
@@ -124,9 +141,15 @@ class RunRenderer(
     private fun blit(
         c: Canvas, img: Bitmap?, feetX: Double, feetY: Double, hgt: Double,
         squash: Double = 0.0, stretch: Double = 0.0, flip: Boolean = false, a: Double = 1.0, rot: Double = 0.0,
-        shadow: Boolean = false, tint: Int = 0, tintA: Double = 0.0,
+        shadow: Boolean = false, tint: Int = 0, tintA: Double = 0.0, outline: Double = 0.0,
     ): Boolean {
         if (img == null || img.width <= 0 || img.height <= 0) return false
+        if (outline > 0) {
+            // same feet/height as the bare sprite; the ink ring sits just outside it
+            val o = outlined(img, outline)
+            val pad = (o.height - img.height) / 2.0 * hgt / img.height
+            return blit(c, o, feetX, feetY + pad, hgt + pad * 2, squash, stretch, flip, a, rot, shadow, tint, tintA)
+        }
         val sy = 1 - squash * 0.34 + stretch * 0.28
         val sx = (1 + squash * 0.22 - stretch * 0.12) * if (flip) -1 else 1
         val dw = hgt * img.width / img.height
@@ -428,7 +451,7 @@ class RunRenderer(
         c.drawRect((x + w - 2).toFloat(), (y - 18).toFloat(), (x + w + 3).toFloat(), (y + 4).toFloat(), solid(0xFF3A2A22.toInt()))
     }
 
-    private fun drawPlat(c: Canvas, x: Double, y: Double, w: Double, thick: Double, t: Double, glow: Double, skin: RunSkin, kind: PlatKind, live: Boolean) {
+    private fun drawPlat(c: Canvas, x: Double, y: Double, w: Double, thick: Double, t: Double, glow: Double, skin: RunSkin, kind: PlatKind, live: Boolean, dim: Double = 0.0) {
         if (kind == PlatKind.WIRE) {
             drawWire(c, x, y, w, t, live)
             return
@@ -438,60 +461,92 @@ class RunRenderer(
         val cell = if (flag) 0xFF6AAFD8.toInt() else skin.cell
         val deep = if (flag) 0xFF3E86C4.toInt() else skin.deep
         val hh = max(48.0, thick * 2.7)
-        val r = hh * 0.48
-        // ambient occlusion under the roof
+        // a real rooftop: solar modules on an aluminium deck, a clay-tile eave, a shadow under
+        val deckBot = y + hh * 0.56
+        val frame = mixInt(0xFFCBD3DA.toInt(), lip, 0.35)
+        val tile = mixInt(0xFFB65A34.toInt(), skin.band, 0.3)
+        val tileDark = mixInt(tile, 0xFF2A1810.toInt(), 0.45)
+        val tileHi = mixInt(tile, 0xFFFFE2C0.toInt(), 0.35)
+        // soft shadow under the roof
         fill.color = Color.BLACK
-        fill.shader = LinearGradient(0f, (y + hh).toFloat(), 0f, (y + hh + 26).toFloat(), rgba(20, 40, 20, 0.22), rgba(20, 40, 20, 0.0), Shader.TileMode.CLAMP)
-        roundRect(c, x + 6, y + hh - 4, w - 4, 30.0, 14.0, fill)
+        fill.shader = LinearGradient(0f, (y + hh - 6).toFloat(), 0f, (y + hh + 34).toFloat(), rgba(16, 30, 16, 0.3), rgba(16, 30, 16, 0.0), Shader.TileMode.CLAMP)
+        roundRect(c, x + 2, y + hh - 6, w - 4, 40.0, 18.0, fill)
         fill.shader = null
-        roundRect(c, x + 4, y + 8, w, hh, r, solid(Color.rgb(40, 70, 40), 0.16))
-        roundRect(c, x - 4, y - 5, w + 8, hh + 10, r + 3, solid(0xFF3A2C22.toInt()))
-        fill.color = Color.BLACK // shader alpha is multiplied by the paint alpha
-        fill.shader = LinearGradient(0f, y.toFloat(), 0f, (y + hh).toFloat(), color(cell), color(deep), Shader.TileMode.CLAMP)
-        fill.color = Color.argb(a255(1.0), 255, 255, 255)
-        roundRect(c, x, y - 1, w, hh, r, fill)
-        fill.shader = null
-        // solar cells on the face (skin grid colour), clipped to the pill
+        // ink silhouette
+        roundRect(c, x - 6, y - 6, w + 12, hh + 11, 12.0, solid(0xFF2A1E16.toInt()))
+        // clay-tile eave: one row of barrel tiles with rounded ends
+        roundRect(c, x - 3, deckBot - 2, w + 6, y + hh - deckBot + 2, 9.0, solid(tileDark))
         c.save()
-        rect.set(x.toFloat(), (y - 1).toFloat(), (x + w).toFloat(), (y - 1 + hh).toFloat())
-        path2.reset(); path2.addRoundRect(rect, r.toFloat(), r.toFloat(), Path.Direction.CW)
-        c.clipPath(path2)
-        stroke.color = color(skin.grid, 0.9)
-        stroke.strokeWidth = 1.2f
-        stroke.strokeCap = Paint.Cap.BUTT
-        val top = y + hh * 0.42
-        val cw = 22.0
-        var cx = x + 8
-        while (cx < x + w) {
-            c.drawLine(cx.toFloat(), top.toFloat(), (cx - 5).toFloat(), (y + hh).toFloat(), stroke)
-            cx += cw
+        rect.set((x - 3).toFloat(), (deckBot - 2).toFloat(), (x + w + 3).toFloat(), (y + hh).toFloat())
+        c.clipRect(rect)
+        val tw = 17.0
+        val tBot = y + hh - 2.5
+        var tx = x - 3
+        var ti = 0
+        while (tx < x + w + 3) {
+            roundRect(c, tx + 1, deckBot - 10, tw - 2, tBot - deckBot + 10, (tw - 2) / 2, solid(if (ti % 2 == 0) tile else mixInt(tile, tileDark, 0.18)))
+            roundRect(c, tx + 3.5, deckBot, 3.0, (tBot - deckBot) * 0.62, 1.5, solid(tileHi, 0.8))
+            tx += tw; ti++
         }
-        c.drawLine(x.toFloat(), (y + hh * 0.7).toFloat(), (x + w).toFloat(), (y + hh * 0.7).toFloat(), stroke)
-        // travelling glint
-        if (!reducedMotion) {
-            val gx = x + ((t * 120 + x * 0.37) % (w + 160)) - 80
-            path.reset()
-            path.moveTo(gx.toFloat(), (y - 2).toFloat()); path.lineTo((gx + 26).toFloat(), (y - 2).toFloat())
-            path.lineTo((gx + 6).toFloat(), (y + hh).toFloat()); path.lineTo((gx - 20).toFloat(), (y + hh).toFloat()); path.close()
-            c.drawPath(path, solid(Color.WHITE, 0.14))
-        }
-        // darker base band
-        c.drawRect(x.toFloat(), (y + hh * 0.86).toFloat(), (x + w).toFloat(), (y + hh).toFloat(), solid(deep, 0.65))
         c.restore()
-        roundRect(c, x, y - 1, w, hh * 0.4, r, solid(lip))
-        c.drawRect((x + 5).toFloat(), (y + hh * 0.26).toFloat(), (x + w - 5).toFloat(), (y + hh * 0.38).toFloat(), solid(cell))
-        c.drawRect((x + 5).toFloat(), (y + hh * 0.36).toFloat(), (x + w - 5).toFloat(), (y + hh * 0.39).toFloat(), solid(skin.band, 0.45))
-        roundRect(c, x + 16, y + 4, min(72.0, w * 0.24), max(5.0, hh * 0.1), 6.0, solid(Color.WHITE, 0.55))
-        circle(c, x + 16 + min(72.0, w * 0.24) + 8, y + 6.5, 2.4, solid(Color.WHITE, 0.5))
-        stroke.color = rgba(255, 255, 255, 0.28)
-        stroke.strokeWidth = 2f
-        stroke.strokeCap = Paint.Cap.ROUND
-        val seams = max(1, floor(w / 120).toInt())
-        for (i in 1 until seams) {
-            val sx = (x + (w * i) / seams).toFloat()
-            c.drawLine(sx, (y + hh * 0.42).toFloat(), sx, (y + hh * 0.72).toFloat(), stroke)
+        // gutter
+        c.drawRect((x - 4).toFloat(), (deckBot - 3).toFloat(), (x + w + 4).toFloat(), (deckBot + 1.5).toFloat(), solid(mixInt(frame, 0xFF1C140E.toInt(), 0.35)))
+        // deck + modules
+        roundRect(c, x - 1, y - 3, w + 2, deckBot - y + 1, 7.0, solid(frame))
+        val n = max(1, Math.round(w / 62.0).toInt())
+        val gap = 4.0
+        val mw = (w - 8 - (n - 1) * gap) / n
+        val mTop = y + 0.5
+        val mBot = deckBot - 3.5
+        fill.color = Color.BLACK
+        fill.shader = LinearGradient(0f, mTop.toFloat(), 0f, mBot.toFloat(), color(mixInt(cell, Color.WHITE, 0.12)), color(deep), Shader.TileMode.CLAMP)
+        fill.color = Color.argb(a255(1.0), 255, 255, 255)
+        stroke.color = color(skin.grid, 0.85)
+        stroke.strokeWidth = 1f
+        stroke.strokeCap = Paint.Cap.BUTT
+        for (m in 0 until n) {
+            val mx = x + 4 + m * (mw + gap)
+            rect.set(mx.toFloat(), mTop.toFloat(), (mx + mw).toFloat(), mBot.toFloat())
+            c.drawRoundRect(rect, 2.5f, 2.5f, fill)
+            val cols = max(2, Math.round(mw / 13).toInt())
+            for (k in 1 until cols) {
+                val lx = (mx + mw * k / cols).toFloat()
+                c.drawLine(lx, mTop.toFloat(), lx, mBot.toFloat(), stroke)
+            }
+            val my = ((mTop + mBot) / 2).toFloat()
+            c.drawLine(mx.toFloat(), my, (mx + mw).toFloat(), my, stroke)
+        }
+        fill.shader = null
+        // glint sweep across the glass
+        if (!reducedMotion) {
+            c.save()
+            rect.set(x.toFloat(), mTop.toFloat(), (x + w).toFloat(), mBot.toFloat())
+            c.clipRect(rect)
+            val gx = x + ((t * 140 + x * 0.37) % (w + 200)) - 100
+            path.reset()
+            path.moveTo(gx.toFloat(), mTop.toFloat()); path.lineTo((gx + 30).toFloat(), mTop.toFloat())
+            path.lineTo((gx + 14).toFloat(), mBot.toFloat()); path.lineTo((gx - 16).toFloat(), mBot.toFloat()); path.close()
+            c.drawPath(path, solid(Color.WHITE, 0.32))
+            path.reset()
+            path.moveTo((gx + 38).toFloat(), mTop.toFloat()); path.lineTo((gx + 46).toFloat(), mTop.toFloat())
+            path.lineTo((gx + 30).toFloat(), mBot.toFloat()); path.lineTo((gx + 22).toFloat(), mBot.toFloat()); path.close()
+            c.drawPath(path, solid(Color.WHITE, 0.2))
+            c.restore()
+        }
+        // ridge highlight where the feet land
+        c.drawRect((x + 3).toFloat(), (y - 2.5).toFloat(), (x + w - 3).toFloat(), (y - 0.5).toFloat(), solid(Color.WHITE, 0.55))
+        // dusk/night: the roof falls into the scene's light, the glass keeps a cool sheen
+        if (dim > 0.01) {
+            roundRect(c, x - 6, y - 6, w + 12, hh + 11, 12.0, solid(Color.rgb(14, 20, 48), dim))
+            c.drawRect((x + 3).toFloat(), (y - 2.5).toFloat(), (x + w - 3).toFloat(), (y - 0.5).toFloat(), solid(0xFFBFD8FF.toInt(), 0.5 * dim))
         }
         if (glow > 0) roundRect(c, x - 2, y - 8, w + 4, 14.0, 6.0, solid(skin.hi, 0.12 * glow))
+    }
+
+    private fun mixInt(a: Int, b: Int, t: Double): Int {
+        val u = t.coerceIn(0.0, 1.0)
+        fun ch(sh: Int) = (((a shr sh) and 0xFF) * (1 - u) + ((b shr sh) and 0xFF) * u).toInt()
+        return Color.rgb(ch(16), ch(8), ch(0))
     }
 
     private fun drawPortal(c: Canvas, x: Double, y: Double, t: Double) {
@@ -541,7 +596,7 @@ class RunRenderer(
             c.restore()
             return
         }
-        val r = if (gold) 14.0 else 12.0
+        val r = if (gold) 17.5 else 15.0
         c.restore()
         val yy = y + bob
         softGlow(c, x, yy, r * 2.4, if (gold) 0xFFFFD24A.toInt() else 0xFFFFB347.toInt(), 0.5)
@@ -559,13 +614,13 @@ class RunRenderer(
         }
         c.restore()
         c.scale(spin.toFloat(), 1f)
-        circle(c, 0.0, 1.5, r, solid(0xFF8A4A10.toInt()))
-        circle(c, 0.0, 0.0, r, solid(0xFF1C140E.toInt()))
+        circle(c, 0.0, 2.5, r + 1.5, solid(0xFF8A4A10.toInt()))
+        circle(c, 0.0, 0.0, r + 1.5, solid(0xFF1C140E.toInt()))
         fill.color = Color.BLACK // shader alpha is multiplied by the paint alpha
         fill.shader = RadialGradient((-r * 0.25).toFloat(), (-r * 0.3).toFloat(), (r * 1.15).toFloat(),
             intArrayOf(color(0xFFFFF6C4.toInt()), color(if (gold) 0xFFFFC44A.toInt() else 0xFFF0A24A.toInt()), color(0xFFD47A28.toInt())),
             floatArrayOf(0.05f, 0.55f, 1f), Shader.TileMode.CLAMP)
-        circle(c, 0.0, 0.0, r * 0.8, fill)
+        circle(c, 0.0, 0.0, r * 0.84, fill)
         fill.shader = null
         stroke.color = color(0xFFFFF2B0.toInt(), 0.7); stroke.strokeWidth = 1.4f
         circle(c, 0.0, 0.0, r * 0.52, stroke)
@@ -756,7 +811,7 @@ class RunRenderer(
         fill.shader = null
     }
 
-    private fun drawHero(c: Canvas, feetX: Double, feetY: Double, size: Double, phase: Double, grounded: Boolean, squash: Double, stretch: Double, vy: Double, rot: Double, a: Double, shadow: Boolean, hurt: Double = 0.0) {
+    private fun drawHero(c: Canvas, feetX: Double, feetY: Double, size: Double, phase: Double, grounded: Boolean, squash: Double, stretch: Double, vy: Double, rot: Double, a: Double, shadow: Boolean, hurt: Double = 0.0, clock: Double = 0.0) {
         // web drawHero: a bought robot runs on its own 4-frame strip (frame 4 in the air)
         val strip = if (robot != "stock") spr.robotRun(robot) else emptyList()
         val frame = if (strip.size >= 2) {
@@ -765,8 +820,14 @@ class RunRenderer(
             spr.heroFrame(grounded, vy, phase, squash)
         }
         val wobble = if (hurt > 0 && !reducedMotion) sin(hurt * 40) * 0.18 * hurt else 0.0
-        if (!blit(c, frame, feetX, feetY, size, squash, stretch, a = a, rot = rot + wobble, shadow = shadow, tint = 0xFF4830, tintA = hurt * 0.6)) {
+        if (!blit(c, frame, feetX, feetY, size, squash, stretch, a = a, rot = rot + wobble, shadow = shadow, tint = 0xFF4830, tintA = hurt * 0.6, outline = 0.026)) {
             circle(c, feetX, feetY - size / 2, size / 3, solid(0xFF7AD1FF.toInt(), a))
+        }
+        // the head panel catches the sun now and then
+        val gl = (clock * 0.55) % 1.0
+        if (gl < 0.14 && !reducedMotion && a > 0.5) {
+            val hs = 1 - squash * 0.34 + stretch * 0.28
+            sparkle(c, feetX + size * 0.08, feetY - size * hs * 0.94, size * 0.09 * sin(gl / 0.14 * PI), gl * 8, 0xFFFFFFFF.toInt(), 0.95)
         }
     }
 
@@ -833,7 +894,8 @@ class RunRenderer(
             c.translate((-w * 0.5).toFloat(), (-h * 0.55).toFloat())
         }
 
-        val heroH = min(h * 0.125, 84.0)
+        // drawn ~1.6x the web size for phone readability; the sim hitbox (PW/PH) is unchanged
+        val heroH = min(h * 0.2, 136.0)
         val hillTop = h * 0.87
         val playTop = h * 0.52
         val playBot = hillTop - 14
@@ -938,7 +1000,7 @@ class RunRenderer(
                 val x = p.x - camX
                 if (x + p.w < -40 || x > w + 40) continue
                 val live = s.grind && s.grounded && s.x >= p.x - 12 && s.x <= p.x + p.w + 12 && p.kind == PlatKind.WIRE
-                drawPlat(c, x, sy(p.y), p.w, thick, clock, s.fever + night * 0.45, skin, p.kind, live)
+                drawPlat(c, x, sy(p.y), p.w, thick, clock, s.fever + night * 0.45, skin, p.kind, live, dim = dusk * 0.12 + night * 0.3)
             }
         }
 
@@ -975,12 +1037,14 @@ class RunRenderer(
                         val u = (e.t * 3 + k / 3.0) % 1.0
                         circle(c, x - dir * (10 + u * 18), ey - 3 - u * 8, 2.0 + u * 3, solid(0xFFE8D9B0.toInt(), 0.45 * (1 - u)))
                     }
-                    if (!blit(c, spr.mite, x, feet, 44.0, squash = max(0.0, -step) * 0.7, stretch = max(0.0, step) * 0.35, flip = dir > 0, rot = dir * 0.14)) {
+                    val breathe = if (reducedMotion) 0.0 else 0.08 * (0.5 + 0.5 * sin(clock * 5 + e.x * 0.03))
+                    if (!blit(c, spr.mite, x, feet, 56.0, squash = max(0.0, -step) * 0.7, stretch = max(0.0, step) * 0.35 + breathe, flip = dir > 0, rot = dir * 0.14, outline = 0.035)) {
                         oval(c, x, feet - 12, 16.0, 10.0, solid(0xFF8A4A28.toInt()))
                     }
                 }
                 EnemyKind.DRONE -> {
-                    val size = if (e.boss) 74.0 else 62.0
+                    val size = if (e.boss) 82.0 else 70.0
+                    val hoverBob = if (reducedMotion) 0.0 else sin(clock * 3.1 + e.x * 0.02) * 3
                     // scan light under the drone + blinking beacon
                     fill.color = Color.BLACK
                     fill.shader = LinearGradient(0f, (ey - 8).toFloat(), 0f, (ey + 70).toFloat(), rgba(150, 220, 255, 0.28), rgba(150, 220, 255, 0.0), Shader.TileMode.CLAMP)
@@ -989,7 +1053,7 @@ class RunRenderer(
                     path.lineTo((x + 30).toFloat(), (ey + 70).toFloat()); path.lineTo((x - 30).toFloat(), (ey + 70).toFloat()); path.close()
                     c.drawPath(path, fill)
                     fill.shader = null
-                    if (!blit(c, spr.drone, x, ey, size)) oval(c, x, ey - 20, if (e.boss) 26.0 else 22.0, 16.0, solid(if (e.boss) 0xFF2A88C8.toInt() else 0xFF3D6A6A.toInt()))
+                    if (!blit(c, spr.drone, x, ey + hoverBob, size, outline = 0.03)) oval(c, x, ey - 20, if (e.boss) 26.0 else 22.0, 16.0, solid(if (e.boss) 0xFF2A88C8.toInt() else 0xFF3D6A6A.toInt()))
                     // rotor blur
                     if (!reducedMotion) oval(c, x, ey - size * 0.86, size * 0.42, 3.0 + abs(sin(clock * 40)) * 2, solid(Color.WHITE, 0.28))
                     if (floor(clock * 2.5 + e.x * 0.01).toInt() % 2 == 0) softGlow(c, x, ey - size * 0.45, 10.0, 0xFFFF4A3A.toInt(), 0.9)
@@ -1082,13 +1146,22 @@ class RunRenderer(
         if (!blink || s.phase == Phase.COUNTDOWN) {
             val rot = if (s.bonus) max(-0.5, min(0.55, s.vy / 860)) else if (sliding) -0.22 else if (!s.grounded) max(-0.12, min(0.12, s.vy / 3000)) else 0.0
             val charged = s.fever > 0 || s.combo >= 4 || s.grind
-            val squash = if (sliding) max(s.squash, 0.92) else s.squash
-            val stretch = if (sliding) 0.0 else s.stretch
-            oval(c, hx, hy + 3, heroH * 0.22, 6.0, solid(Color.rgb(22, 14, 10), 0.28))
+            // presentation squash/stretch on top of the sim's: a landing squish, a take-off stretch
+            val landU = (clock - landAt) / 0.2
+            val landSq = if (landU in 0.0..1.0 && !sliding && !reducedMotion) 0.3 * (1 - landU) * (1 - landU) else 0.0
+            val air = if (!s.grounded && !s.bonus && !reducedMotion) (if (s.vy < 0) min(0.42, -s.vy / 1500) else min(0.16, s.vy / 4000)) else 0.0
+            val squash = if (sliding) 1.0 else min(0.55, s.squash + landSq)
+            val stretch = if (sliding) 0.0 else min(1.0, s.stretch + air)
+            // contact shadow on the roof below, shrinking with height
+            val below = if (s.grounded || s.bonus) null else s.plats.filter { it.kind == PlatKind.ROOF && s.x >= it.x && s.x <= it.x + it.w && it.y >= s.y }.minByOrNull { it.y }
+            val groundY = if (below != null) sy(below.y) - 6 else hy
+            val shY = if (s.grounded) 1.0 else if (below == null) 0.0 else max(0.35, 1 - (groundY - hy) / 260)
+            if (shY > 0) oval(c, hx, groundY + 3, heroH * 0.26 * shY, 8.0 * shY, solid(Color.rgb(22, 14, 10), 0.3 * shY))
             heroGlow(c, hx, hy, heroH, charged)
             // red flinch: from the heart that was just lost, or straight from the sim's hit flash
             val hurt = max(max(0.0, 1 - (clock - hurtAt) / 0.45), if (s.flash > 0.3) min(1.0, s.flash / 0.72) else 0.0)
-            drawHero(c, hx, hy, heroH * if (sliding) 0.78 else 1.0, s.runPhase, s.grounded, squash, stretch, s.vy, rot, 1.0, shadow = true, hurt = hurt)
+            // sliding: a low, wide tuck so the art clears drones the way the 24-unit slide box does
+            drawHero(c, hx, hy, heroH * if (sliding) 0.5 else 1.0, s.runPhase, s.grounded, squash, stretch, s.vy, rot, 1.0, shadow = true, hurt = hurt, clock = clock)
             if (s.shield > 0) {
                 // shield bubble (native: the web shows the shield only in the HUD)
                 val cy = hy - heroH * 0.48
@@ -1156,7 +1229,7 @@ class RunRenderer(
         text.typeface = displayFace ?: textFace ?: Typeface.DEFAULT_BOLD
         outline.typeface = text.typeface
         for (pop in s.pops) {
-            val py = sy(pop.y)
+            val py = sy(pop.y) - 34 // clear of the larger hero art
             if (py < 78 || py > h - 24) continue
             val age = clock - (popBorn[pop] ?: clock)
             val a = min(1.0, pop.life * 2)

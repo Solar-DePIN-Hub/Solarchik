@@ -465,48 +465,61 @@ class SkinSwatch(ctx: Context, private val skin: RunSkin) : View(ctx) {
     private val flag = skin == RunSkin.FLAG
     private val cell = if (flag) 0xFF6AAFD8.toInt() else skin.cell
     private val deep = if (flag) 0xFF3E86C4.toInt() else skin.deep
+    private val lip = if (flag) 0xFFF0C14D.toInt() else skin.lip
+    // same palette rules as the run's rooftop (RunRenderer.drawPlat)
+    private val frame = Ui.blend(0xFFCBD3DA.toInt(), lip, 0.35f)
+    private val tile = Ui.blend(0xFFB65A34.toInt(), skin.band, 0.3f)
+    private val tileDark = Ui.blend(tile, 0xFF2A1810.toInt(), 0.45f)
     private var skyShader: Shader? = null
-    private var roofShader: Shader? = null
+    private var glassShader: Shader? = null
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         val hf = h.toFloat()
         skyShader = LinearGradient(0f, 0f, 0f, hf, 0xFF8FD3FF.toInt(), 0xFFD8F2C8.toInt(), Shader.TileMode.CLAMP)
-        roofShader = LinearGradient(0f, hf * 0.48f, 0f, hf * 0.82f, cell, deep, Shader.TileMode.CLAMP)
+        glassShader = LinearGradient(0f, hf * 0.46f, 0f, hf * 0.64f, Ui.blend(cell, Color.WHITE, 0.12f), deep, Shader.TileMode.CLAMP)
     }
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-        val lip = if (flag) 0xFFF0C14D.toInt() else skin.lip
-        // sky dot + sun
         p.shader = skyShader
         r.set(0f, 0f, w, h)
         canvas.drawRoundRect(r, h * 0.22f, h * 0.22f, p)
         p.shader = null
         p.color = 0xFFFFD24A.toInt()
         canvas.drawCircle(w * 0.76f, h * 0.24f, h * 0.1f, p)
-        val top = h * 0.48f
-        val bh = h * 0.34f
-        val rad = bh * 0.48f
-        p.color = 0xFF3A2C22.toInt()
-        r.set(w * 0.06f, top - 3, w * 0.94f, top + bh + 4)
-        canvas.drawRoundRect(r, rad + 3, rad + 3, p)
-        p.shader = roofShader
-        r.set(w * 0.09f, top, w * 0.91f, top + bh)
-        canvas.drawRoundRect(r, rad, rad, p)
+        val left = w * 0.08f
+        val right = w * 0.92f
+        val top = h * 0.44f
+        val deckBot = h * 0.66f
+        val bot = h * 0.84f
+        // ink silhouette, tile eave, deck, modules
+        p.color = 0xFF2A1E16.toInt()
+        r.set(left - 3, top - 3, right + 3, bot + 3); canvas.drawRoundRect(r, 8f, 8f, p)
+        p.color = tileDark
+        r.set(left, deckBot, right, bot); canvas.drawRoundRect(r, 6f, 6f, p)
+        val tw = (right - left) / 5
+        p.color = tile
+        for (i in 0 until 5) {
+            r.set(left + i * tw + 1, deckBot - 4, left + (i + 1) * tw - 1, bot - 2)
+            canvas.drawRoundRect(r, tw / 2, tw / 2, p)
+        }
+        p.color = frame
+        r.set(left, top, right, deckBot); canvas.drawRoundRect(r, 5f, 5f, p)
+        p.shader = glassShader
+        val mw = (right - left - 9) / 2
+        for (m in 0 until 2) {
+            r.set(left + 3 + m * (mw + 3), top + 2.5f, left + 3 + m * (mw + 3) + mw, deckBot - 2.5f)
+            canvas.drawRoundRect(r, 2f, 2f, p)
+        }
         p.shader = null
         p.color = skin.grid
-        p.strokeWidth = 1.5f
-        var x = w * 0.16f
-        while (x < w * 0.88f) {
-            canvas.drawLine(x, top + bh * 0.45f, x - 3, top + bh, p)
-            x += w * 0.12f
+        p.strokeWidth = 1f
+        for (m in 0 until 2) {
+            val mx = left + 3 + m * (mw + 3)
+            for (k in 1 until 3) canvas.drawLine(mx + mw * k / 3, top + 2.5f, mx + mw * k / 3, deckBot - 2.5f, p)
         }
-        p.color = lip
-        r.set(w * 0.09f, top, w * 0.91f, top + bh * 0.4f)
-        canvas.drawRoundRect(r, rad, rad, p)
         p.color = 0x8CFFFFFF.toInt()
-        r.set(w * 0.2f, top + 2, w * 0.42f, top + 5)
-        canvas.drawRoundRect(r, 3f, 3f, p)
+        r.set(left + 6, top + 3, left + mw * 0.7f, top + 5); canvas.drawRoundRect(r, 2f, 2f, p)
     }
 }
