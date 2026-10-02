@@ -907,6 +907,13 @@ export const WORK_EN: Record<string, string> = {
   "У NFT ще немає стратегії на ланцюгу. Збережи стратегію.": "The NFT has no on-chain strategy yet. Save a strategy.",
   "У гаманці вже": "The wallet already has",
   "У крана сервера скінчились devnet SOL.": "The server faucet is out of devnet SOL.",
+  "Не вистачає devnet SOL на гаманці кімнати. Натисни «Отримати devnet SOL» і спробуй ще раз.":
+    "Not enough devnet SOL in the room wallet. Tap “Get devnet SOL” and try again.",
+  "Devnet зараз перевантажений. Спробуй за хвилину.": "Devnet is overloaded right now. Try again in a minute.",
+  "Мережа не встигла підтвердити. Спробуй ще раз.": "The network did not confirm in time. Try again.",
+  "Підпис відхилено.": "Signature declined.",
+  "Немає зв'язку з Devnet. Спробуй ще раз.": "No connection to Devnet. Try again.",
+  "Транзакція не пройшла на Devnet.": "The transaction failed on Devnet.",
   "Кран сервера порожній, а devnet-airdrop зараз обмежений. Спробуй пізніше або візьми SOL на faucet.solana.com.":
     "The server faucet is empty and the devnet airdrop is rate-limited right now. Try again later or get SOL at faucet.solana.com.",
   "Devnet-airdrop надіслав": "Devnet airdrop sent",

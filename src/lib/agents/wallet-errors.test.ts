@@ -15,3 +15,13 @@ test("reasonOf trims any thrown value", () => {
   assert.equal(reasonOf(null), "");
   assert.equal(reasonOf("x".repeat(300)).length, 160);
 });
+
+test("chain errors become one actionable line (no raw web3 text)", async () => {
+  const { chainErrorText, NO_SOL_REASON } = await import("./wallet-errors.ts");
+  assert.equal(chainErrorText(new Error("Simulation failed. Message: Transaction simulation failed: Attempt to debit an account but found no record of a prior credit.. Logs: []")), NO_SOL_REASON);
+  assert.equal(chainErrorText(new Error("custom program error: 0x1")), NO_SOL_REASON);
+  assert.match(chainErrorText(new Error("429 Too Many Requests")), /перевантажений/);
+  assert.match(chainErrorText(new Error("Blockhash not found")), /не встигла/);
+  assert.match(chainErrorText(new Error("User rejected the request")), /відхилено/);
+  assert.equal(chainErrorText(new Error("weird")), "Транзакція не пройшла на Devnet.");
+});

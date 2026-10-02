@@ -8,6 +8,7 @@ import { loadKeypair } from "./wallet";
 import { signProof } from "./wallet-sign";
 import { specHash, validateSpec, type StrategySpec } from "./strategy-spec";
 import type { StrategyInfo } from "./strategy.server";
+import { chainErrorText, NO_SOL_REASON } from "./wallet-errors";
 
 type Res = { ok: true; sig: string } | { ok: false; reason: string };
 const fail = (reason: string): Res => ({ ok: false, reason });
@@ -16,7 +17,25 @@ async function sendTxs(txs: string[]): Promise<string> {
   const kp = await loadKeypair();
   if (!kp) throw new Error("Немає ключа кімнати.");
   const { sendServerMint } = await import("./chain");
-  return sendServerMint(kp, txs);
+  try {
+    return await sendServerMint(kp, txs);
+  } catch (e) {
+    console.warn("[strategy] send failed", e);
+    throw new Error(chainErrorText(e));
+  }
+}
+
+/** Price + fees + a little rent headroom, before asking the server to build a buy. */
+const BUY_HEADROOM_LAMPORTS = 5_000_000;
+async function hasLamports(need: number): Promise<boolean | null> {
+  const kp = await loadKeypair();
+  if (!kp) return null;
+  try {
+    const { getConn } = await import("./chain");
+    return (await getConn().getBalance(kp.publicKey, "confirmed")) >= need;
+  } catch {
+    return null; // unknown: let the chain decide
+  }
 }
 
 async function confirmLoop<T extends { ok: boolean; reason?: string }>(route: string, body: Record<string, unknown>): Promise<T> {
@@ -67,6 +86,7 @@ export async function unlistOnChain(asset: string): Promise<Res> {
 export async function buyOnChain(asset: string, priceLamports: number): Promise<Res> {
   const kp = await loadKeypair();
   if (!kp) return fail("Немає ключа кімнати.");
+  if ((await hasLamports(priceLamports + BUY_HEADROOM_LAMPORTS)) === false) return fail(NO_SOL_REASON);
   const proof = await signProof(kp, "market", `buy:${asset}:${priceLamports}`);
   const prep = await callStrategy<{ ok: true; txs: string[] } | { ok: false; reason: string }>("market-prepare-buy", { proof, asset, priceLamports });
   if (!prep.ok) return fail(prep.reason);
