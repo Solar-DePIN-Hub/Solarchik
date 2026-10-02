@@ -28,7 +28,6 @@ const VIBE_LINE: Record<PetVibe, string> = {
 const CHAT_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.6-flash"] as const;
 const TTS_MODELS = ["gemini-2.5-flash-preview-tts", "gemini-3.1-flash-tts-preview"] as const;
 const STT_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.6-flash"] as const;
-const XAI_STT_MODEL = "grok-voice-transcribe-2.0";
 
 type HistoryItem = { role: "user" | "buddy"; text: string };
 
@@ -389,13 +388,14 @@ function audioExt(mime: string): string {
 
 // Fallback when every Gemini audio call fails (live grok.me hearBuddy returned ok:false for WAV,
 // WebM/Opus and MP3 on 2026-10-02 while chat and TTS worked). xAI REST STT: POST /v1/stt multipart.
+// Per docs.x.ai the endpoint takes NO `model` field (41029fc sent "grok-voice-transcribe-2.0" and the
+// live call still failed in ~0.3 s), option fields go first and `file` must be the LAST field.
 async function hearXai(audio: string, mime: string): Promise<string | null> {
   const key = xaiApiKey();
   if (!key) return null;
   try {
     const cleanMime = mime.split(";")[0] || "audio/webm";
     const form = new FormData();
-    form.append("model", XAI_STT_MODEL);
     form.append("file", new Blob([Buffer.from(audio, "base64")], { type: cleanMime }), `speech.${audioExt(cleanMime)}`);
     const res = await fetch("https://api.x.ai/v1/stt", {
       method: "POST",
@@ -403,11 +403,15 @@ async function hearXai(audio: string, mime: string): Promise<string | null> {
       body: form,
       signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn("hearXai stt", res.status, (await res.text().catch(() => "")).slice(0, 300));
+      return null;
+    }
     const json = (await res.json()) as { text?: unknown };
     const text = typeof json?.text === "string" ? clip(json.text, CHAT_MAX_LEN) : "";
     return text || null;
-  } catch {
+  } catch (e) {
+    console.warn("hearXai stt failed", String(e).slice(0, 200));
     return null;
   }
 }
