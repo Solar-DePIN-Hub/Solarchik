@@ -507,7 +507,7 @@
     <string name="sm_market">Strategy NFT market (devnet)</string>
     <string name="sm_market_hint">Devnet SOL only. 95% to the seller, 5% royalty to the treasury, one atomic transaction. While listed the NFT is frozen by the server so the seller cannot move it.</string>
     <string name="sm_loading">Reading the market…</string>
-    <string name="sm_empty">No listings yet. An NFT can be listed %1$d h after its last strategy change.</string>
+    <string name="sm_empty">No listings yet. A freshly minted NFT can be listed right away; after a strategy change, %1$d h later.</string>
     <string name="sm_mine">My Strategy NFTs</string>
     <string name="sm_mine_empty">No server-collection Strategy NFT in this wallet yet. Buy one above (or mint on the web).</string>
     <string name="sm_refresh">Refresh</string>

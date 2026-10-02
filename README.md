@@ -29,16 +29,17 @@ cd artifacts/solarchik-handoff/android
 A signed release needs your own keystore (`app/solarchik-release.jks` + `keystore.properties`, both gitignored). Without it `assembleRelease` produces an unsigned APK.
 
 ### For judges: Strategy NFTs on devnet
-The Agents tab → Strategy NFT market uses the server routes of the web app (devnet only). Real devnet addresses (server collection [`74Tyscw6gL9mDxvNsSSDuj6v4YHqFPCyUULirjLPeuQC`](https://explorer.solana.com/address/74Tyscw6gL9mDxvNsSSDuj6v4YHqFPCyUULirjLPeuQC?cluster=devnet)):
+The Agents tab → Strategy NFT market uses the server routes of the web app (devnet only). Rule: a fresh mint is not locked; every strategy change locks sale for 240 h on chain (FreezeDelegate under the server). Real devnet addresses (server collection [`74Tyscw6gL9mDxvNsSSDuj6v4YHqFPCyUULirjLPeuQC`](https://explorer.solana.com/address/74Tyscw6gL9mDxvNsSSDuj6v4YHqFPCyUULirjLPeuQC?cluster=devnet)):
 
-| Strategy NFT | Asset |
-| --- | --- |
-| Calm Hourly BTC | [`sZ4R4sbUtuGc8ygfmwHvG34zqL5LoSBRF5YkHDTDfVH`](https://core.metaplex.com/explorer/sZ4R4sbUtuGc8ygfmwHvG34zqL5LoSBRF5YkHDTDfVH?env=devnet) |
-| Momentum Rider 5m | [`AV8EgTtPaZydbrRDZtFFUfeuDR32jB6oHuRozUhKWEwX`](https://core.metaplex.com/explorer/AV8EgTtPaZydbrRDZtFFUfeuDR32jB6oHuRozUhKWEwX?env=devnet) |
-| Mean Revert Scout | [`2ijiD193pRVfhomaFtXSNuc13ki9XVwhxw7AFXL1dsK7`](https://core.metaplex.com/explorer/2ijiD193pRVfhomaFtXSNuc13ki9XVwhxw7AFXL1dsK7?env=devnet) |
-| Lock Test BTC Windows (strategy changed, transfer refused on chain, server-written APR) | [`BxXZvfVhEbBDqYRYu3pK8pkBfWq6YQ3GL4QevGm1TDip`](https://core.metaplex.com/explorer/BxXZvfVhEbBDqYRYu3pK8pkBfWq6YQ3GL4QevGm1TDip?env=devnet) |
+| Strategy NFT | Asset | State |
+| --- | --- | --- |
+| Calm Hourly BTC | [`sZ4R4sbUtuGc8ygfmwHvG34zqL5LoSBRF5YkHDTDfVH`](https://core.metaplex.com/explorer/sZ4R4sbUtuGc8ygfmwHvG34zqL5LoSBRF5YkHDTDfVH?env=devnet) | listed, 0.05 SOL |
+| Momentum Rider 5m | [`AV8EgTtPaZydbrRDZtFFUfeuDR32jB6oHuRozUhKWEwX`](https://core.metaplex.com/explorer/AV8EgTtPaZydbrRDZtFFUfeuDR32jB6oHuRozUhKWEwX?env=devnet) | listed, 0.12 SOL |
+| Mean Revert Scout | [`2ijiD193pRVfhomaFtXSNuc13ki9XVwhxw7AFXL1dsK7`](https://core.metaplex.com/explorer/2ijiD193pRVfhomaFtXSNuc13ki9XVwhxw7AFXL1dsK7?env=devnet) | listed, 0.08 SOL |
+| Market Test | [`8vSSKk1Eio44Ja265FR6WvfDr2QvmBPLsrtjnoEUHjWe`](https://core.metaplex.com/explorer/8vSSKk1Eio44Ja265FR6WvfDr2QvmBPLsrtjnoEUHjWe?env=devnet) | listed, bought (95/5), buyer changed the strategy → locked until 2026-10-12 16:50 UTC |
+| Lock Test BTC Windows | [`BxXZvfVhEbBDqYRYu3pK8pkBfWq6YQ3GL4QevGm1TDip`](https://core.metaplex.com/explorer/BxXZvfVhEbBDqYRYu3pK8pkBfWq6YQ3GL4QevGm1TDip?env=devnet) | strategy changed, transfer refused on chain, server-written APR; locked until 2026-10-12 16:38 UTC |
 
-Their 240 h sale lock (it starts at mint and at every strategy change) ends 2026-10-12 16:38 UTC; listing and buying on devnet come after that. Every signature: [docs/devnet-strategy-run.md](docs/devnet-strategy-run.md).
+Every signature: [docs/devnet-strategy-run.md](docs/devnet-strategy-run.md).
 
 ---
 

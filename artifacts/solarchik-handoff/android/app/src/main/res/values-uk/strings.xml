@@ -496,7 +496,7 @@
     <string name="sm_market">Ринок Strategy NFT (devnet)</string>
     <string name="sm_market_hint">Лише devnet SOL. 95% продавцю, 5% роялті в скарбницю, одна атомарна транзакція. На час лістингу NFT заморожений сервером, тож продавець не може його вивести.</string>
     <string name="sm_loading">Читаю ринок…</string>
-    <string name="sm_empty">Лістингів поки немає. NFT можна виставити через %1$d год після останньої зміни стратегії.</string>
+    <string name="sm_empty">Лістингів поки немає. Свіжий NFT можна виставити одразу, а після зміни стратегії — через %1$d год.</string>
     <string name="sm_mine">Мої Strategy NFT</string>
     <string name="sm_mine_empty">У цьому гаманці ще немає Strategy NFT з колекції сервера. Купи вище (або змінти у вебі).</string>
     <string name="sm_refresh">Оновити</string>

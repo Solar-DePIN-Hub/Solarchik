@@ -42,6 +42,12 @@ object StrategyRules {
 
     fun lockLeftMs(unlockSec: Long, nowMs: Long): Long = max(0L, unlockSec * 1000 - nowMs)
 
+    /** Mirrors strategy-spec.ts: a fresh mint (strategy v1) carries no sale lock (su = sc). */
+    fun mintUnlockSec(mintSec: Long): Long = mintSec
+
+    /** Mirrors strategy-spec.ts unlockSecFor: every strategy change locks sale for [SALE_LOCK_HOURS]. */
+    fun changeUnlockSec(changedSec: Long): Long = changedSec + SALE_LOCK_HOURS * 3600L
+
     /** "2д 3год" style; "" when open. */
     fun lockParts(leftMs: Long): Pair<Long, Long>? {
         if (leftMs <= 0) return null

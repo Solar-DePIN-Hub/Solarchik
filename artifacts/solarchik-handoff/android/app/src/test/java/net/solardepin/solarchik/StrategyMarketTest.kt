@@ -57,6 +57,10 @@ class StrategyMarketTest {
         assertNull(StrategyRules.lockParts(StrategyRules.lockLeftMs(100, 100_000)))
         assertEquals(9L to 23L, StrategyRules.lockParts(StrategyRules.lockLeftMs(240 * 3600L, 3_600_000L)))
         assertEquals(9_500_000L to 500_000L, StrategyRules.splitSale(10_000_000))
+        // Lock follows a strategy change, not the mint.
+        val mint = 1_790_000_000L
+        assertNull(StrategyRules.lockParts(StrategyRules.lockLeftMs(StrategyRules.mintUnlockSec(mint), mint * 1000)))
+        assertEquals(10L to 0L, StrategyRules.lockParts(StrategyRules.lockLeftMs(StrategyRules.changeUnlockSec(mint + 60), (mint + 60) * 1000)))
         assertEquals("https://explorer.solana.com/tx/S?cluster=devnet", StrategyRules.explorerTx("S"))
     }
 
