@@ -4,7 +4,7 @@ import { create, createCollection } from "@metaplex-foundation/mpl-core";
 import type { Keypair } from "@solana/web3.js";
 import { liveCatalog } from "./catalog";
 import { attrList } from "./core-attrs";
-import { mergeAttrs, specAttrs, specFromStrategy, unlockSecFor } from "./strategy-spec";
+import { mergeAttrs, mintSpecMeta, specAttrs, specFromStrategy } from "./strategy-spec";
 import { ROYALTY_BPS } from "./fees.config";
 import { PAY_WALLET } from "@/lib/game/pay";
 import { COLLECTION_NAME, type AgentNft } from "./types";
@@ -145,11 +145,11 @@ async function freeAlreadyOwned(wallet: string, except = ""): Promise<boolean> {
   return owned.some((a) => a.asset !== except && core.isFreeTier(a));
 }
 
-/** Attributes of a fresh co-signed mint: catalog stats + the on-chain strategy v1 (sale lock from now). */
+/** Attributes of a fresh co-signed mint: catalog stats + the on-chain strategy v1 (no sale lock: it follows a change). */
 export function mintAttributes(draft: AgentNft, nowMs: number): Attr[] {
   const nowSec = Math.floor(nowMs / 1000);
   const spec = specFromStrategy({ ...draft.strategy.prediction, risk: draft.brief?.risk });
-  return mergeAttrs(attrList(draft), specAttrs(spec, { version: 1, changedSec: nowSec, unlockSec: unlockSecFor(nowSec) }));
+  return mergeAttrs(attrList(draft), specAttrs(spec, mintSpecMeta(nowSec)));
 }
 
 /** Builds the co-signed Core mint (and the one-time collection setup) for the room wallet to pay. */
@@ -204,8 +204,9 @@ export async function buildCosigned(input: {
           creators: [{ address: publicKey(TREASURY), percentage: 100 }],
           ruleSet: { type: "None" },
         },
-        // Sale lock: frozen under the server until the 240 h after the strategy was set.
-        { type: "FreezeDelegate", frozen: true, authority: { type: "Address", address: serverSigner.publicKey } },
+        // No sale lock at mint: thawed and held by the owner. A strategy change (v2+) hands it to the server
+        // and freezes for 240 h; listing hands it to the server as escrow.
+        { type: "FreezeDelegate", frozen: false, authority: { type: "Owner" } },
       ],
     })
       .setFeePayer(payer)

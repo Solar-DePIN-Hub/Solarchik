@@ -254,8 +254,8 @@ export function ChainStrategyPanel({ nft }: { nft: AgentNft }) {
       <div>
         <h3 className="text-sm font-medium">Strategy NFT · стратегія на ланцюгу (devnet)</h3>
         <p className="mt-1 text-xs text-muted leading-normal">
-          Параметри й хеш живуть в атрибутах Core цього NFT. Сервер перевіряє правила й підписує запис; угоди поза стратегією сервер не приймає. Кожна зміна
-          ставить замок продажу на {SALE_LOCK_HOURS} год (FreezeDelegate на ланцюгу).
+          Параметри й хеш живуть в атрибутах Core цього NFT. Сервер перевіряє правила й підписує запис; угоди поза стратегією сервер не приймає. Свіжий мінт
+          можна виставити одразу. Кожна зміна стратегії ставить замок продажу на {SALE_LOCK_HOURS} год (FreezeDelegate на ланцюгу).
         </p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2 text-xs">
@@ -390,7 +390,7 @@ export function StrategyMarket() {
       </p>
       {msg ? <p className="text-xs break-words">{msg}</p> : null}
       {items.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">Лістингів немає. Свій NFT можна виставити через {SALE_LOCK_HOURS} год після останньої зміни стратегії.</p>
+        <p className="rounded-lg border border-dashed border-border p-6 text-sm text-muted">Лістингів немає. Свіжий NFT можна виставити одразу, а після зміни стратегії — через {SALE_LOCK_HOURS} год.</p>
       ) : (
         <ul className="grid gap-3">
           {items.map((it) => {
@@ -470,7 +470,7 @@ export function JudgeStart() {
       <ol className="text-xs text-muted list-decimal pl-4 grid gap-0.5">
         <li>Магазин → «Агенти»: візьми Free агента (мінт на devnet).</li>
         <li>Праця → «Strategy NFT»: зміни стратегію й запиши в NFT (замок продажу {SALE_LOCK_HOURS} год стартує знову).</li>
-        <li>Магазин → «Ринок»: купи виставлений Strategy NFT; свій можна виставити після замка.</li>
+        <li>Магазин → «Ринок»: купи виставлений Strategy NFT; свій свіжий можна виставити одразу, а після зміни стратегії — після замка.</li>
         <li>На кожній картці: посилання Explorer і «Перевірити APR».</li>
       </ol>
       <DevnetDemo />
@@ -478,10 +478,11 @@ export function JudgeStart() {
   );
 }
 
-/** The real devnet run: demo Strategy NFTs (seller wallet) and the lock test, each with Explorer links. */
+/** The real devnet run: listed demo Strategy NFTs, the market test (bought, then re-locked) and the lock test, with Explorer links. */
 function DevnetDemo() {
   const now = useNow();
   const d = DEVNET_STRATEGY;
+  const m = d.marketTest;
   const lockText = (unlockSec: number) => {
     const left = saleLockLeftMs(unlockSec, now);
     return left > 0 ? `замок до ${when(unlockSec * 1000)} (${lockLabel(left)})` : "замок знято";
@@ -496,9 +497,14 @@ function DevnetDemo() {
         {d.demos.map((n) => (
           <li key={n.asset} className="break-words">
             <Ext href={coreExplorerUrl(n.asset)}>{n.name}</Ext> · <Ext href={explorerUrl("address", n.asset)}>{short(n.asset)}</Ext> ·{" "}
-            <Ext href={explorerUrl("tx", n.mintTx)}>мінт</Ext> · {lockText(n.unlockSec)}
+            <Ext href={explorerUrl("tx", n.mintTx)}>мінт</Ext> · <Ext href={explorerUrl("tx", n.listTx)}>виставлено</Ext> · {n.priceSol} SOL
           </li>
         ))}
+        <li className="break-words">
+          <Ext href={coreExplorerUrl(m.asset)}>{m.name}</Ext> · <Ext href={explorerUrl("tx", m.listTx)}>виставлено</Ext> ·{" "}
+          <Ext href={explorerUrl("tx", m.buyTx)}>куплено (95% продавцю, 5% роялті)</Ext> · <Ext href={explorerUrl("tx", m.strategyTxs[m.strategyTxs.length - 1])}>зміна стратегії</Ext> ·{" "}
+          <Ext href={explorerUrl("tx", m.refusedTransferTx)}>переказ відхилено ланцюгом</Ext> · {lockText(m.unlockSec)}
+        </li>
         <li className="break-words">
           <Ext href={coreExplorerUrl(d.lockTest.asset)}>{d.lockTest.name}</Ext> · <Ext href={explorerUrl("tx", d.lockTest.strategyTx)}>зміна стратегії</Ext> ·{" "}
           <Ext href={explorerUrl("tx", d.lockTest.refusedTransferTx)}>переказ відхилено ланцюгом</Ext> · <Ext href={explorerUrl("tx", d.lockTest.resultsTx)}>запис результатів</Ext> ·{" "}

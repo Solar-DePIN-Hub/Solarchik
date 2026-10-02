@@ -19,6 +19,7 @@ import {
   exitByRule,
   listPriceOk,
   mergeAttrs,
+  mintLockToRelease,
   perfAttrs,
   perfFromAttrs,
   specAttrs,
@@ -174,7 +175,7 @@ export async function confirmStrategy(env: StrategyEnv, input: { asset: string; 
 
 /* ------------------------------ results ------------------------------ */
 
-export type SyncResult = { ok: true; closed: number; perfSig: string | null; thawSig: string | null; perf: Perf | null } | Fail;
+export type SyncResult = { ok: true; closed: number; perfSig: string | null; thawSig: string | null; releaseSig?: string | null; perf: Perf | null } | Fail;
 
 async function sendServer(env: StrategyEnv, umi: Umi, builder: ReturnType<typeof perfBuilder>): Promise<string> {
   const server = serverSigner(umi, env.authority as Keypair);
@@ -183,14 +184,40 @@ async function sendServer(env: StrategyEnv, umi: Umi, builder: ReturnType<typeof
   return encodeBase58(res.signature);
 }
 
+/**
+ * Mint-lock migration: a v1 asset minted while the lock wrongly started at mint, never changed through the
+ * server and not listed. The server rewrites su = sc (its own Attributes write). The thaw that follows in
+ * syncAsset is the normal "lock over" path.
+ */
+async function releaseMintLock(env: StrategyEnv, umi: Umi, got: Loaded, sql: GuardSql): Promise<string | null> {
+  const c = got.chain;
+  if (!c || !got.trusted) return null;
+  if (!mintLockToRelease(c, (await ledger.versionsOf(sql, String(got.asset.publicKey))).length)) return null;
+  const merged = mergeAttrs(got.attrs, [{ key: "su", value: String(c.changedSec) }]);
+  return sendServer(env, umi, perfBuilder(umi, env.authority as Keypair, got.asset, got.collection, merged));
+}
+
 /** Stop/take sweep, results write (only when they changed) and thaw after the lock (when not listed). */
 export async function syncAsset(env: StrategyEnv, asset: string): Promise<SyncResult> {
   const umi = umiOf(env);
-  const got = await load(env, umi, asset);
+  let got = await load(env, umi, asset);
   if ("ok" in got) return got;
-  const c = got.chain;
-  if (!c || !env.sql) return { ok: true, closed: 0, perfSig: null, thawSig: null, perf: null };
+  if (!got.chain || !env.sql) return { ok: true, closed: 0, perfSig: null, thawSig: null, perf: null };
   const sql = env.sql;
+  let releaseSig: string | null = null;
+  {
+    const l0 = await ledger.listingOfAsset(sql, asset);
+    if (!(l0 && (l0.status === "active" || l0.status === "pending"))) {
+      releaseSig = await releaseMintLock(env, umi, got, sql);
+      if (releaseSig) {
+        const again = await load(env, umi, asset);
+        if ("ok" in again) return again;
+        got = again;
+      }
+    }
+  }
+  const c = got.chain;
+  if (!c) return { ok: true, closed: 0, perfSig: null, thawSig: null, releaseSig, perf: null };
   // Whole seconds: pu on chain is in seconds, so a judge can recompute exactly at pu.
   const now = Math.floor(env.now() / 1000) * 1000;
   let closed = 0;
@@ -222,7 +249,7 @@ export async function syncAsset(env: StrategyEnv, asset: string): Promise<SyncRe
     const b = thawBuilder(umi, env.authority as Keypair, fresh, got.collection, true);
     if (b) thawSig = await sendServer(env, umi, b);
   }
-  return { ok: true, closed, perfSig, thawSig, perf };
+  return { ok: true, closed, perfSig, thawSig, releaseSig, perf };
 }
 
 /* ------------------------------ market ------------------------------ */

@@ -5,11 +5,15 @@
  * Refuses to run unless the RPC's genesis hash is devnet. The server clock is never shifted:
  * the 240 h sale lock is honoured exactly as in production.
  *
- *   PHASE=cycle   mint (v1, frozen) -> strategy change v2 (lock reset) -> list refused by the server,
- *                 transfer refused by Core on chain (failed tx kept) -> scripted trades in the ledger ->
- *                 server writes results/APR into the NFT -> judge recompute -> faucet drip
- *   PHASE=demo    mint demo Strategy NFTs to the seller (distinct v1 strategies), try to list (lock)
- *   PHASE=market  after the lock: list demo + cycle NFTs (escrow), buyer buys the cycle NFT (5% royalty)
+ * Rule: the 240 h sale lock follows every strategy change; a fresh mint (strategy v1) is not locked.
+ *
+ *   PHASE=cycle    mint (v1) -> strategy change v2 (240 h lock) -> list refused by the server,
+ *                  transfer refused by Core on chain (failed tx kept) -> scripted trades in the ledger ->
+ *                  server writes results/APR into the NFT -> judge recompute -> faucet drip
+ *   PHASE=demo     mint demo Strategy NFTs to the seller (distinct v1 strategies)
+ *   PHASE=migrate  release the old mint-time lock on the demo NFTs (server syncAsset: su = sc, thaw)
+ *   PHASE=market   list the demo NFTs; mint "Market Test", list it, buyer buys (5% royalty), buyer changes
+ *                  the strategy -> listing refused, transfer refused on chain (lock again)
  *
  * Run: JITI_ALIAS='{"@/":"<repo>/src/"}' PHASE=cycle npx jiti scripts/strategy-devnet-run.ts
  */
@@ -26,7 +30,7 @@ import { proofMessage, type ProofAction } from "../src/lib/agents/wallet-proof.t
 import { encodeBase58 } from "../src/lib/agents/base58.ts";
 import { PAY_WALLET } from "../src/lib/game/pay.ts";
 import * as S from "../src/lib/agents/strategy.server.ts";
-import { mergeAttrs, perfFromAttrs, specAttrs, specFromAttrs, specHash, unlockSecFor, validateSpec, verifyPerf, type StrategySpec } from "../src/lib/agents/strategy-spec.ts";
+import { mergeAttrs, mintSpecMeta, perfFromAttrs, specAttrs, specFromAttrs, specHash, validateSpec, verifyPerf, type StrategySpec } from "../src/lib/agents/strategy-spec.ts";
 import { faucetDrip, FAUCET_DEFAULTS } from "../src/lib/agents/faucet.server.ts";
 import { closePosition, openPosition, type PositionDeps } from "../src/lib/agents/positions-ledger.server.ts";
 import { fetchCoreAgent } from "../src/lib/agents/core-owned.server.ts";
@@ -120,9 +124,8 @@ async function mintFor(owner: Keypair, label: string, skuId: string, name: strin
   const draft = { ...sku.nft, tier: "pro" as const, asset: "", owner: owner.publicKey.toBase58(), mintedAt: now0, updatedAt: now0, track: "live" as const, graduated: false, metrics: { ...sku.nft.metrics, workedSec: 0, aprPct: null } };
   let attributes = mintAttributes(draft as never, now0);
   if (spec) {
-    // Strategy chosen at mint: still v1, sale lock from the mint second (same rule as any mint).
-    const sec = Math.floor(now0 / 1000);
-    attributes = mergeAttrs(attributes, specAttrs(spec, { version: 1, changedSec: sec, unlockSec: unlockSecFor(sec) }));
+    // Strategy chosen at mint: still v1 with the mint meta (no sale lock), same as any mint.
+    attributes = mergeAttrs(attributes, specAttrs(spec, mintSpecMeta(Math.floor(now0 / 1000))));
   }
   const assetKey = derivedKeypair(authority, `devnet-${label}:${now0}`);
   const built = await buildCosigned({ rpcUrl: RPC, authority, wallet: owner.publicKey.toBase58(), tier: "pro", assetKey, name, attributes });
@@ -279,38 +282,82 @@ if (PHASE === "demo") {
   }
 }
 
+if (PHASE === "migrate") {
+  // Corrected rule: the demo NFTs were minted while the lock wrongly started at mint (v1, never changed).
+  // The server's normal sync releases that lock (attrs su = sc, server-signed) and thaws (freeze authority back to the owner).
+  for (const d of state.demo ?? []) {
+    const before = await chain(d.asset);
+    log(`migrate ${d.name} before`, { version: before.spec?.version, changedAt: iso(before.spec?.changedSec), unlockAt: iso(before.spec?.unlockSec), freeze: before.freeze });
+    const r = await S.syncAsset(env, d.asset);
+    if (!r.ok) throw new Error(`${d.name}: ${r.reason}`);
+    if (r.releaseSig) sigLog(`migrate ${d.name} release mint lock (su = sc) tx`, [r.releaseSig]);
+    if (r.perfSig) sigLog(`migrate ${d.name} results attrs init (0 trades) tx`, [r.perfSig]);
+    if (r.thawSig) sigLog(`migrate ${d.name} thaw tx`, [r.thawSig]);
+    const after = await chain(d.asset);
+    log(`migrate ${d.name} after`, { version: after.spec?.version, hashOk: after.spec?.hashOk, changedAt: iso(after.spec?.changedSec), unlockAt: iso(after.spec?.unlockSec), freeze: after.freeze });
+  }
+  const lt = state.cycle?.asset;
+  if (lt) {
+    const r = await S.syncAsset(env, lt);
+    const c = await chain(lt);
+    log("migrate Lock Test (v2, changed) untouched", { sync: r.ok ? { releaseSig: r.releaseSig, thawSig: r.thawSig, perfSig: r.perfSig } : r, version: c.spec?.version, unlockAt: iso(c.spec?.unlockSec), freeze: c.freeze });
+  }
+}
+
 if (PHASE === "market") {
-  // Only after the real 240 h lock: list the demo NFTs, list + buy the cycle NFT.
+  // 1. list the demo NFTs at their prices (escrow: freeze + transfer delegate to the server)
   for (const d of state.demo ?? []) {
     const l = await S.prepareList(env, { proof: proof(seller, "market", S.listExtra(d.asset, d.priceLamports)), asset: d.asset, priceLamports: d.priceLamports });
     if (!l.ok) {
       log(`market list ${d.name}`, l);
       continue;
     }
-    sigLog(`market list ${d.name}`, await sendAll(seller, l.txs));
+    sigLog(`market list ${d.name} (${d.priceLamports / LAMPORTS_PER_SOL} SOL) tx`, await sendAll(seller, l.txs));
     log(`market confirm ${d.name}`, await S.confirmList(env, { asset: d.asset }));
+    const c = await chain(d.asset);
+    log(`market ${d.name} escrow`, { owner: c.owner, freeze: c.freeze, transferDelegate: c.transferDelegate });
   }
-  const asset = state.cycle?.asset;
-  if (asset) {
-    const price = 20_000_000;
-    const l = await S.prepareList(env, { proof: proof(seller, "market", S.listExtra(asset, price)), asset, priceLamports: price });
-    log("market list cycle NFT", l.ok ? "built" : l);
-    if (l.ok) {
-      sigLog("market list cycle NFT txs", await sendAll(seller, l.txs));
-      log("market confirm cycle", await S.confirmList(env, { asset }));
-      const before = { seller: await conn.getBalance(seller.publicKey), treasury: await conn.getBalance(new PublicKey(PAY_WALLET)) };
-      const b = await S.prepareBuy(env, { proof: proof(buyer, "market", S.buyExtra(asset, price)), asset, priceLamports: price });
-      if (!b.ok) throw new Error(b.reason);
-      const bs = await sendAll(buyer, b.txs);
-      sigLog("market buy cycle NFT tx", bs);
-      log("market confirm buy", await S.confirmBuy(env, { asset, sig: bs[0] }));
-      const after = { seller: await conn.getBalance(seller.publicKey), treasury: await conn.getBalance(new PublicKey(PAY_WALLET)) };
-      log("market seller +lamports (95%)", after.seller - before.seller);
-      log("market treasury +lamports (5% royalty)", after.treasury - before.treasury);
-      const c = await chain(asset);
-      log("market owner after buy", { owner: c.owner, buyer: buyer.publicKey.toBase58(), freeze: c.freeze, transferDelegate: c.transferDelegate });
-    }
-  }
+  // 2. Market Test: fresh mint under the new rule -> list -> buy
+  const m = await mintFor(seller, "market-test", "sku-pred-alpha-pro", "Market Test", null);
+  const asset = m.asset;
+  state.marketTest = { asset };
+  save();
+  sigLog("market Market Test mint tx", m.sigs);
+  const c0 = await chain(asset);
+  log("market Market Test after mint", { asset, owner: c0.owner, version: c0.spec?.version, hashOk: c0.spec?.hashOk, changedAt: iso(c0.spec?.changedSec), unlockAt: iso(c0.spec?.unlockSec), freeze: c0.freeze });
+  const price = 20_000_000;
+  const l = await S.prepareList(env, { proof: proof(seller, "market", S.listExtra(asset, price)), asset, priceLamports: price });
+  if (!l.ok) throw new Error(`Market Test list: ${l.reason}`);
+  sigLog("market Market Test list (0.02 SOL) tx", await sendAll(seller, l.txs));
+  log("market Market Test confirm list", await S.confirmList(env, { asset }));
+  const before = { seller: await conn.getBalance(seller.publicKey), treasury: await conn.getBalance(new PublicKey(PAY_WALLET)), buyer: await conn.getBalance(buyer.publicKey) };
+  const b = await S.prepareBuy(env, { proof: proof(buyer, "market", S.buyExtra(asset, price)), asset, priceLamports: price });
+  if (!b.ok) throw new Error(b.reason);
+  log("market Market Test split", { sellerLamports: b.sellerLamports, royaltyLamports: b.royaltyLamports });
+  const bs = await sendAll(buyer, b.txs);
+  sigLog("market Market Test buy tx", bs);
+  log("market Market Test confirm buy", await S.confirmBuy(env, { asset, sig: bs[0] }));
+  const after = { seller: await conn.getBalance(seller.publicKey), treasury: await conn.getBalance(new PublicKey(PAY_WALLET)), buyer: await conn.getBalance(buyer.publicKey) };
+  log("market seller +lamports (95%)", after.seller - before.seller);
+  log("market treasury +lamports (5% royalty)", after.treasury - before.treasury);
+  log("market buyer -lamports (price + fee)", before.buyer - after.buyer);
+  const c1 = await chain(asset);
+  log("market Market Test after buy", { owner: c1.owner, isBuyer: c1.owner === buyer.publicKey.toBase58(), freeze: c1.freeze, transferDelegate: c1.transferDelegate });
+  // 3. the new owner changes the strategy -> 240 h lock again
+  await new Promise((r) => setTimeout(r, 3000));
+  const v2 = { ...cycleSpec.spec, takePct: 90 };
+  const p2 = await S.prepareStrategy(env, { proof: proof(buyer, "strategy", S.strategyExtra(asset, v2)), asset, spec: v2 });
+  if (!p2.ok) throw new Error(p2.reason);
+  const s2 = await sendAll(buyer, p2.txs);
+  sigLog("market Market Test buyer strategy change txs", s2);
+  log("market Market Test confirm change", await S.confirmStrategy(env, { asset, version: p2.version, sig: s2[s2.length - 1] }));
+  const c2 = await chain(asset);
+  log("market Market Test after change", { owner: c2.owner, version: c2.spec?.version, hashOk: c2.spec?.hashOk, changedAt: iso(c2.spec?.changedSec), unlockAt: iso(c2.spec?.unlockSec), lockHours: c2.spec ? (c2.spec.unlockSec - c2.spec.changedSec) / 3600 : null, freeze: c2.freeze });
+  log("market Market Test list after change", await S.prepareList(env, { proof: proof(buyer, "market", S.listExtra(asset, price)), asset, priceLamports: price }));
+  const t = await transferWhileLocked(asset, buyer, seller);
+  sigLog("market Market Test transfer while locked (expected to FAIL on chain)", [t.sig]);
+  log("market Market Test transfer result", { err: t.err, logs: t.logs });
+  log("market Market Test owner after refused transfer", (await chain(asset)).owner);
   const ml = await S.marketListings(env);
   log("market listings", ml.ok ? ml.items.map((i) => ({ asset: i.asset, name: i.name, priceLamports: i.priceLamports })) : ml);
 }

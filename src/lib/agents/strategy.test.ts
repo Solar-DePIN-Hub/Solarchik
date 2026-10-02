@@ -29,6 +29,8 @@ import {
   specHash,
   splitSale,
   unlockSecFor,
+  mintSpecMeta,
+  mintLockToRelease,
   validateSpec,
   verifyPerf,
   explorerUrl,
@@ -173,6 +175,29 @@ describe("strategy spec: sale lock", () => {
     assert.equal(saleLockLeftMs(unlockSecFor(changed), (changed + 864_000) * 1000), 0);
     assert.equal(lockLabel(0), "відкрито");
     assert.equal(lockLabel(3_600_000 * 239 + 60_000 * 5), "239 год 05 хв");
+  });
+  it("does not start at mint: v1 unlocks at the mint second; a change locks 240 h", () => {
+    const mintSec = 1_790_000_000;
+    const m = mintSpecMeta(mintSec);
+    assert.deepEqual(m, { version: 1, changedSec: mintSec, unlockSec: mintSec });
+    assert.equal(saleLockLeftMs(m.unlockSec, mintSec * 1000), 0, "listable right after mint");
+    const back = specFromAttrs(specAttrs(base, m));
+    assert.equal(back?.unlockSec, back?.changedSec);
+    const changeSec = mintSec + 60;
+    assert.equal(saleLockLeftMs(unlockSecFor(changeSec), changeSec * 1000), 240 * 3_600_000, "any change re-locks for 240 h");
+  });
+  it("releases only an old-rule mint lock (v1, su > sc, never changed through the server)", () => {
+    const sc = 1_790_000_000;
+    assert.equal(mintLockToRelease({ version: 1, changedSec: sc, unlockSec: unlockSecFor(sc) }, 0), true);
+    assert.equal(mintLockToRelease({ version: 1, changedSec: sc, unlockSec: unlockSecFor(sc) }, 1), false, "a server-signed first save is a change");
+    assert.equal(mintLockToRelease({ version: 2, changedSec: sc, unlockSec: unlockSecFor(sc) }, 0), false, "v2+ keeps its lock");
+    assert.equal(mintLockToRelease({ version: 1, changedSec: sc, unlockSec: sc }, 0), false, "nothing to release");
+  });
+  it("the co-signed mint writes the v1 meta without a lock and does not freeze", () => {
+    const src = readFileSync(new URL("./mint.server.ts", import.meta.url), "utf8");
+    assert.match(src, /specAttrs\(spec, mintSpecMeta\(nowSec\)\)/);
+    assert.match(src, /type: "FreezeDelegate", frozen: false, authority: \{ type: "Owner" \}/);
+    assert.doesNotMatch(src, /type: "FreezeDelegate", frozen: true/);
   });
 });
 
@@ -320,6 +345,17 @@ describe("Core transactions (built offline)", () => {
     assert.equal(signedBy(r.txs[1], server), true, "B carries the server signature");
     assert.equal(String(b.message.accounts[0]), owner, "owner pays");
     for (const tx of r.txs) assert.ok(Buffer.from(tx, "base64").length <= 1232, "fits a packet");
+  });
+  it("fresh mint (thawed, owner-held freeze): a strategy change hands the freeze to the server and freezes", async () => {
+    const asset = fakeAsset({ owner, collection, attrAuth: "UpdateAuthority", freeze: { frozen: false, authority: "Owner" } });
+    const r = await buildStrategyTxs({ umi, authority, asset, collection, attrs, blockhash });
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.equal(r.txs.length, 2);
+    const [a, b] = r.txs.map(decode);
+    assert.equal(a.message.instructions.length, 1, "owner approves the freeze to the server");
+    assert.equal(b.message.instructions.length, 2, "write attrs + freeze (the 240 h lock)");
+    assert.equal(signedBy(r.txs[1], server), true);
   });
   it("server-locked asset: only tx B", async () => {
     const asset = fakeAsset({ owner, collection, attrAuth: "UpdateAuthority", freeze: { frozen: true, authority: server } });
@@ -523,15 +559,22 @@ describe("judge faucet (devnet fallback, rate-limited)", () => {
 });
 
 describe("devnet demo constants", () => {
-  it("are real-looking public addresses and signatures, locks end after the mint", async () => {
+  it("are real-looking public addresses and signatures; demos listed, change locks 240 h", async () => {
     const { DEVNET_STRATEGY: d } = await import("./devnet-demo.ts");
     const addr = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
     const sig = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
-    for (const a of [d.authority, d.collection, d.seller, d.buyer, d.lockTest.asset, ...d.demos.map((x) => x.asset)]) assert.match(a, addr);
-    for (const s of [...d.lockTest.mintTxs, d.lockTest.strategyTx, d.lockTest.refusedTransferTx, d.lockTest.resultsTx, ...d.demos.map((x) => x.mintTx)]) assert.match(s, sig);
+    const m = d.marketTest;
+    for (const a of [d.authority, d.collection, d.treasury, d.seller, d.buyer, d.lockTest.asset, m.asset, ...d.demos.map((x) => x.asset)]) assert.match(a, addr);
+    const sigs = [
+      ...d.lockTest.mintTxs, d.lockTest.strategyTx, d.lockTest.refusedTransferTx, d.lockTest.resultsTx,
+      ...d.demos.flatMap((x) => [x.mintTx, x.releaseTx, x.resultsInitTx, x.thawTx, x.listTx]),
+      m.mintTx, m.listTx, m.buyTx, ...m.strategyTxs, m.refusedTransferTx,
+    ];
+    for (const s of sigs) assert.match(s, sig);
+    assert.equal(new Set(sigs).size, sigs.length, "no signature reused");
     assert.equal(new Set(d.demos.map((x) => x.asset)).size, d.demos.length);
-    // Locks end 240 h after the 2026-10-02 run, not earlier.
-    for (const u of [d.lockTest.unlockSec, ...d.demos.map((x) => x.unlockSec)]) assert.ok(u - SALE_LOCK_HOURS * 3600 >= Date.UTC(2026, 9, 2) / 1000);
-    for (const x of d.demos) assert.ok(x.priceSol >= 0.05 && x.priceSol <= 0.2);
+    assert.deepEqual(d.demos.map((x) => x.priceSol), [0.05, 0.12, 0.08]);
+    // The changed NFTs stay locked 240 h past the 2026-10-02 run.
+    for (const u of [d.lockTest.unlockSec, m.unlockSec]) assert.ok(u - SALE_LOCK_HOURS * 3600 >= Date.UTC(2026, 9, 2) / 1000);
   });
 });

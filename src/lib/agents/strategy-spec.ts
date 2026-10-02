@@ -7,7 +7,8 @@
  *   strategy  lo lanes on, pw windows, ab ask band, ps stake SOL, pe edge bps,
  *             sr risk, sl stop %, tp take %, rl rules DSL, pf/pm/pwin derived
  *   identity  sx schema, sv version, sh hash (base58 sha256 of the canonical spec),
- *             sc lastChangedAt (unix s), su sale unlock (unix s) = sc + 240 h
+ *             sc lastChangedAt (unix s), su sale unlock (unix s): = sc at mint (v1, no lock),
+ *             = sc + 240 h after any strategy change
  *   results   rn trades, rw win rate %, rpnl realized SOL (all since sc),
  *             a7 / a30 / apr  APR % over 7 d / 30 d / since change, pu written at (unix s),
  *             jobs/wins/losses/pnl lifetime (server positions)
@@ -15,7 +16,7 @@
 import { encodeBase58 } from "./base58.ts";
 
 export const SPEC_SCHEMA = 1;
-/** Sale lock after a strategy change. */
+/** Sale lock after a strategy change (not at mint). */
 export const SALE_LOCK_HOURS = 240;
 export const SALE_LOCK_MS = SALE_LOCK_HOURS * 3_600_000;
 export const SPEC_STAKE_MIN = 0.005;
@@ -314,8 +315,22 @@ export function specFromAttrs(attrs: Map<string, string> | Attr[]): ChainSpec | 
 
 /* ------------------------------ sale lock ------------------------------ */
 
+/** Unlock after a strategy change: the sale lock runs 240 h from the change. */
 export function unlockSecFor(changedSec: number): number {
   return changedSec + SALE_LOCK_HOURS * 3600;
+}
+
+/** Spec meta written at mint: strategy v1, no sale lock (unlock = the mint second). */
+export function mintSpecMeta(nowSec: number): SpecMeta {
+  return { version: 1, changedSec: nowSec, unlockSec: nowSec };
+}
+
+/**
+ * A v1 spec still carrying the old mint-time lock (su > sc) and never changed through the server:
+ * under the corrected rule the lock only follows a strategy change, so this lock is released.
+ */
+export function mintLockToRelease(c: { version: number; changedSec: number; unlockSec: number }, serverVersions: number): boolean {
+  return c.version === 1 && c.unlockSec > c.changedSec && serverVersions === 0;
 }
 
 export function saleLockLeftMs(unlockSec: number, nowMs: number): number {
