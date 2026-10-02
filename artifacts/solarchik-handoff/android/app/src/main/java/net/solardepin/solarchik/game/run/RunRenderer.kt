@@ -1621,8 +1621,11 @@ class RunRenderer(
         val yb = sy(y0 + lane[1])
         val ey = by + 2.0 // the emitter under the hull
         if (!front) {
-            val bw = img.w * 0.95
-            val bh = img.h * 0.95
+            // drawn 1.45x (was 0.95x) so the mini-boss reads as a boss on a phone; anchored so the hull
+            // top (0.31 of the art above its centre) stays where it was, on the sim's stomp box
+            val bw = img.w * 1.45
+            val bh = img.h * 1.45
+            val hy = by + (bh - img.h * 0.95) * 0.31
             val hot = s.bossStage == 3
             val charging = s.bossStage == 2 && s.bossTele > 0
             val recoil = if (s.bossBeam > 0) -5.0 * min(1.0, s.bossBeam / 0.15) else 0.0
@@ -1631,20 +1634,20 @@ class RunRenderer(
             val jit = if (charging && !reducedMotion) (1 - s.bossTele / RunSim.BOSS_TELE) * 2.5 else 0.0
             c.save()
             c.translate((sin(clock * 71) * jit).toFloat(), (cos(clock * 83) * jit).toFloat())
-            c.rotate(tilt.toFloat(), bx.toFloat(), by.toFloat())
-            softGlow(c, bx, by + bh * 0.1, bh * 0.9, if (hot) 0xFFFF6A3A.toInt() else 0xFFFFC870.toInt(), if (hot) 0.4 else 0.18)
-            art(c, img, bx - bw / 2, by - bh * 0.55, bw, bh, filter = spr.art.cityFilter(if (s.classic) 0.0 else RunSim.cityMoodAt(s.distance), if (s.classic) 0.0 else RunSim.cityStormAt(s.distance)))
+            c.rotate(tilt.toFloat(), bx.toFloat(), hy.toFloat())
+            softGlow(c, bx, hy + bh * 0.1, bh * 0.9, if (hot) 0xFFFF6A3A.toInt() else 0xFFFFC870.toInt(), if (hot) 0.4 else 0.18)
+            art(c, img, bx - bw / 2, hy - bh * 0.55, bw, bh, filter = spr.art.cityFilter(if (s.classic) 0.0 else RunSim.cityMoodAt(s.distance), if (s.classic) 0.0 else RunSim.cityStormAt(s.distance)))
             // rotor blur and a charging eye
-            if (!reducedMotion) for (rx in doubleArrayOf(-bw * 0.38, bw * 0.38)) oval(c, bx + rx, by - bh * 0.38, bw * 0.13, 2.0 + abs(sin(clock * 50)) * 1.5, solid(Color.WHITE, 0.35))
+            if (!reducedMotion) for (rx in doubleArrayOf(-bw * 0.38, bw * 0.38)) oval(c, bx + rx, hy - bh * 0.38, bw * 0.13, 2.0 + abs(sin(clock * 50)) * 1.5, solid(Color.WHITE, 0.35))
             val charge = if (s.bossTele > 0) 1 - s.bossTele / RunSim.BOSS_TELE else if (s.bossBeam > 0) 1.0 else 0.2
-            if (!reducedMotion) drawBossLife(c, bx, by, bw, bh, clock, charge, hot)
-            softGlow(c, bx, by - bh * 0.08, 18 + 26 * charge, 0xFFFF5A2A.toInt(), 0.5 + 0.5 * charge)
+            if (!reducedMotion) drawBossLife(c, bx, hy, bw, bh, clock, charge, hot)
+            softGlow(c, bx, hy - bh * 0.08, 18 + 26 * charge, 0xFFFF5A2A.toInt(), 0.5 + 0.5 * charge)
             if (hot && !reducedMotion) {
                 for (k in 0 until 6) {
                     val u = (clock * 0.9 + k / 6.0) % 1.0
-                    circle(c, bx - 10 + hash(k + 2.0) * 20 - u * 20, by - bh * 0.4 - u * 60, 6 + u * 14, solid(0xFF3A3A40.toInt(), 0.45 * (1 - u)))
+                    circle(c, bx - 10 + hash(k + 2.0) * 20 - u * 20, hy - bh * 0.4 - u * 60, 6 + u * 14, solid(0xFF3A3A40.toInt(), 0.45 * (1 - u)))
                 }
-                if (floor(clock * 12).toInt() % 3 == 0) sparkle(c, bx + 20, by, 8.0, clock * 7, 0xFFFFD27A.toInt(), 0.9)
+                if (floor(clock * 12).toInt() % 3 == 0) sparkle(c, bx + 20, hy, 8.0, clock * 7, 0xFFFFD27A.toInt(), 0.9)
             }
             c.restore()
             // telegraph: the lane lights up, with a jump / slide cue on the robot's side
@@ -1833,13 +1836,18 @@ class RunRenderer(
         val playBot = hillTop - 14
         fun sy0(wy: Double) = playTop + ((wy - 140) / 150) * (playBot - playTop)
         // camera lift: on a high (double) jump the world eases down so the robot stays clear of the HUD
-        val headroom = h * 0.15 + heroH
-        val liftRaw = max(0.0, headroom - sy0(s.y))
-        val liftWant = if (s.bonus) 0.0 else liftRaw * liftRaw / (liftRaw + h * 0.05)
-        // smooth follow: the lift eases after its target (snaps on cuts: respawn, a new run, a jump in time)
+        // (the HUD chips end ~0.125h down and the robot stretches on take-off: aim its head at ~0.26h,
+        // never above ~0.2h)
+        val headroom = h * 0.28 + heroH
+        val liftRaw = if (s.bonus) 0.0 else max(0.0, headroom - sy0(s.y))
+        val liftWant = liftRaw * liftRaw / (liftRaw + h * 0.05)
+        // smooth follow: rises quickly with a jump, settles slowly after it (snaps on cuts: respawn,
+        // a new run, a jump in time); never lags so far that the robot reaches the HUD
         val camDt = clock - camT
         camT = clock
-        camLift = if (camDt <= 0 || camDt > 0.25 || reducedMotion) liftWant else camLift + (liftWant - camLift) * (1 - kotlin.math.exp(-camDt * 7))
+        camLift = if (camDt <= 0 || camDt > 0.25 || reducedMotion) liftWant
+        else camLift + (liftWant - camLift) * (1 - kotlin.math.exp(-camDt * (if (liftWant > camLift) 14.0 else 5.0)))
+        camLift = max(camLift, liftRaw - h * 0.06)
         val lift = camLift
         fun sy(wy: Double) = sy0(wy) + lift
         val sunX = w * 0.84

@@ -38,6 +38,7 @@ android {
             it.systemProperty("solarchik.live", (project.findProperty("live") as String?) ?: "")
             it.systemProperty("solarchik.chat", (project.findProperty("chat") as String?) ?: "")
             it.systemProperty("solarchik.runshots", (project.findProperty("runshots") as String?) ?: layout.buildDirectory.dir("screens-run").get().asFile.path)
+            it.systemProperty("solarchik.runvideo", (project.findProperty("runvideo") as String?) ?: "")
             it.systemProperty("solarchik.shots", (project.findProperty("shots") as String?) ?: layout.buildDirectory.dir("screens").get().asFile.path)
         }
     }

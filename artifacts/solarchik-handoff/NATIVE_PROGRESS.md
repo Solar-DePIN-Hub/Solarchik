@@ -413,7 +413,12 @@ Everything stays native Kotlin (Canvas + SoundPool/MediaPlayer). No engine was a
   - Mites have a walk cycle cut from the single painted sprite: the front and back leg pairs swing in opposite phase on the hip line while the shell bobs, rocks and breathes, and the eye glints.
   - Drones tilt with their bob and the wind, with a spinning two-blade rotor, a double-blink beacon, pulsing eyes and an occasional arc.
   - The boss has rotor blades, alternating red/green nav lights, a chasing panel strip that speeds up while charging, thruster glow, a shiver while charging and recoil when it fires.
-- **Hero and camera.** The hero leans into the run as speed climbs, on top of the existing squash/stretch. The camera lift now eases after its target, snapping only on cuts.
+- **Hero and camera.**
+  - The hero leans into the run as speed climbs, on top of the existing squash/stretch.
+  - Framing: the camera lift aims the robot's head at ~0.26 of the screen height (was 0.15) and never lets it rise above ~0.2, so high double jumps no longer hug or slip under the top HUD chips.
+  - The lift rises quickly with a jump and settles slowly after it, snapping only on cuts.
+- **Boss size.** The maintenance drone is drawn 1.45x (was 0.95x) so it reads as a boss on a phone. The art is anchored so the hull top stays on the sim's stomp box; the hitboxes are unchanged.
+- **Gameplay preview tool.** `RunVideoTest` (off unless `-Prunvideo=DIR`) renders consecutive 30 fps frames from the sim with the bot playing, using the real renderer + HUD, and logs the sound events. `tools/run-audio/preview.py DIR assets/audio OUT.mp4` mixes the music + SFX by the `RunAudio` rules and encodes H.264 1280x576 + AAC.
 - **HUD and transitions.**
   - The score rolls up instead of jumping.
   - The suns chip uses the same dark glass as the other chips (gold icon + digits) and pops when the flying sun lands.
