@@ -7,6 +7,13 @@
 # /secretary-lang, starter credit + TRIAL_DAILY_CAP / TRIAL_CALLER_CAP / TRIAL_SESSIONS (optional vars), demo line budget.
 # Rollback: npx wrangler rollback 71b66276-8aad-4cc8-890c-f2d33a72e1ba --name solarchik-screen (78069545 code + current secrets;
 # older: 58787520, base 744a4bf8).
+# Live 79a77437-e167-4f58-88dc-50905b082e88 (3 Oct 2026, ~00:40 Kyiv, native 0.21.8 job): CallRoom Durable Object (strict
+# once-only incoming calls + realtime sideband transcript -> fallback note), call:<id> markers (a duplicate delivery never
+# charges, refunds or rewrites the inbox), note tool first in the instructions, no company field; /topup RPC fall-through on
+# empty history + GET /rpc-health; Sol routes POST /sol/chat (OpenAI gpt-4.1-mini, streamed NDJSON, propose_action) and
+# GET /sol/tts (gpt-4o-mini-tts, Cloudflare-cached). Includes the owner's 81e336fa edits (app_seen logs, no-company prompts).
+# Rollback: npx wrangler rollback 81e336fa-670a-4e95-b818-e67a1ce609f2 --name solarchik-screen (the DO binding stays
+# deployed but unused by that code; older: 241bf359, 71b66276).
 name = "solarchik-screen"
 main = "solarchik-screen.js"
 compatibility_date = "2026-09-19"
@@ -15,3 +22,14 @@ workers_dev = true
 [[kv_namespaces]]
 binding = "BALANCES"
 id = "39853e1695f04f52999da250e215e4e8"
+
+# One Durable Object per call id: strict once-only handling of realtime.call.incoming (OpenAI delivered one call
+# twice, 166 ms apart, on 2 Oct) and the realtime sideband that writes a note from the transcript when the model
+# never called save_call_note. SQLite-backed class (works on the Workers Free plan).
+[[durable_objects.bindings]]
+name = "CALLS"
+class_name = "CallRoom"
+
+[[migrations]]
+tag = "v1-call-room"
+new_sqlite_classes = ["CallRoom"]

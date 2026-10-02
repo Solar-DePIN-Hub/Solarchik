@@ -82,3 +82,24 @@ Do not put keys in the APK.
 - Tests: `node --test scripts/screen-worker.test.mjs` (28).
 
 **Desk** (`wrangler.desk.toml`): added the `/api/titan` quote route to the source. It is NOT deployed, because deployed bc237b32 may differ from this file (see the note in the file).
+
+**Call secretary + Sol, update 79a77437** (3 Oct, ~00:40 Kyiv). Deploy from the repo root: `npx wrangler deploy --config worker/wrangler.screen.toml`. Roll back with `npx wrangler rollback 81e336fa-670a-4e95-b818-e67a1ce609f2 --name solarchik-screen`. Tests: `node --test scripts/screen-worker.test.mjs worker/solarchik-screen.test.mjs` (28 + 19).
+- **Duplicate call delivery (live, call …qjb3).** OpenAI posted `realtime.call.incoming` twice 166 ms apart, into different isolates. KV dedup missed the second delivery: its accept failed, it refunded the session and overwrote the good inbox line with "could not pick up".
+  - Production now routes `/sip` into a `CallRoom` Durable Object (binding `CALLS`, SQLite class, migration `v1-call-room`), one per call id. Its storage is strongly consistent and its requests are serialised, so one call is processed exactly once.
+  - Without the binding (tests, local dev), a `call:<id>` marker (`accepting` → `accepted`) is written before any money moves. It is read again before charging and after a failed accept, so a delivery that finds the call already taken never charges, refunds or rewrites anything.
+  - The failure path only rewrites a line that is still `pending`.
+  - Every delivery id is remembered, not only the first one.
+- **Notes that never arrived.** The instructions now open with a hard NOTE TOOL rule: call `save_call_note` as soon as the caller's wish is known, always before goodbye, even without a name. The tool schema has no `company` field, and the callback defaults to the caller's number.
+  - The call room also opens the realtime sideband (`wss://api.openai.com/v1/realtime?call_id=…`) and turns on caller transcription (`gpt-4o-mini-transcribe`).
+  - On hang-up (socket close), or from an alarm 16 min after accept, a line that is still `pending` gets a note summarised from the transcript (gpt-4o-mini, `source:"auto"`). With no caller words, it gets "Call answered; the caller left no details."
+  - Log events: `sideband_open`, `sideband_refused`, `call_finished {why, lines, note}`.
+- **Top-up RPC.** Tested live from a Worker: api.mainnet-beta answers 403 "Your IP or provider is blocked". publicnode and solanatracker answer 200 but keep only recent history, so they return `[]`/`null` for older signatures. solanavibestation has full history but is rate-limited.
+  - The order is now `SOLANA_RPC` → mainnet-beta (fails in ~15 ms) → publicnode → solanavibestation → solanatracker. An empty history answer moves on to the next RPC.
+  - `GET /rpc-health` shows status, history count and ms per RPC. A `SOLANA_RPC` host is shown as `env`.
+  - For a guaranteed lookup, set a keyed RPC: `npx wrangler secret put SOLANA_RPC --name solarchik-screen`.
+- **Sol for the Android app (0.21.8).**
+  - `POST /sol/chat {message, language, scene, context, agents[], market[], canMintFree, history[], stream}` uses OpenAI `gpt-4.1-mini` (falling back to `gpt-4o-mini`) with a `propose_action` tool. Agents and listings reach the model as short refs (a1, l1), and the worker maps them back to the app's ids. It answers `{ok, reply, action|null, model, ttftMs, ms}`, or NDJSON `{"d":"…"}` lines plus a final `{"done":true,…}` when `stream:true`.
+  - `GET /sol/tts?text=&lang=uk|en&voice=marin&fmt=pcm|mp3|wav` uses OpenAI `gpt-4o-mini-tts` with a natural-speech style instruction per language. pcm is 24 kHz s16le mono and streams straight through. The response is Cloudflare-cached per text+lang+voice+fmt, and the `x-sol-tts` header names the engine and voice.
+  - Both routes are limited per isolate to 40 requests/min per IP.
+  - Live, 3 Oct: chat TTFT 0.43–0.6 s, a full short reply 0.8 s; tts first byte 0.38–1.2 s, a cache hit 0.04 s.
+  - The market's Gemini `sol-voice` answered 503 (all four TTS models 429) at the same time. That is why the app fell back to the phone's robotic system voice.

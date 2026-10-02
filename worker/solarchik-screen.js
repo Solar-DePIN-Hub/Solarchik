@@ -15,18 +15,28 @@ const MAX_AGE_SEC = 30 * 24 * 3600;
 const B58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
 
 const VOICE = `You are Solarchik, a short solar-powered secretary.
-Greet once. Ask name, company, callback number, and why they called.
+Greet once. Ask only the caller's name and what they wanted. Never ask for a company, job, or anything else personal.
+Use the caller's number as the callback; ask for another number only if they offer one.
 Keep spoken answers under 20 words. Warm, a bit cheeky, never rude.
 Never give wallets, seeds, passwords, or home address.
 If spam or scam, refuse and end the call.
-When you have name plus reason plus callback, confirm once and say the owner will see the note, then say goodbye.`;
+When you have name plus reason, confirm once and say the owner will see the note, then say goodbye.`;
 
 const NOTE_RULE = "\nBefore goodbye, call the save_call_note tool once with what you learned.";
+
+/**
+ * Live call 2 Oct (…qjb3): the model said goodbye without ever calling the tool. The note step is now spelled
+ * out as the hard rule of the call, ahead of the language line; NOTE_RULE stays the last line.
+ */
+export const NOTE_FIRST = `NOTE TOOL (most important rule): you have the tool save_call_note.
+Call it as soon as you know what the caller wants, even without a name (pass what you have; callback = the caller's number unless they gave another).
+Always call save_call_note BEFORE you say goodbye, and before ending a spam call too. Never finish a call without it.
+Call it once; if the caller adds something important afterwards, call it again with the full note. After it answers "Saved", say a short goodbye.`;
 
 const SYSTEM = `You are Solarchik, the secretary in the player's cabinet.
 Speak short. Warm. Under 40 words.
 Ask who is calling and why. Never give wallet, address, codes, family.
-Spam: end fast. Real call: name, company, callback, reason, urgency.
+Spam: end fast. Real call: ask only name and what they want. Never ask for a company.
 When you have enough, last line exactly:
 SUMMARY_JSON={"caller_name":"...","company":"...","callback":"...","intent":"...","urgency":"low|medium|high","spam_risk":"low|medium|high","action":"callback|ignore|block","notes":"..."}`;
 
@@ -155,14 +165,35 @@ async function secretary(env, text) {
   return { reply, summary: parseSummary(reply) };
 }
 
-/** Mainnet RPCs tried in order. api.mainnet-beta refuses Cloudflare Workers egress (live 2026-10-02), so a
- * public fallback follows; SOLANA_RPC (secret or var) goes first when set. */
-const RPCS = ["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"];
+/**
+ * Mainnet RPCs tried in order (tested live from a Worker, 2026-10-02 ~24:00 Kyiv, `GET /rpc-health` repeats it):
+ * - api.mainnet-beta.solana.com answers HTTP 403 "Your IP or provider is blocked" to Cloudflare egress (fails in
+ *   ~15 ms, so it costs nothing to ask it first). The live "rpc 403" was this host: publicnode then answered an
+ *   empty history and the error text of the first host was all the app saw.
+ * - solana-rpc.publicnode.com: 200 from Workers, fast (~20 ms), but keeps only recent history: older signatures
+ *   come back as [] / null. A top-up is checked minutes after paying, which it covers.
+ * - public.rpc.solanavibestation.com: full history but rate-limited (429 on bursts).
+ * - rpc.solanatracker.io/public: 200, recent history only.
+ * SOLANA_RPC (secret or var, e.g. a keyed Helius URL) always goes first. An empty answer to a history lookup
+ * ([] or null) moves on to the next RPC, so a pruned node cannot hide a real payment.
+ */
+export const RPCS = [
+  "https://api.mainnet-beta.solana.com", // 403 from Workers in ~15 ms today; kept first as the canonical endpoint
+  "https://solana-rpc.publicnode.com",
+  "https://public.rpc.solanavibestation.com",
+  "https://rpc.solanatracker.io/public",
+];
+const HISTORY = new Set(["getSignaturesForAddress", "getTransaction"]);
+
+export function rpcUrls(env) {
+  return [...new Set([env?.SOLANA_RPC, ...RPCS].filter(Boolean))];
+}
 
 async function rpc(env, method, params) {
-  const urls = [...new Set([env.SOLANA_RPC, ...RPCS].filter(Boolean))];
   let last = "rpc";
-  for (const url of urls) {
+  let empty;
+  let sawEmpty = false;
+  for (const url of rpcUrls(env)) {
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -171,14 +202,46 @@ async function rpc(env, method, params) {
         signal: AbortSignal.timeout(8000),
       });
       const j = await res.json().catch(() => ({}));
-      if (res.ok && !j.error) return j.result;
-      last = "rpc " + (j.error?.code ?? res.status);
+      if (res.ok && !j.error && "result" in j) {
+        const r = j.result;
+        const isEmpty = r == null || (Array.isArray(r) && r.length === 0);
+        if (!(HISTORY.has(method) && isEmpty)) return r;
+        empty = r;
+        sawEmpty = true;
+        last = "empty";
+      } else last = "rpc " + (j.error?.code ?? res.status);
     } catch (e) {
       last = "rpc " + (e?.name || "error");
     }
-    console.log(JSON.stringify({ event: "rpc_fail", host: new URL(url).host, method, detail: last }));
+    console.log(JSON.stringify({ event: "rpc_fail", host: url === env?.SOLANA_RPC ? "env" : new URL(url).host, method, detail: last }));
   }
+  if (sawEmpty) return empty;
   throw new Error(last);
+}
+
+/** GET /rpc-health: which RPC answers from this Worker right now (no keys: SOLANA_RPC shows as "env"). */
+async function rpcHealth(env) {
+  const out = [];
+  for (const url of rpcUrls(env)) {
+    const t = Date.now();
+    let status = "";
+    let history = null;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSignaturesForAddress", params: [PAY_WALLET, { limit: 3 }] }),
+        signal: AbortSignal.timeout(6000),
+      });
+      const j = await res.json().catch(() => ({}));
+      status = j.error ? "rpc " + (j.error.code ?? res.status) : String(res.status);
+      if (Array.isArray(j.result)) history = j.result.length;
+    } catch (e) {
+      status = e?.name || "error";
+    }
+    out.push({ host: url === env?.SOLANA_RPC ? "env" : new URL(url).host, status, history, ms: Date.now() - t });
+  }
+  return json({ wallet: PAY_WALLET, rpcs: out });
 }
 
 function keyOf(k) {
@@ -425,7 +488,7 @@ export async function langOf(env, userId) {
 }
 
 export function voiceFor(lang, withNote) {
-  return VOICE + "\n" + (LANG_RULE[lang] || LANG_RULE.auto) + (withNote ? NOTE_RULE : "");
+  return VOICE + "\n" + (withNote ? NOTE_FIRST + "\n" : "") + (LANG_RULE[lang] || LANG_RULE.auto) + (withNote ? NOTE_RULE : "");
 }
 
 function validUserId(userId) {
@@ -562,11 +625,18 @@ export function resetDedupMemory() {
 export async function firstDelivery(env, keys, now = Date.now()) {
   for (const [k, exp] of SEEN) if (exp < now) SEEN.delete(k);
   const ks = keys.filter(Boolean);
-  if (ks.some((k) => SEEN.has(k))) return false;
+  // A repeat still records its own delivery id, so a later retry of either delivery is known too.
+  const remember = () => Promise.all(ks.map((k) => env.BALANCES.put(k, String(now), { expirationTtl: DEDUP_TTL_SEC })));
+  if (ks.some((k) => SEEN.has(k))) {
+    for (const k of ks) SEEN.set(k, now + DEDUP_TTL_SEC * 1000);
+    await remember();
+    return false;
+  }
   for (const k of ks) SEEN.set(k, now + DEDUP_TTL_SEC * 1000);
-  for (const k of ks) if (await env.BALANCES.get(k)) return false;
-  await Promise.all(ks.map((k) => env.BALANCES.put(k, String(now), { expirationTtl: DEDUP_TTL_SEC })));
-  return true;
+  let seen = false;
+  for (const k of ks) if (await env.BALANCES.get(k)) seen = true;
+  await remember();
+  return !seen;
 }
 
 /** After a failed accept: let OpenAI's retry try again. */
@@ -618,12 +688,12 @@ async function patchInbox(env, userId, callId, patch) {
 
 const NOTE_TOOL = {
   name: "save_call_note",
-  description: "Save the caller's message for the owner. Call it once, after you have the name, reason and callback, before goodbye.",
+  description:
+    "Save the caller's message for the owner. Call it as soon as you know what the caller wants (name if given), always before goodbye. Callback defaults to the caller's number.",
   inputSchema: {
     type: "object",
     properties: {
       caller_name: { type: "string" },
-      company: { type: "string" },
       callback: { type: "string" },
       intent: { type: "string", description: "Why they called, one sentence." },
       urgency: { type: "string", enum: ["low", "medium", "high"] },
@@ -668,14 +738,15 @@ async function mcp(env, request) {
     const summary = {
       caller_name: clip(a.caller_name, 60),
       company: clip(a.company, 60),
-      callback: clip(a.callback, 40),
+      callback: clip(a.callback, 40) || (call.caller && call.caller !== "unknown" ? call.caller : ""),
       intent: clip(a.intent, 200),
       urgency: clip(a.urgency, 8),
       spam_risk: clip(a.spam_risk, 8),
       action: clip(a.action, 10),
       notes: clip(a.notes, 400),
     };
-    await patchInbox(env, call.userId, callId, { caller: call.caller, text: noteText(summary) || "Call note (empty)", summary, status: "done" });
+    if (!summary.company) delete summary.company;
+    await patchInbox(env, call.userId, callId, { caller: call.caller, text: noteText(summary) || "Call note (empty)", summary, status: "done", source: "tool" });
     return ok({ content: [{ type: "text", text: "Saved. Say goodbye." }] });
   }
   return json({ jsonrpc: "2.0", id, error: { code: -32601, message: "method not found" } });
@@ -697,6 +768,34 @@ async function acceptCall(env, callId, body) {
  * gone: a missed-call line in the inbox (if there is a player) and reject 486.
  */
 async function incomingCall(env, origin, callId, sipHeaders, dedupKeys = [], dataKeys = []) {
+  const out = await handleIncoming(env, origin, callId, sipHeaders, dedupKeys, dataKeys);
+  return json(out.body);
+}
+
+/** call:<id> marker: who the call is for and how far it got ("accepting" -> "accepted" | "failed"). */
+async function callMark(env, callId) {
+  const raw = await env.BALANCES.get("call:" + callId);
+  try {
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function putMark(env, callId, mark) {
+  await env.BALANCES.put("call:" + callId, JSON.stringify(mark), { expirationTtl: 3600 });
+}
+
+/**
+ * The incoming-call logic. Returns { body, meta } (meta: what the call room needs to watch the call).
+ * Live 2 Oct (…qjb3): OpenAI delivered realtime.call.incoming twice 166 ms apart into different isolates; KV
+ * dedup missed it, the second accept failed and its failure path refunded and overwrote the good inbox line
+ * with "could not pick up". Now: (1) with the CALLS Durable Object (production) one call id is processed
+ * exactly once, strictly; (2) without it, the call:<id> marker is read before charging and after a failed
+ * accept, so a delivery that finds the call already taken or accepted never charges, refunds or rewrites the
+ * inbox; (3) the failure path only rewrites a line that is still "pending".
+ */
+export async function handleIncoming(env, origin, callId, sipHeaders, dedupKeys = [], dataKeys = []) {
   const parties = callParties(sipHeaders, env);
   console.log(
     JSON.stringify({
@@ -709,6 +808,11 @@ async function incomingCall(env, origin, callId, sipHeaders, dedupKeys = [], dat
       dataKeys: dataKeys.slice(0, 20),
     }),
   );
+  const dup = () => {
+    console.log(JSON.stringify({ event: "sip_duplicate", callId: String(callId).slice(-8), via: "marker" }));
+    return { body: { ok: true, duplicate: true }, meta: null };
+  };
+  if (await callMark(env, callId)) return dup();
   const userId = await playerFor(env, parties);
   const own = isOwnLine(env, parties);
   const lang = await langOf(env, userId);
@@ -734,13 +838,16 @@ async function incomingCall(env, origin, callId, sipHeaders, dedupKeys = [], dat
     );
     if (reason) {
       const rej = await reject();
-      return json({ accepted: false, rejected: Boolean(rej?.ok), error: "NEED_TOPUP", reason, player: false });
+      return { body: { accepted: false, rejected: Boolean(rej?.ok), error: "NEED_TOPUP", reason, player: false }, meta: null };
     }
     const accept = await acceptCall(env, callId, base);
     if (!accept.ok) await forgetDelivery(env, dedupKeys);
-    return json({ accepted: accept.ok, status: accept.status, player: false, trial: true, source: "demo", lang });
+    return { body: { accepted: accept.ok, status: accept.status, player: false, trial: true, source: "demo", lang }, meta: null };
   }
 
+  // Taken before any money moves: a second delivery that reaches this point later sees the marker.
+  const at = Date.now();
+  await putMark(env, callId, { userId, caller: parties.caller, at, state: "accepting" });
   let charge = await chargeSession(env, userId, parties.caller);
   if (!charge.ok && own) {
     // The demo line: its owner pays when they can; otherwise the shared demo budget answers.
@@ -748,13 +855,13 @@ async function incomingCall(env, origin, callId, sipHeaders, dedupKeys = [], dat
     charge = reason ? { ...charge, reason } : { ok: true, source: "demo", usd: charge.usd, refund: async () => {} };
   }
   if (!charge.ok) {
+    await putMark(env, callId, { userId, caller: parties.caller, at, state: "rejected" });
     await addInbox(env, userId, { callId, caller: parties.caller, text: MISSED[charge.reason] || MISSED.NEED_TOPUP, at: Date.now(), status: "need_topup", reason: charge.reason });
     const rej = await reject();
-    return json({ accepted: false, rejected: Boolean(rej?.ok), error: "NEED_TOPUP", reason: charge.reason });
+    return { body: { accepted: false, rejected: Boolean(rej?.ok), error: "NEED_TOPUP", reason: charge.reason }, meta: null };
   }
   const trial = charge.source !== "paid";
   const chargedUsd = charge.source === "demo" ? 0 : SESSION_USD;
-  await env.BALANCES.put("call:" + callId, JSON.stringify({ userId, caller: parties.caller, at: Date.now() }), { expirationTtl: 3600 });
   await addInbox(env, userId, { callId, caller: parties.caller, text: "Call answered by the secretary. Note follows.", at: Date.now(), status: "pending", chargedUsd, trial, source: charge.source });
   const tool = {
     type: "mcp",
@@ -772,18 +879,538 @@ async function incomingCall(env, origin, callId, sipHeaders, dedupKeys = [], dat
     withTool = false;
   }
   if (!accept.ok) {
+    // Another delivery may have answered this very call meanwhile (the accept then fails here): never undo it.
+    const mark = await callMark(env, callId);
+    if (mark?.state === "accepted") {
+      console.log(JSON.stringify({ event: "sip_accept_failed_after_accept", callId: String(callId).slice(-8), status: accept.status }));
+      return { body: { ok: true, duplicate: true, status: accept.status }, meta: null };
+    }
     await charge.refund();
-    await patchInbox(env, userId, callId, { text: "Missed call: the secretary could not pick up (refunded).", status: "failed", chargedUsd: 0 });
+    await putMark(env, callId, { userId, caller: parties.caller, at, state: "failed" });
+    const items = JSON.parse((await env.BALANCES.get("inbox:" + userId)) || "[]");
+    const line = items.find((it) => it && it.callId === callId);
+    if (!line || line.status === "pending") {
+      await patchInbox(env, userId, callId, { text: "Missed call: the secretary could not pick up (refunded).", status: "failed", chargedUsd: 0 });
+    }
     await forgetDelivery(env, dedupKeys);
-    return json({ accepted: false, status: accept.status, refunded: true });
+    await env.BALANCES.delete?.("call:" + callId);
+    return { body: { accepted: false, status: accept.status, refunded: true }, meta: { retry: true } };
   }
-  return json({ accepted: true, status: accept.status, player: true, noteTool: withTool, usd: charge.usd, trial, source: charge.source, lang });
+  await putMark(env, callId, { userId, caller: parties.caller, at, state: "accepted", lang });
+  return {
+    body: { accepted: true, status: accept.status, player: true, noteTool: withTool, usd: charge.usd, trial, source: charge.source, lang },
+    meta: { userId, caller: parties.caller, lang, noteTool: withTool },
+  };
+}
+
+// ---- After the call: a note even when the model never called the tool ----
+
+export const AUTO_NOTE_EMPTY = "Call answered; the caller left no details.";
+
+/**
+ * Called when the call is over (the sideband socket closed) or the room's alarm fires. If the line is still
+ * "pending" (save_call_note never ran), writes a note from the transcript (gpt-4o-mini, JSON) or, without a
+ * transcript, a plain "answered, no details" line. A line the tool already filled is never touched.
+ */
+export async function finishNote(env, callId, userId, caller, lines = []) {
+  if (!userId) return "no_user";
+  const items = JSON.parse((await env.BALANCES.get("inbox:" + userId)) || "[]");
+  const line = items.find((it) => it && it.callId === callId);
+  if (line && line.status !== "pending") return "kept";
+  const said = lines.filter((l) => l && l.text).slice(-40);
+  const heard = said.some((l) => l.who === "caller");
+  if (!heard || !env.OPENAI_API_KEY) {
+    await patchInbox(env, userId, callId, { caller, text: AUTO_NOTE_EMPTY, status: "done", source: "auto" });
+    return "empty";
+  }
+  let summary = null;
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + env.OPENAI_API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        temperature: 0.2,
+        max_tokens: 220,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              'Summarise this phone call for the person who was called. JSON only: {"caller_name":"","intent":"one sentence: what they want","urgency":"low|medium|high","spam_risk":"low|medium|high","action":"callback|ignore|block","notes":""}. Write intent and notes in the language the caller spoke. Leave a field empty when unknown. Never invent details.',
+          },
+          { role: "user", content: said.map((l) => (l.who === "caller" ? "Caller: " : "Secretary: ") + clip(l.text, 400)).join("\n").slice(0, 6000) },
+        ],
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const j = await res.json().catch(() => ({}));
+    summary = JSON.parse(j.choices?.[0]?.message?.content || "null");
+  } catch {
+    summary = null;
+  }
+  if (!summary || typeof summary !== "object" || !clip(summary.intent, 200)) {
+    const first = said.find((l) => l.who === "caller");
+    await patchInbox(env, userId, callId, { caller, text: "Call answered (from the call transcript): " + clip(first?.text, 300), status: "done", source: "auto" });
+    return "raw";
+  }
+  const s2 = {
+    caller_name: clip(summary.caller_name, 60),
+    callback: caller && caller !== "unknown" ? caller : "",
+    intent: clip(summary.intent, 200),
+    urgency: clip(summary.urgency, 8),
+    spam_risk: clip(summary.spam_risk, 8),
+    action: clip(summary.action, 10),
+    notes: clip(summary.notes, 400),
+  };
+  await patchInbox(env, userId, callId, { caller, text: noteText(s2), summary: s2, status: "done", source: "auto" });
+  return "summary";
+}
+
+/** Realtime events that carry the call's words. */
+export function transcriptLine(ev) {
+  if (!ev || typeof ev !== "object") return null;
+  if (ev.type === "conversation.item.input_audio_transcription.completed" && ev.transcript) return { who: "caller", text: String(ev.transcript) };
+  if ((ev.type === "response.output_audio_transcript.done" || ev.type === "response.audio_transcript.done") && ev.transcript)
+    return { who: "secretary", text: String(ev.transcript) };
+  return null;
+}
+
+/**
+ * One Durable Object per call id (binding CALLS). It makes "process this call" strictly once-only (its storage
+ * is strongly consistent and requests to one object are serialised), then holds the realtime sideband socket
+ * (wss://api.openai.com/v1/realtime?call_id=…) for the call: turns on caller transcription, keeps the words, and
+ * on hang-up writes the fallback note through finishNote. An alarm 16 min after accept finishes it anyway
+ * (an outbound socket pins the object for at most 15 min).
+ */
+export class CallRoom {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+    this.lines = [];
+    this.done = false;
+  }
+
+  async fetch(request) {
+    // Synchronous claim first (one instance per call id serves every request in order), storage for later ones.
+    const first = !this.taken;
+    this.taken = true;
+    const b = await request.json().catch(() => ({}));
+    if (!first || (await this.state.storage.get("state"))) {
+      console.log(JSON.stringify({ event: "sip_duplicate", callId: String(b.callId || "").slice(-8), via: "room" }));
+      return json({ ok: true, duplicate: true });
+    }
+    await this.state.storage.put("state", "taken");
+    const out = await handleIncoming(this.env, b.origin, b.callId, b.sipHeaders, [], b.dataKeys || []);
+    if (out.meta?.retry) {
+      await this.state.storage.delete("state");
+      this.taken = false;
+    }
+    else if (out.meta?.userId) {
+      await this.state.storage.put({ state: "accepted", callId: b.callId, userId: out.meta.userId, caller: out.meta.caller });
+      await this.state.storage.setAlarm(Date.now() + 16 * 60 * 1000);
+      this.watch(b.callId, out.meta.userId, out.meta.caller).catch((e) =>
+        console.log(JSON.stringify({ event: "sideband_error", callId: String(b.callId).slice(-8), detail: String(e?.message || e).slice(0, 120) })),
+      );
+    }
+    return json(out.body);
+  }
+
+  async watch(callId, userId, caller) {
+    const res = await fetch("https://api.openai.com/v1/realtime?call_id=" + encodeURIComponent(callId), {
+      headers: { Upgrade: "websocket", Authorization: "Bearer " + this.env.OPENAI_API_KEY },
+    });
+    const ws = res.webSocket;
+    if (!ws) {
+      console.log(JSON.stringify({ event: "sideband_refused", callId: String(callId).slice(-8), status: res.status }));
+      return;
+    }
+    ws.accept();
+    console.log(JSON.stringify({ event: "sideband_open", callId: String(callId).slice(-8) }));
+    ws.send(JSON.stringify({ type: "session.update", session: { type: "realtime", audio: { input: { transcription: { model: "gpt-4o-mini-transcribe" } } } } }));
+    ws.addEventListener("message", (e) => {
+      let ev = null;
+      try {
+        ev = JSON.parse(typeof e.data === "string" ? e.data : "");
+      } catch {
+        return;
+      }
+      const l = transcriptLine(ev);
+      if (l) {
+        this.lines.push(l);
+        this.state.storage.put("lines", this.lines.slice(-60)).catch(() => {});
+      }
+      if (ev?.type === "error") console.log(JSON.stringify({ event: "sideband_event_error", callId: String(callId).slice(-8), code: ev.error?.code || ev.error?.type || "" }));
+    });
+    const end = (why) => this.finish(callId, userId, caller, why).catch(() => {});
+    ws.addEventListener("close", () => end("closed"));
+    ws.addEventListener("error", () => end("error"));
+  }
+
+  async finish(callId, userId, caller, why) {
+    if (this.done) return;
+    this.done = true;
+    const lines = this.lines.length ? this.lines : (await this.state.storage.get("lines")) || [];
+    const r = await finishNote(this.env, callId, userId, caller, lines);
+    console.log(JSON.stringify({ event: "call_finished", callId: String(callId).slice(-8), why, lines: lines.length, note: r }));
+    await this.state.storage.put("state", "finished");
+    await this.state.storage.deleteAlarm();
+  }
+
+  async alarm() {
+    const s = await this.state.storage.get(["callId", "userId", "caller", "state"]);
+    if (s.get("state") === "accepted") await this.finish(s.get("callId"), s.get("userId"), s.get("caller"), "alarm");
+  }
+}
+
+// ---- Sol, the app's companion: chat that can act, and a natural neural voice (0.21.8) ----
+//
+// The Android app's chat, voice and in-run radio all come here first (the solarchik-market Gemini routes are
+// the fallback). One OpenAI call answers in the player's language AND, when the player asks Sol to do
+// something, proposes ONE action through the propose_action tool; the worker re-checks it against the ids the
+// app sent. Nothing is executed here: the app shows its confirmation card and runs the devnet flow on tap.
+// Streaming (NDJSON) lets the app start speaking on the first sentence.
+
+export const SOL_MODELS = ["gpt-4.1-mini", "gpt-4o-mini"];
+export const SOL_TTS_MODEL = "gpt-4o-mini-tts";
+export const SOL_VOICES = ["marin", "cedar", "coral", "nova", "sage", "shimmer", "alloy", "ash", "ballad", "verse"];
+export const SOL_DEFAULT_VOICE = "marin";
+export const ACT_TYPES = ["set_strategy", "buy_strategy", "mint_free", "start_agent", "stop_agent", "agent_status"];
+const RISKS = ["calm", "balanced", "risky"];
+const WINDOWS = [5, 15, 60, 240];
+
+const SOL_FACTS = `Game facts (state only these, never invent numbers): Solarchik is a rooftop runner on solar city roofs: jump, slide, dodge drones, wires and crumbling roofs, collect suns, three hearts per run. Running 1000 m unlocks CLOCK IN: a daily wallet signature that grows a streak; 7 days earn a 48-hour fee-free window, 30 days a 7-day window. The player also has a call secretary and AI trading agents (Strategy NFTs) that practise on Solana devnet with test money. Free agents pay 5% only on profitable closed trades; Pro costs 0.1 SOL once, no profit fee. Risk limits: at most 0.02 SOL per trade, 0.3 SOL spend and 0.3 SOL loss per day, auto-stop after 2 losses in a row. Never promise profit or tell the player to add money.`;
+
+const SOL_UK = `Ти — Сол (Sol), маленький теплий сонячний робот-компаньйон у грі Solarchik і справжній друг гравця.
+Пиши грамотною живою українською: правильні відмінки й узгодження, природний порядок слів, звертання на «ти». Без кальок з англійської, без русизмів, без канцеляриту. Англійські слова лише як назви: Solana, SOL, devnet, NFT, Pro, CLOCK IN.
+Відповідай саме на питання, 1–2 короткі речення (до 180 символів). Без markdown, списків і емодзі.
+Попросили жарт — розкажи один короткий добрий жарт українською (можна про сонце, роботів чи дахи), без пояснень.`;
+const SOL_EN = `You are Sol, a small warm solar robot companion in the game Solarchik and the player's real friend.
+Reply in natural, casual English. Answer exactly what was asked in 1-2 short sentences (under 180 characters). No markdown, lists or emoji.
+If asked for a joke, tell one short, clean, original joke (sun, robots or rooftops are fine), no explanation.`;
+
+const SOL_ACT_RULES = `You CAN act on the player's agents through the app, and you must never say you can only watch or that agents cannot be controlled.
+Actions: start_agent, stop_agent (pause), agent_status, set_strategy (risk calm/balanced/risky and/or windows in minutes 5/15/60/240, or copy a market listing as a template), buy_strategy (a market listing), mint_free (the free agent).
+When the player asks for one of these, call propose_action with ids from CONTEXT only, and say in one short sentence what will happen and that a confirmation card will appear. Nothing happens until the player taps Confirm, so never claim it is already done.
+If the player names an agent or listing that is not in CONTEXT, do NOT pick another one: say you cannot find it and name what they have.
+For agents that are not owned yet (owned=false), start_agent is still allowed: the card will offer to mint or buy it first.`;
+
+const SOL_RUN_UK = "Зараз гравець біжить дахами. На подію забігу відповідай ОДНИМ коротким живим реченням до 70 символів.";
+const SOL_RUN_EN = "The player is running across the roofs right now. React to a run event with ONE short lively sentence under 70 characters.";
+
+const PROPOSE_TOOL = {
+  type: "function",
+  function: {
+    name: "propose_action",
+    description: "Propose ONE action on the player's agents. The app shows a confirmation card; it runs only after the player's tap.",
+    parameters: {
+      type: "object",
+      properties: {
+        type: { type: "string", enum: ACT_TYPES },
+        agent: { type: "string", description: "agent ref from CONTEXT, like a1 (start/stop/status/set_strategy), else empty" },
+        listing: { type: "string", description: "listing ref from CONTEXT, like l1 (buy_strategy, or template for set_strategy), else empty" },
+        risk: { type: "string", enum: ["", ...RISKS] },
+        windows: { type: "array", items: { type: "integer", enum: WINDOWS } },
+      },
+      required: ["type", "agent", "listing", "risk", "windows"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+};
+
+function solLangOf(v) {
+  const t = String(v || "").toLowerCase();
+  return t.startsWith("uk") || t.startsWith("ua") ? "uk" : "en";
+}
+
+function solCtx(input) {
+  const agents = (Array.isArray(input?.agents) ? input.agents : []).slice(0, 16).map((a) => ({
+    id: clip(a?.id, 64),
+    name: clip(a?.name, 48),
+    running: a?.running === true,
+    owned: a?.owned !== false,
+    strategyNft: a?.strategyNft === true,
+    risk: RISKS.includes(a?.risk) ? a.risk : "",
+    windows: (Array.isArray(a?.windows) ? a.windows : []).map(Number).filter((w) => WINDOWS.includes(w)),
+  })).filter((a) => a.id).map((a, i) => ({ ...a, ref: "a" + (i + 1) }));
+  const market = (Array.isArray(input?.market) ? input.market : []).slice(0, 20).map((m) => ({
+    id: clip(m?.id, 64),
+    name: clip(m?.name, 48),
+    priceSol: Number(m?.priceSol) || 0,
+  })).filter((m) => m.id).map((m, i) => ({ ...m, ref: "l" + (i + 1) }));
+  return { agents, market, canMintFree: input?.canMintFree === true };
+}
+
+export function solCtxLines(ctx) {
+  // Short refs (a1, l1): live, the model cut "paper:sku-…" ids at the colon. solAction maps refs back to ids.
+  const ref = (x) => x.ref || x.id;
+  const a = ctx.agents.map((x) => `agent ${ref(x)} = "${x.name}" ${x.running ? "running" : "stopped"}${x.owned ? "" : " owned=false"}${x.strategyNft ? " strategyNft" : ""}${x.risk ? " risk=" + x.risk : ""}${x.windows.length ? " windows=" + x.windows.join("/") : ""}`);
+  const m = ctx.market.map((x) => `listing ${ref(x)} = "${x.name}" ${x.priceSol} SOL`);
+  return [...(a.length ? a : ["(no agents)"]), ...(m.length ? m : ["(market empty)"]), `free mint available: ${ctx.canMintFree}`].join("\n");
+}
+
+/** The same rules as the app's SolActions.normalize: ids must exist, risk/windows must be legal. */
+export function solAction(raw, ctx) {
+  if (!raw || typeof raw !== "object") return null;
+  const type = ACT_TYPES.includes(raw.type) ? raw.type : "";
+  if (!type) return null;
+  // Ids first; a model that passes the shown name instead ("Біткоїн-вікна #11") still maps to that one item.
+  const byName = (list, v) => {
+    const t = String(v || "").trim().toLowerCase();
+    if (!t) return null;
+    const hits = list.filter((x) => x.name.toLowerCase() === t);
+    return hits.length === 1 ? hits[0] : null;
+  };
+  const pick = (list, v) => list.find((x) => x.ref && x.ref === v) || list.find((x) => x.id === v) || byName(list, v);
+  const agent = pick(ctx.agents, raw.agent);
+  const listing = pick(ctx.market, raw.listing);
+  const risk = RISKS.includes(raw.risk) ? raw.risk : "";
+  const windows = [...new Set((Array.isArray(raw.windows) ? raw.windows : []).map(Number).filter((w) => WINDOWS.includes(w)))].sort((x, y) => x - y);
+  if (type === "buy_strategy") return listing ? { type, listing: listing.id } : null;
+  if (type === "mint_free") return { type };
+  if (type === "set_strategy") {
+    if (!agent) return null;
+    if (!risk && !windows.length && !listing) return null;
+    return { type, agent: agent.id, ...(listing && { listing: listing.id }), ...(risk && { risk }), ...(windows.length && { windows }) };
+  }
+  return agent ? { type, agent: agent.id } : null;
+}
+
+export function solSystem(lang, scene, ctx, context) {
+  const uk = lang === "uk";
+  return [
+    uk ? SOL_UK : SOL_EN,
+    scene === "run" ? (uk ? SOL_RUN_UK : SOL_RUN_EN) : "",
+    SOL_FACTS,
+    uk ? "Факти англійською лише для тебе; гравцеві відповідай українською." : "",
+    SOL_ACT_RULES,
+    context ? "What is happening now: " + context : "",
+    "CONTEXT\n" + solCtxLines(ctx),
+  ].filter(Boolean).join("\n\n");
+}
+
+function solMessages(system, history, message) {
+  const out = [{ role: "system", content: system }];
+  for (const row of (Array.isArray(history) ? history : []).slice(-6)) {
+    const text = clip(row?.content ?? row?.text, 400);
+    if (!text) continue;
+    out.push({ role: row?.role === "assistant" || row?.role === "model" ? "assistant" : "user", content: text });
+  }
+  out.push({ role: "user", content: message });
+  return out;
+}
+
+const SOL_RATE = new Map();
+/** Best-effort per-isolate limit: 40 Sol requests a minute per IP (keeps a leaked URL from burning the key). */
+export function solRateOk(ip, now = Date.now()) {
+  const k = String(ip || "?");
+  const r = SOL_RATE.get(k);
+  if (!r || now - r.t > 60_000) {
+    SOL_RATE.set(k, { t: now, n: 1 });
+    if (SOL_RATE.size > 5000) SOL_RATE.clear();
+    return true;
+  }
+  r.n += 1;
+  return r.n <= 40;
+}
+
+function readyLine(lang, action) {
+  if (action.type === "agent_status") return "";
+  return lang === "uk" ? "Перевір картку нижче: без твого підтвердження нічого не станеться." : "Check the card below: nothing happens until you confirm.";
+}
+
+/** Reads an OpenAI chat-completions SSE stream: text deltas to onText, tool-call arguments collected. */
+export async function readChatStream(body, onText) {
+  const reader = body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  let text = "";
+  let args = "";
+  let first = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i).trim();
+      buf = buf.slice(i + 1);
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (data === "[DONE]") continue;
+      let j;
+      try {
+        j = JSON.parse(data);
+      } catch {
+        continue;
+      }
+      const d = j.choices?.[0]?.delta || {};
+      if (d.content) {
+        if (!first) first = Date.now();
+        text += d.content;
+        await onText(d.content);
+      }
+      for (const tc of d.tool_calls || []) if (tc.function?.arguments) args += tc.function.arguments;
+    }
+  }
+  return { text, args, first };
+}
+
+async function solChatRoute(env, request) {
+  const t0 = Date.now();
+  const input = await request.json().catch(() => ({}));
+  const message = clip(input.message, 600);
+  if (!message) return json({ ok: false, error: "message" }, 400);
+  if (!solRateOk(request.headers.get("cf-connecting-ip"))) return json({ ok: false, error: "rate" }, 429);
+  if (!env.OPENAI_API_KEY) return json({ ok: false, error: "no-key" }, 503);
+  const lang = solLangOf(input.language ?? input.lang);
+  const scene = clip(input.scene, 12).toLowerCase() === "run" ? "run" : "yard";
+  const ctx = solCtx(input);
+  const system = solSystem(lang, scene, ctx, clip(input.context, 500));
+  const messages = solMessages(system, input.history, message);
+  const stream = input.stream === true;
+  const tried = [];
+  let upstream = null;
+  let model = "";
+  for (const m of SOL_MODELS) {
+    const s = Date.now();
+    try {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + env.OPENAI_API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: m,
+          messages,
+          temperature: 0.7,
+          max_tokens: scene === "run" ? 80 : 170,
+          stream: true,
+          tools: [PROPOSE_TOOL],
+          tool_choice: "auto",
+          parallel_tool_calls: false,
+        }),
+        signal: AbortSignal.timeout(9000),
+      });
+      tried.push({ model: m, status: res.status, ms: Date.now() - s });
+      if (res.ok && res.body) {
+        upstream = res;
+        model = m;
+        break;
+      }
+    } catch (e) {
+      tried.push({ model: m, status: e?.name || "error", ms: Date.now() - s });
+    }
+  }
+  if (!upstream) return json({ ok: false, error: "unavailable", tried, ms: Date.now() - t0 }, 503);
+
+  const finish = (text, args, first) => {
+    let raw = null;
+    try {
+      raw = args ? JSON.parse(args) : null;
+    } catch {
+      raw = null;
+    }
+    const action = solAction(raw, ctx);
+    let reply = clip(text, scene === "run" ? 140 : 360);
+    if (!reply && action) reply = readyLine(lang, action);
+    if (!reply && raw && !action) {
+      const names = ctx.agents.map((a) => a.name).filter(Boolean).slice(0, 4).join(", ");
+      reply = lang === "uk" ? "Не зрозумів, про якого агента мова." + (names ? " У тебе є: " + names + "." : "") : "I couldn't tell which agent you mean." + (names ? " You have: " + names + "." : "");
+      console.log(JSON.stringify({ event: "sol_action_unmatched", type: raw.type, agentLen: String(raw.agent || "").length, agentHead: String(raw.agent || "").slice(0, 12) }));
+    }
+    console.log(JSON.stringify({ event: "sol_chat", lang, scene, model, action: action?.type || "none", ttftMs: first ? first - t0 : null, ms: Date.now() - t0 }));
+    return { ok: true, reply, action, raw: raw?.type || "none", language: lang, provider: "openai", model, ttftMs: first ? first - t0 : null, ms: Date.now() - t0, tried };
+  };
+
+  if (!stream) {
+    const r = await readChatStream(upstream.body, async () => {});
+    return json(finish(r.text, r.args, r.first));
+  }
+  const { readable, writable } = new TransformStream();
+  const w = writable.getWriter();
+  const line = (o) => w.write(enc.encode(JSON.stringify(o) + "\n"));
+  (async () => {
+    try {
+      const r = await readChatStream(upstream.body, (d) => line({ d }));
+      await line({ done: true, ...finish(r.text, r.args, r.first) });
+    } catch (e) {
+      await line({ done: true, ok: false, error: "stream", detail: String(e?.name || e) }).catch(() => {});
+    } finally {
+      await w.close().catch(() => {});
+    }
+  })();
+  return new Response(readable, {
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" },
+  });
+}
+
+export const TTS_STYLE = {
+  uk: "Говори природною, теплою українською, як усміхнений добрий друг: живі інтонації, легкі природні паузи, звичайний розмовний темп, чітка вимова. Не монотонно і не як диктор.",
+  en: "Speak natural, warm, friendly English like a smiling kind friend: lively intonation, light natural pauses, normal conversational pace, clear diction. Not monotone, not like a newsreader.",
+};
+
+/**
+ * GET /sol/tts?text=&lang=uk|en&voice=marin&fmt=pcm|mp3|wav: OpenAI gpt-4o-mini-tts, streamed straight through
+ * (pcm = 24 kHz 16-bit mono little-endian, the app plays it as it arrives). Same text+lang+voice+fmt is served
+ * from the Cloudflare cache. Header x-sol-tts names the engine and voice that spoke.
+ */
+async function solTtsRoute(env, request, ctx) {
+  const url = new URL(request.url);
+  const text = clip(url.searchParams.get("text"), 400);
+  if (!text) return json({ ok: false, error: "text" }, 400);
+  const lang = solLangOf(url.searchParams.get("lang"));
+  const voice = SOL_VOICES.includes(url.searchParams.get("voice")) ? url.searchParams.get("voice") : SOL_DEFAULT_VOICE;
+  const fmt = ["pcm", "mp3", "wav", "opus"].includes(url.searchParams.get("fmt")) ? url.searchParams.get("fmt") : "pcm";
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  const keyUrl = new URL("https://sol-tts.cache/v1");
+  keyUrl.searchParams.set("t", text);
+  keyUrl.searchParams.set("l", lang);
+  keyUrl.searchParams.set("v", voice);
+  keyUrl.searchParams.set("f", fmt);
+  const key = new Request(keyUrl.toString());
+  const hit = cache ? await cache.match(key) : null;
+  if (hit) {
+    const h = new Headers(hit.headers);
+    h.set("x-sol-cache", "hit");
+    return new Response(hit.body, { status: 200, headers: h });
+  }
+  if (!solRateOk(request.headers.get("cf-connecting-ip"))) return json({ ok: false, error: "rate" }, 429);
+  if (!env.OPENAI_API_KEY) return json({ ok: false, error: "no-key" }, 503);
+  const t0 = Date.now();
+  const res = await fetch("https://api.openai.com/v1/audio/speech", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + env.OPENAI_API_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: SOL_TTS_MODEL, voice, input: text, instructions: TTS_STYLE[lang], response_format: fmt }),
+    signal: AbortSignal.timeout(15000),
+  }).catch((e) => ({ ok: false, status: e?.name || "error" }));
+  if (!res.ok || !res.body) {
+    console.log(JSON.stringify({ event: "sol_tts_fail", status: res.status, ms: Date.now() - t0 }));
+    return json({ ok: false, error: "unavailable", status: res.status }, 503);
+  }
+  console.log(JSON.stringify({ event: "sol_tts", lang, voice, fmt, chars: text.length, headersMs: Date.now() - t0 }));
+  const type = { pcm: "audio/L16;rate=24000;channels=1", mp3: "audio/mpeg", wav: "audio/wav", opus: "audio/ogg" }[fmt];
+  const headers = {
+    "Content-Type": type,
+    "Cache-Control": "public, max-age=604800",
+    "Access-Control-Allow-Origin": "*",
+    "x-sol-tts": `openai:${SOL_TTS_MODEL}:${voice}`,
+    "x-sol-cache": "miss",
+  };
+  if (cache && ctx?.waitUntil) {
+    const [a, b] = res.body.tee();
+    ctx.waitUntil(cache.put(key, new Response(b, { headers })).catch(() => {}));
+    return new Response(a, { headers });
+  }
+  return new Response(res.body, { headers });
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") return json({});
     const url = new URL(request.url);
+
+    if (request.method === "POST" && url.pathname === "/sol/chat") return solChatRoute(env, request);
+    if (request.method === "GET" && url.pathname === "/sol/tts") return solTtsRoute(env, request, ctx);
 
     if (request.method === "GET" && (url.pathname === "/health" || url.pathname === "/sip")) {
       return json({ ok: true, where: "cloudflare", sip: "/sip" });
@@ -813,6 +1440,14 @@ export default {
         (type === "realtime.call.incoming" || type === "live.transport.incoming" || type === "live.call.incoming") &&
         callId
       ) {
+        if (env.CALLS) {
+          // Production: the call room decides once-only and watches the call (see CallRoom).
+          const room = env.CALLS.get(env.CALLS.idFromName(String(callId)));
+          return room.fetch("https://call-room/incoming", {
+            method: "POST",
+            body: JSON.stringify({ origin: url.origin, callId, sipHeaders: body.data?.sip_headers, dataKeys: Object.keys(body.data || {}) }),
+          });
+        }
         const keys = ["dedup:call:" + callId];
         const whId = request.headers.get("webhook-id");
         if (whId) keys.unshift("dedup:wh:" + whId.slice(0, 120));
@@ -874,9 +1509,12 @@ export default {
       return json({ userId, item });
     }
 
+    if (request.method === "GET" && url.pathname === "/rpc-health") return rpcHealth(env);
+
     if (request.method === "GET" && url.pathname === "/balance") {
       const userId = url.searchParams.get("userId") || "";
       if (!userId) return json({ error: "userId required" }, 400);
+      console.log(JSON.stringify({ event: "app_seen", route: "balance", userId: userId.slice(0, 80) }));
       const paidUsd = await getUsd(env, userId);
       const t = await trialOf(env, userId);
       return json({ userId, usd: cents(paidUsd + t.usd), paidUsd, trialUsd: t.usd, trial: t.usd > 0, sessionUsd: SESSION_USD });
@@ -896,6 +1534,7 @@ export default {
 
     if (request.method === "POST" && url.pathname === "/topup") {
       const body = await request.json().catch(() => ({}));
+      console.log(JSON.stringify({ event: "app_seen", route: "topup", userId: String(body.userId || "").slice(0, 80) }));
       return topup(env, body);
     }
 
