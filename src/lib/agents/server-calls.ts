@@ -11,7 +11,7 @@ import type { ArbFireResult } from "./arb-guard.server";
 import type { ClockResult, WindowResult } from "./positions.server";
 import type { CloseResult, FeeBalance, OpenResult } from "./positions-ledger.server";
 
-export const NATIVE_API_ORIGIN = "https://solarchik-super-app.vercel.app";
+export const NATIVE_API_ORIGIN = "https://solarchik-market.vercel.app";
 
 const NATIVE = import.meta.env.VITE_NATIVE === "1";
 

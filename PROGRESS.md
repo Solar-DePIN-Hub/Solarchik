@@ -48,7 +48,7 @@
 - `DESK_TOKEN` — same value as the desk worker secret. Rotate it: the old literal is in git history.
 - `DESK_PROXY_ORIGINS` — optional extra origins for `/api/desk/*`.
 - `SOLANA_RPC_DEVNET`, `SOLANA_RPC_MAINNET` — optional private RPC URLs.
-- `VITE_DESK_PROXY_ORIGIN` — public, build time, only for the native web bundle (default `https://solarchik-super-app.vercel.app`).
+- `VITE_DESK_PROXY_ORIGIN` — public, build time, only for the native web bundle (default `https://solarchik-market.vercel.app`).
 
 ## In progress
 

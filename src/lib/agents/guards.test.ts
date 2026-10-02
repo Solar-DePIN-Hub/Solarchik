@@ -512,3 +512,11 @@ describe("live trading is off by default (hackathon build)", () => {
     assert.match(src("./mint.server.ts"), /liveTrading: liveTradingFrom\(process\.env\.LIVE_TRADING_ENABLED\)/);
   });
 });
+
+describe("native bundle default server", () => {
+  it("points at the judges deployment that serves /api/native", () => {
+    const src = readFileSync(new URL("./server-calls.ts", import.meta.url), "utf8");
+    assert.match(src, /NATIVE_API_ORIGIN = "https:\/\/solarchik-market\.vercel\.app"/);
+    assert.doesNotMatch(readFileSync(new URL("../../../.env.example", import.meta.url), "utf8"), /solarchik-super-app/);
+  });
+});
