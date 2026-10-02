@@ -32,7 +32,7 @@ const RETRY_TOKENS = 800;
 const REPLY_CHARS = 900;
 const FEATHERLESS_TIMEOUT_MS = 7000;
 const GEMINI_TIMEOUT_MS = 6000;
-const TRANSCRIBE_TIMEOUT_MS = 7000;
+const TRANSCRIBE_TIMEOUT_MS = 6000;
 
 const LANG_NAMES = { en: "English", uk: "Ukrainian", es: "Spanish", pt: "Portuguese", de: "German", ja: "Japanese", ru: "Russian" };
 
@@ -224,7 +224,17 @@ async function chat(request, env, headers) {
   return json({ ok: true, reply: fallbackReply(body?.language), provider: "fallback", fallback: true }, 200, headers);
 }
 
-/** Unchanged from the deployed version. */
+/**
+ * Transcription models, tried in order. Live check 2026-10-01/02: the deployed worker answered every
+ * valid WAV with 503 transcription_unavailable while chat on Gemini worked, so the dedicated
+ * transcribe model is followed by the chat model (any Gemini flash model accepts inline audio).
+ */
+function transcribeModels(env) {
+  const list = [env.GEMINI_TRANSCRIBE_MODEL, "gemini-3.5-transcribe", env.GEMINI_MODEL || "gemini-3.6-flash"];
+  return [...new Set(list.filter((m) => typeof m === "string" && m.trim()).map((m) => m.trim()))];
+}
+
+/** Request/response shapes unchanged from the deployed version; only the model fallback is new. */
 async function transcribe(request, env, headers) {
   const body = await request.json().catch(() => null);
   const audio = String(body?.audio || "")
@@ -234,21 +244,25 @@ async function transcribe(request, env, headers) {
   if (!/^audio\/(webm|mp4|m4a|ogg|opus|wav|mpeg|mp3|aac)$/.test(mime) || audio.length < 64 || audio.length > 2e6) {
     return json({ ok: false, error: "invalid_audio" }, 400, headers);
   }
-  try {
-    const res = await fetch(`${GEMINI_URL}/gemini-3.5-transcribe:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          { parts: [{ text: "Transcribe the speech exactly and return only spoken words." }, { inlineData: { mimeType: mime, data: audio } }] },
-        ],
-      }),
-      signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
-    });
-    const text = geminiText(await res.json().catch(() => ({})));
-    if (res.ok && text) return json({ ok: true, text }, 200, headers);
-  } catch (_) {
-    /* unavailable */
+  for (const model of transcribeModels(env)) {
+    const t0 = Date.now();
+    try {
+      const res = await fetch(`${GEMINI_URL}/${model}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            { parts: [{ text: "Transcribe the speech exactly and return only spoken words." }, { inlineData: { mimeType: mime, data: audio } }] },
+          ],
+        }),
+        signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
+      });
+      const text = geminiText(await res.json().catch(() => ({})));
+      console.log(JSON.stringify({ event: "transcribe", model, status: res.status, ms: Date.now() - t0, chars: text ? text.length : 0 }));
+      if (res.ok && text) return json({ ok: true, text }, 200, headers);
+    } catch (err) {
+      console.log(JSON.stringify({ event: "transcribe", model, status: 0, ms: Date.now() - t0, error: err?.name || "error" }));
+    }
   }
   return json({ ok: false, error: "transcription_unavailable" }, 503, headers);
 }

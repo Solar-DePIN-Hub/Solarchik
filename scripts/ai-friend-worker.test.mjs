@@ -160,7 +160,15 @@ test("transcribe: same shapes as the deployed worker", async () => {
   assert.ok(calls[0].url.includes("/gemini-3.5-transcribe:generateContent"));
   assert.equal(calls[0].body.contents[0].parts[1].inlineData.mimeType, "audio/webm");
 
-  upstream(["throw"]);
+  // dedicated model fails (404 / empty) -> the chat model transcribes
+  const fb = upstream([{ status: 404, body: { error: { code: 404 } } }, gemini("fallback words")]);
+  const ok2 = await call("/v1/transcribe", { body: { audio: "A".repeat(100), mime: "audio/wav" } });
+  assert.deepEqual(ok2.json, { ok: true, text: "fallback words" });
+  assert.equal(fb.length, 2);
+  assert.ok(fb[0].url.includes("/gemini-3.5-transcribe:generateContent"));
+  assert.ok(fb[1].url.includes("/gemini-3.6-flash:generateContent"));
+
+  upstream(["throw", "throw"]);
   const down = await call("/v1/transcribe", { body: { audio: "A".repeat(100) } });
   assert.equal(down.status, 503);
   assert.deepEqual(down.json, { ok: false, error: "transcription_unavailable" });
