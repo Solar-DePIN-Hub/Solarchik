@@ -100,6 +100,7 @@
     <string name="mint_ok">Minted %1$s. Verifying on chain…</string>
     <string name="mint_verified">%1$s is on chain and yours.</string>
     <string name="mint_err_free" formatted="false">This wallet already has its free agent. Go Pro for 0% fee.</string>
+    <string name="mint_err_wallet_changed">The wallet signed with a different account. Reconnect the wallet and try again.</string>
     <string name="mint_err_pro_off">Paid Pro mint is off on mainnet for now. Switch to devnet in Settings.</string>
     <string name="mint_err_big">Transaction too big. Nothing was sent.</string>
     <string name="mint_lanes">Market: %1$s</string>

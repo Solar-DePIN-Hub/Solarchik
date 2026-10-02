@@ -10,6 +10,7 @@ import net.solardepin.solarchik.solana.CoreIx
 import net.solardepin.solarchik.solana.Ix
 import net.solardepin.solarchik.solana.LegacyTx
 import net.solardepin.solarchik.solana.SystemIx
+import net.solardepin.solarchik.wallet.Base58
 import net.solardepin.solarchik.wallet.SentTx
 import net.solardepin.solarchik.wallet.SolanaWallet
 import net.solardepin.solarchik.wallet.WalletError
@@ -17,7 +18,7 @@ import org.sol4k.Keypair
 import org.sol4k.PublicKey
 
 class MintError(val kind: Kind, detail: String = "") : Exception(detail.ifBlank { kind.name }) {
-    enum class Kind { FREE_USED, PRO_MAINNET_OFF, TOO_BIG }
+    enum class Kind { FREE_USED, PRO_MAINNET_OFF, TOO_BIG, WALLET_CHANGED }
 }
 
 /** Builds and sends Metaplex Core strategy NFT mints through MWA. */
@@ -28,6 +29,19 @@ class Minter(
         { sender, build -> wallet.signAndSend(sender, build) },
     private val cluster: () -> String = { wallet.clusterName },
     private val clock: () -> Long = System::currentTimeMillis,
+    /** The wallet's signature of [FreeAsset.message] (raw 64 bytes). */
+    private val freeSeed: suspend (ActivityResultSender, String) -> Result<ByteArray> = { sender, addr ->
+        wallet.signText(sender, FreeAsset.message(addr)).mapCatching { proof ->
+            if (proof.address != addr) throw MintError(MintError.Kind.WALLET_CHANGED)
+            Base58.decode(proof.signature)
+        }
+    },
+    /** Owner of an existing Core asset at this address, "" for another program's account, null when absent. */
+    private val coreOwner: suspend (String) -> String? = { address ->
+        wallet.rpc.accountInfo(address)?.let { info ->
+            if (info.owner == SolarchikConfig.MPL_CORE_PROGRAM) CoreIx.ownerOf(info.data)?.toBase58().orEmpty() else ""
+        }
+    },
 ) {
 
     fun canMint(sku: AgentSku, tier: String): MintError.Kind? {
@@ -42,7 +56,31 @@ class Minter(
             wallet.connect(sender).onFailure { return Result.failure(it) }
             canMint(sku, tier)?.let { return Result.failure(MintError(it)) }
         }
+        if (tier == AgentTier.FREE) return mintFree(sender, sku)
         return mintWith(sender, sku, tier, Keypair.generate())
+    }
+
+    /**
+     * Free: the asset address is derived from the wallet's signature (see [FreeAsset]), so a second
+     * Free mint from the same wallet fails on chain too: reinstall, second phone, any cluster.
+     */
+    internal suspend fun mintFree(sender: ActivityResultSender, sku: AgentSku): Result<OwnedAgent> {
+        val owner = wallet.address
+        val sig = freeSeed(sender, owner).getOrElse { return Result.failure(it) }
+        val asset = FreeAsset.keypair(owner, sig) ?: return Result.failure(MintError(MintError.Kind.WALLET_CHANGED))
+        val assetId = asset.publicKey.toBase58()
+        val existing = runCatching { coreOwner(assetId) }.getOrElse { return Result.failure(it) }
+        if (existing != null) {
+            if (existing == owner && store.agents().none { it.asset == assetId }) {
+                // Minted before (other phone, reinstall): adopt it instead of minting again.
+                store.upsert(
+                    OwnedAgent(assetId, sku.skuId(AgentTier.FREE), AgentTier.FREE, sku.nameFor(AgentTier.FREE), owner, cluster(),
+                        mintedAt = clock(), status = OwnedAgent.STATUS_VERIFIED),
+                )
+            }
+            return Result.failure(MintError(MintError.Kind.FREE_USED))
+        }
+        return mintWith(sender, sku, AgentTier.FREE, asset, freeOwner = owner)
     }
 
     /**
@@ -50,10 +88,18 @@ class Minter(
      * wallet sends, the asset is still known, checked on chain later, and still counts as this
      * wallet's free mint. It is dropped only when nothing can have been sent.
      */
-    internal suspend fun mintWith(sender: ActivityResultSender, sku: AgentSku, tier: String, asset: Keypair): Result<OwnedAgent> {
+    internal suspend fun mintWith(
+        sender: ActivityResultSender,
+        sku: AgentSku,
+        tier: String,
+        asset: Keypair,
+        freeOwner: String = "",
+    ): Result<OwnedAgent> {
         val assetId = asset.publicKey.toBase58()
         var pending: OwnedAgent? = null
         val sent = send(sender) { payer, blockhash ->
+            // The derived Free address belongs to the wallet that signed the seed; a switched account would mint someone else's.
+            if (freeOwner.isNotBlank() && payer.toBase58() != freeOwner) throw MintError(MintError.Kind.WALLET_CHANGED)
             if (tier == AgentTier.FREE && store.freeClaimed(payer.toBase58(), cluster()) && store.agents().none { it.asset == assetId }) {
                 throw MintError(MintError.Kind.FREE_USED)
             }

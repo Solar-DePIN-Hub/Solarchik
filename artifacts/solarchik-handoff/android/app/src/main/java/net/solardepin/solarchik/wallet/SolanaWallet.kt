@@ -320,6 +320,9 @@ class SolanaWallet(context: Context) {
         }
     }
 
+    /** Detached signature of [message] by the connected account (address + base58 signature). */
+    suspend fun signText(sender: ActivityResultSender, message: String): Result<ClockProof> = signMessage(sender, message)
+
     private suspend fun signMessage(sender: ActivityResultSender, message: String): Result<ClockProof> {
         val bytes = message.encodeToByteArray()
         val cluster = clusterName

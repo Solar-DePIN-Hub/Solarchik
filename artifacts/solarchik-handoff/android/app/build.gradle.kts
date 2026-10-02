@@ -103,6 +103,8 @@ dependencies {
         exclude(group = "androidx.test.services")
     }
     implementation("org.sol4k:sol4k:0.5.14")
+    // Ed25519 keypair from a seed (FreeAsset); already on the runtime classpath through sol4k.
+    implementation("org.sol4k:tweetnacl:0.1.6")
     implementation("io.github.funkatronics:kborsh:0.1.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
