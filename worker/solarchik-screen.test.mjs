@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import worker, {
   RPCS, rpcUrls, handleIncoming, finishNote, transcriptLine, CallRoom, AUTO_NOTE_EMPTY, NOTE_FIRST, voiceFor,
   solAction, solCtxLines, solSystem, readChatStream, resetDedupMemory, SOL_DEFAULT_VOICE, solRateOk,
+  canonCallId, cleanInbox, isBlocked, saveTranscript, speakable,
 } from "./solarchik-screen.js";
 
 const realFetch = globalThis.fetch;
@@ -217,7 +218,7 @@ test("/sip goes through the CALLS room when bound", async () => {
   };
   const r = await call(env, "/sip", JSON.stringify({ type: "realtime.call.incoming", data: { call_id: "rtc_x", sip_headers: ZADARMA } }));
   assert.equal(r.json.via, "room");
-  assert.deepEqual(seen, [["id:rtc_x", "rtc_x"]]);
+  assert.deepEqual(seen, [["id:x", "rtc_x"]], "room named by the canonical id (rtc_/live_ stripped)");
 });
 
 // ---------------- the note ----------------
@@ -407,4 +408,175 @@ test("solAction maps short refs (a2, l1) back to the app's ids; a cut id like 'p
   assert.deepEqual(solAction({ type: "buy_strategy", listing: "l1" }, ctx), { type: "buy_strategy", listing: "Mkt111" });
   assert.deepEqual(solAction({ type: "stop_agent", agent: "aloxa #11" }, ctx), { type: "stop_agent", agent: "7xAbc" });
   assert.equal(solAction({ type: "start_agent", agent: "paper" }, ctx), null);
+});
+
+// ---------------- 0.21.9: one call = one line, block list, transcript, demo-line claim ----------------
+
+/** A CALLS binding backed by real CallRoom objects (one per name), like production. */
+function roomsEnv(env) {
+  const rooms = new Map();
+  env.CALLS = {
+    idFromName: (n) => n,
+    get: (n) => {
+      if (!rooms.has(n)) {
+        const r = new CallRoom(roomState(), env);
+        r.watch = async () => {};
+        rooms.set(n, r);
+      }
+      const r = rooms.get(n);
+      return { fetch: (u, init) => r.fetch(new Request(u, init)) };
+    },
+  };
+  return rooms;
+}
+
+const LIVE = "live_u0_EUfjtp3oN92tzumvMe0LZ6AuayTaC80A";
+const RTC = "rtc_u0_EUfjtp3oN92tzumvMe0LZ6AuayTaC80A";
+
+test("canonCallId strips rtc_/live_; cleanInbox drops the failed live_ twin of an answered call (real 3 Oct data)", () => {
+  assert.equal(canonCallId(LIVE), canonCallId(RTC));
+  assert.equal(canonCallId("abc"), "abc");
+  const items = [
+    { callId: RTC, status: "done", text: "Вадим: Передати привіт", at: 2 },
+    { callId: LIVE, status: "failed", text: "Missed call: the secretary could not pick up (refunded).", at: 1 },
+    { callId: "live_u1_other", status: "failed", text: "Missed call", at: 0 },
+    { caller: "+1", text: "old voicemail", at: 0 },
+  ];
+  const out = cleanInbox(items);
+  assert.deepEqual(out.map((x) => x.callId || x.text), [RTC, "live_u1_other", "old voicemail"]);
+});
+
+test("/sip: live_ (session only) and rtc_ deliveries of one call meet in one room; only rtc_ is accepted, one charge, one line", async () => {
+  const env = { BALANCES: kv(), OPENAI_API_KEY: "sk", OWNER_USER_ID: OWNER, SESSION_WAIT_MS: 60 };
+  await env.BALANCES.put(OWNER, "1");
+  roomsEnv(env);
+  const calls = openai();
+  const [a, b] = await Promise.all([
+    call(env, "/sip", JSON.stringify({ type: "live.transport.incoming", data: { session_id: LIVE, sip_headers: ZADARMA } })),
+    call(env, "/sip", JSON.stringify({ type: "realtime.call.incoming", data: { call_id: RTC, sip_headers: ZADARMA } })),
+  ]);
+  assert.equal(a.json.duplicate, true);
+  assert.equal(b.json.accepted, true);
+  const accepts = calls.filter((c) => c.url.endsWith("/accept"));
+  assert.equal(accepts.length, 1);
+  assert.ok(accepts[0].url.includes(encodeURIComponent(RTC)));
+  assert.equal(await env.BALANCES.get(OWNER), "0.8");
+  const inbox = (await call(env, "/inbox?userId=" + OWNER, undefined, "GET")).json.items;
+  assert.equal(inbox.length, 1);
+  assert.equal(inbox[0].callId, RTC);
+});
+
+test("/sip: a session-only delivery with no twin is still answered after the short wait", async () => {
+  const env = { BALANCES: kv(), OPENAI_API_KEY: "sk", OWNER_USER_ID: OWNER, SESSION_WAIT_MS: 20 };
+  await env.BALANCES.put(OWNER, "1");
+  roomsEnv(env);
+  openai();
+  const r = await call(env, "/sip", JSON.stringify({ type: "live.call.incoming", data: { session_id: "live_solo", sip_headers: ZADARMA } }));
+  assert.equal(r.json.accepted, true);
+});
+
+test("block list: POST/GET /block; a blocked caller is rejected, never charged, and gets a 'blocked' line", async () => {
+  const env = { BALANCES: kv(), OPENAI_API_KEY: "sk", OWNER_USER_ID: OWNER };
+  await env.BALANCES.put(OWNER, "1");
+  assert.equal((await call(env, "/block", { userId: OWNER, number: "nope" })).status, 400);
+  const set = await call(env, "/block", { userId: OWNER, number: "+380 63 850 0117" });
+  assert.deepEqual(set.json.numbers, ["+380638500117"]);
+  assert.deepEqual((await call(env, "/block?userId=" + OWNER, undefined, "GET")).json.numbers, ["+380638500117"]);
+  assert.equal(await isBlocked(env, OWNER, "+380638500117"), true);
+  const calls = openai();
+  const r = await handleIncoming(env, "https://w", "rtc_blocked", ZADARMA);
+  assert.equal(r.body.blocked, true);
+  assert.equal(calls.filter((c) => c.url.endsWith("/accept")).length, 0);
+  assert.equal(calls.filter((c) => c.url.endsWith("/reject")).length, 1);
+  assert.equal(await env.BALANCES.get(OWNER), "1", "not charged");
+  assert.equal(JSON.parse(await env.BALANCES.get("inbox:" + OWNER))[0].status, "blocked");
+  // unblock
+  assert.deepEqual((await call(env, "/block", { userId: OWNER, number: "+380638500117", blocked: false })).json.numbers, []);
+  assert.equal(await isBlocked(env, OWNER, "+380638500117"), false);
+});
+
+test("POST /call-claim: the next call to the demo line goes to the claiming player; the caller is remembered after", async () => {
+  const env = { BALANCES: kv(), OPENAI_API_KEY: "sk", OWNER_USER_ID: OWNER };
+  await env.BALANCES.put(USER, "1");
+  roomsEnv(env);
+  assert.equal((await call(env, "/call-claim", { userId: "x" })).status, 400);
+  const c = await call(env, "/call-claim", { userId: USER });
+  assert.equal(c.json.armedSec, 180);
+  assert.equal(c.json.number, "+380914810885");
+  openai();
+  const r = await handleIncoming(env, "https://w", "rtc_claimed", ZADARMA);
+  assert.equal(r.body.accepted, true);
+  assert.equal(JSON.parse(await env.BALANCES.get("inbox:" + USER))[0].callId, "rtc_claimed");
+  assert.equal(await env.BALANCES.get("inbox:" + OWNER), null);
+  // the claim is used up, but this caller's later calls still reach the same player
+  const r2 = await handleIncoming(env, "https://w", "rtc_again", ZADARMA);
+  assert.equal(r2.body.accepted, true);
+  assert.equal(JSON.parse(await env.BALANCES.get("inbox:" + USER))[0].callId, "rtc_again");
+  // another caller without a claim goes to the owner/demo account as before
+  const other = ZADARMA.map((h) => (h.name === "From" ? { ...h, value: "<sip:+380501112233@pbx.zadarma.com>" } : h));
+  await handleIncoming(env, "https://w", "rtc_other", other);
+  assert.equal(JSON.parse(await env.BALANCES.get("inbox:" + OWNER))[0].callId, "rtc_other");
+});
+
+test("an expired claim is ignored", async () => {
+  const st = roomState();
+  const room = new CallRoom(st, {});
+  await room.fetch(new Request("https://call-room/claim", { method: "POST", body: JSON.stringify({ userId: USER }) }));
+  st.m.set("claim", { userId: USER, until: Date.now() - 1 });
+  const j = await (await room.fetch(new Request("https://call-room/claim-take", { method: "POST", body: JSON.stringify({ caller: "+380638500117" }) }))).json();
+  assert.equal(j.userId, "");
+});
+
+test("call room finish stores the transcript and duration; GET /call returns the line with its words (KV or old room)", async () => {
+  const env = { BALANCES: kv(), OPENAI_API_KEY: "sk" };
+  await env.BALANCES.put("inbox:" + OWNER, JSON.stringify([{ callId: "rtc_f", status: "done", text: "tool note", at: 1 }, { callId: RTC, status: "done", text: "old", at: 0 }]));
+  const st = roomState();
+  st.m.set("startedAt", Date.now() - 41_000);
+  const room = new CallRoom(st, env);
+  room.lines = [{ who: "secretary", text: "Привіт" }, { who: "caller", text: "Це Вадим" }];
+  await room.finish("rtc_f", OWNER, "+380638500117", "closed");
+  const line = JSON.parse(await env.BALANCES.get("inbox:" + OWNER))[0];
+  assert.ok(line.durationSec >= 40 && line.durationSec <= 43);
+  assert.equal(line.transcriptLines, 2);
+  const r = await call(env, "/call?userId=" + OWNER + "&callId=rtc_f", undefined, "GET");
+  assert.equal(r.json.lines.length, 2);
+  assert.equal(r.json.lines[1].who, "caller");
+  assert.equal(r.json.item.text, "tool note");
+  // an older call: words only in its call room (named by the full id)
+  const rooms = roomsEnv(env);
+  env.CALLS.get(RTC);
+  rooms.get(RTC).state.storage.put("lines", [{ who: "caller", text: "Передати привіт" }]);
+  const old = await call(env, "/call?userId=" + OWNER + "&callId=" + RTC, undefined, "GET");
+  assert.deepEqual(old.json.lines, [{ who: "caller", text: "Передати привіт" }]);
+  assert.ok(await env.BALANCES.get("transcript:" + RTC), "cached in KV after the first read");
+  assert.equal((await call(env, "/call?userId=" + OWNER + "&callId=nope", undefined, "GET")).status, 404);
+});
+
+test("the tool re-creating a lost line keeps the call's start time", async () => {
+  const env = { BALANCES: kv(), OPENAI_API_KEY: "sk", OWNER_USER_ID: OWNER };
+  await env.BALANCES.put(OWNER, "1");
+  openai();
+  await handleIncoming(env, "https://w", "rtc_lost", ZADARMA);
+  const at = JSON.parse(await env.BALANCES.get("inbox:" + OWNER))[0].at;
+  await env.BALANCES.put("inbox:" + OWNER, "[]"); // a concurrent write dropped it
+  const { callToken } = await import("./solarchik-screen.js");
+  await new Promise((r) => setTimeout(r, 15));
+  await call(env, "/mcp", { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "save_call_note", arguments: { intent: "Привіт" } } }, "POST", { "x-solarchik-call": await callToken(env, "rtc_lost") });
+  assert.equal(JSON.parse(await env.BALANCES.get("inbox:" + OWNER))[0].at, at);
+});
+
+test("speakable: #11 is read as 'номер 11', no symbols read aloud; Sol prompt fixes ti/tviy, agent gender and CLOCK IN wording", () => {
+  assert.equal(speakable("Bitcoin-вікна #11 і Метеостанція #3 працюють.", "uk"), "Bitcoin вікна номер 11 і Метеостанція номер 3 працюють.");
+  assert.equal(speakable("**Calm** BTC #2 → ready", "en"), "Calm BTC number 2 ready");
+  const uk = solSystem("uk", "yard", { agents: [], market: [], canMintFree: false }, "");
+  assert.match(uk, /Ніколи не кажи «підписати гаманець»/);
+  assert.match(uk, /Агент „Метеостанція“ ще не твій/);
+  assert.match(uk, /не «твій»/);
+  assert.match(solSystem("en", "yard", { agents: [], market: [], canMintFree: false }, ""), /Never say "sign your wallet"/);
+});
+
+test("phone secretary speaks to callers with one consistent polite form in Ukrainian (live call mixed тебе/вас)", () => {
+  const v = voiceFor("uk", true);
+  assert.match(v, /polite «ви» every time/);
+  assert.match(v, /Never switch to «ти»/);
 });

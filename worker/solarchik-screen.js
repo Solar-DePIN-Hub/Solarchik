@@ -20,7 +20,8 @@ Use the caller's number as the callback; ask for another number only if they off
 Keep spoken answers under 20 words. Warm, a bit cheeky, never rude.
 Never give wallets, seeds, passwords, or home address.
 If spam or scam, refuse and end the call.
-When you have name plus reason, confirm once and say the owner will see the note, then say goodbye.`;
+When you have name plus reason, confirm once and say the owner will see the note, then say goodbye.
+In Ukrainian, address the caller with polite «ви» every time (you speak for the owner to someone you do not know): «Як вас звати і що ви хотіли передати?». Never switch to «ти» mid-call; «ви хотіли» also avoids guessing the caller's gender.`;
 
 const NOTE_RULE = "\nBefore goodbye, call the save_call_note tool once with what you learned.";
 
@@ -443,8 +444,30 @@ export async function playerFor(env, parties) {
     const mapped = await env.BALANCES.get("phone:" + n);
     if (mapped) return mapped;
   }
-  if (isOwnLine(env, parties) && env.OWNER_USER_ID) return String(env.OWNER_USER_ID);
+  if (isOwnLine(env, parties)) {
+    const claimed = await claimedPlayer(env, parties.caller);
+    if (claimed) return claimed;
+    if (env.OWNER_USER_ID) return String(env.OWNER_USER_ID);
+  }
   return "";
+}
+
+/**
+ * The demo line is shared. A player who taps "Call the secretary" in the app arms a claim (POST /call-claim,
+ * 3 min); the next call to the line goes to their inbox and their caller number is remembered for later calls
+ * (so a judge's own calls land in their own app). Trade-off, stated in the app: anyone calling the line during
+ * those 3 minutes lands in the claimer's inbox.
+ */
+async function claimedPlayer(env, caller) {
+  const room = claimRoom(env);
+  if (!room) return "";
+  try {
+    const res = await room.fetch("https://call-room/claim-take", { method: "POST", body: JSON.stringify({ caller: e164(caller) }) });
+    const j = await res.json();
+    return validUserId(j?.userId) ? j.userId : "";
+  } catch {
+    return "";
+  }
 }
 
 export function isOwnLine(env, parties) {
@@ -672,6 +695,69 @@ export async function callFromToken(env, token) {
   return (await sameSecret(t, await callToken(env, callId))) ? callId : "";
 }
 
+/**
+ * One phone call reaches /sip twice (3 Oct, …ayTaC80A): a live.* delivery with data.session_id "live_<x>" and a
+ * realtime.call.incoming with data.call_id "rtc_<x>", the same <x>. Only the rtc_ id can be accepted. The
+ * canonical key (prefix stripped) names the call room, so both deliveries meet in one Durable Object.
+ */
+export function canonCallId(id) {
+  return String(id || "").replace(/^(rtc|live)_/, "");
+}
+
+/**
+ * The inbox as the apps get it: per call, a failed "could not pick up" ghost (the live_ twin of an answered call)
+ * is dropped when the same call also has an answered/pending/blocked line. Old KV data still has such ghosts.
+ */
+export function cleanInbox(items) {
+  const list = (Array.isArray(items) ? items : []).filter((it) => it && typeof it === "object");
+  const good = new Set(list.filter((it) => it.callId && it.status !== "failed").map((it) => canonCallId(it.callId)));
+  return list.filter((it) => !(it.callId && it.status === "failed" && good.has(canonCallId(it.callId))));
+}
+
+const BLOCK_MAX = 200;
+
+export async function blockedNumbers(env, userId) {
+  try {
+    const v = JSON.parse((await env.BALANCES.get("block:" + userId)) || "[]");
+    return Array.isArray(v) ? v.filter((n) => typeof n === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function isBlocked(env, userId, caller) {
+  const n = e164(caller);
+  if (!userId || !n) return false;
+  return (await blockedNumbers(env, userId)).includes(n);
+}
+
+async function setBlocked(env, userId, number, blocked) {
+  const list = (await blockedNumbers(env, userId)).filter((n) => n !== number);
+  if (blocked) list.unshift(number);
+  await env.BALANCES.put("block:" + userId, JSON.stringify(list.slice(0, BLOCK_MAX)));
+  return list.slice(0, BLOCK_MAX);
+}
+
+const TRANSCRIPT_TTL = 60 * 24 * 3600;
+
+/** The call's words for the app's call detail (KV transcript:<callId>, 60 days), capped. */
+export async function saveTranscript(env, callId, lines, durationSec) {
+  const clean = (Array.isArray(lines) ? lines : [])
+    .filter((l) => l && l.text)
+    .slice(-60)
+    .map((l) => ({ who: l.who === "caller" ? "caller" : "secretary", text: clip(l.text, 500) }));
+  const rec = { lines: clean, durationSec: Number.isFinite(durationSec) ? durationSec : null, at: Date.now() };
+  await env.BALANCES.put("transcript:" + callId, JSON.stringify(rec), { expirationTtl: TRANSCRIPT_TTL });
+  return rec;
+}
+
+/** The demo line's claim room: one Durable Object (strongly consistent, unlike KV) for /call-claim. */
+function claimRoom(env) {
+  return env.CALLS ? env.CALLS.get(env.CALLS.idFromName("__line_claims__")) : null;
+}
+
+export const CLAIM_SEC = 180;
+
 async function addInbox(env, userId, item) {
   const raw = await env.BALANCES.get("inbox:" + userId);
   const items = raw ? JSON.parse(raw) : [];
@@ -679,11 +765,13 @@ async function addInbox(env, userId, item) {
   await env.BALANCES.put("inbox:" + userId, JSON.stringify(items.slice(0, 20)));
 }
 
-async function patchInbox(env, userId, callId, patch) {
+async function patchInbox(env, userId, callId, patch, { create = true, at = 0 } = {}) {
   const raw = await env.BALANCES.get("inbox:" + userId);
   const items = raw ? JSON.parse(raw) : [];
   const i = items.findIndex((it) => it && it.callId === callId);
-  if (i < 0) items.unshift({ callId, at: Date.now(), ...patch });
+  if (i < 0 && !create) return;
+  // Re-created line (a concurrent write lost it): keep the call's real start time, not the patch time.
+  if (i < 0) items.unshift({ callId, at: at || Date.now(), ...patch });
   else items[i] = { ...items[i], ...patch };
   await env.BALANCES.put("inbox:" + userId, JSON.stringify(items.slice(0, 20)));
 }
@@ -746,7 +834,7 @@ async function mcp(env, request) {
       action: clip(a.action, 10),
       notes: clip(a.notes, 400),
     };
-    await patchInbox(env, call.userId, callId, { caller: call.caller, text: noteText(summary) || "Call note (empty)", summary, status: "done", source: "tool" });
+    await patchInbox(env, call.userId, callId, { caller: call.caller, text: noteText(summary) || "Call note (empty)", summary, status: "done", source: "tool" }, { at: call.at });
     return ok({ content: [{ type: "text", text: "Saved. Say goodbye." }] });
   }
   return json({ jsonrpc: "2.0", id, error: { code: -32601, message: "method not found" } });
@@ -847,6 +935,14 @@ export async function handleIncoming(env, origin, callId, sipHeaders, dedupKeys 
 
   // Taken before any money moves: a second delivery that reaches this point later sees the marker.
   const at = Date.now();
+  if (await isBlocked(env, userId, parties.caller)) {
+    // The player blocked this number in the app (POST /block): rejected, never charged, one line in the inbox.
+    await putMark(env, callId, { userId, caller: parties.caller, at, state: "rejected" });
+    await addInbox(env, userId, { callId, caller: parties.caller, text: "Blocked caller: the secretary rejected the call.", at, status: "blocked", chargedUsd: 0 });
+    const rej = await reject();
+    console.log(JSON.stringify({ event: "sip_blocked", callId: String(callId).slice(-8), caller: last4(parties.caller) }));
+    return { body: { accepted: false, rejected: Boolean(rej?.ok), blocked: true }, meta: null };
+  }
   await putMark(env, callId, { userId, caller: parties.caller, at, state: "accepting" });
   let charge = await chargeSession(env, userId, parties.caller);
   if (!charge.ok && own) {
@@ -862,7 +958,7 @@ export async function handleIncoming(env, origin, callId, sipHeaders, dedupKeys 
   }
   const trial = charge.source !== "paid";
   const chargedUsd = charge.source === "demo" ? 0 : SESSION_USD;
-  await addInbox(env, userId, { callId, caller: parties.caller, text: "Call answered by the secretary. Note follows.", at: Date.now(), status: "pending", chargedUsd, trial, source: charge.source });
+  await addInbox(env, userId, { callId, caller: parties.caller, text: "Call answered by the secretary. Note follows.", at, status: "pending", chargedUsd, trial, source: charge.source, lang });
   const tool = {
     type: "mcp",
     server_label: "solarchik",
@@ -992,6 +1088,18 @@ export class CallRoom {
   }
 
   async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === "/lines") return this.linesRoute();
+    if (url.pathname === "/claim" || url.pathname === "/claim-take") return this.claimRoute(url.pathname, await request.json().catch(() => ({})));
+    // A session-only delivery (live_<x>, no call_id) cannot be accepted when its rtc_<x> twin exists: give the
+    // twin a moment to claim this room (both arrive within ms); answer it only if no twin comes.
+    if (url.searchParams.get("session") === "1" && !this.taken) {
+      await new Promise((r) => setTimeout(r, Number(this.env.SESSION_WAIT_MS ?? 2500)));
+      if (this.taken) {
+        console.log(JSON.stringify({ event: "sip_duplicate", via: "session_twin" }));
+        return json({ ok: true, duplicate: true, via: "session" });
+      }
+    }
     // Synchronous claim first (one instance per call id serves every request in order), storage for later ones.
     const first = !this.taken;
     this.taken = true;
@@ -1007,7 +1115,7 @@ export class CallRoom {
       this.taken = false;
     }
     else if (out.meta?.userId) {
-      await this.state.storage.put({ state: "accepted", callId: b.callId, userId: out.meta.userId, caller: out.meta.caller });
+      await this.state.storage.put({ state: "accepted", callId: b.callId, userId: out.meta.userId, caller: out.meta.caller, startedAt: Date.now() });
       await this.state.storage.setAlarm(Date.now() + 16 * 60 * 1000);
       this.watch(b.callId, out.meta.userId, out.meta.caller).catch((e) =>
         console.log(JSON.stringify({ event: "sideband_error", callId: String(b.callId).slice(-8), detail: String(e?.message || e).slice(0, 120) })),
@@ -1052,9 +1160,49 @@ export class CallRoom {
     this.done = true;
     const lines = this.lines.length ? this.lines : (await this.state.storage.get("lines")) || [];
     const r = await finishNote(this.env, callId, userId, caller, lines);
-    console.log(JSON.stringify({ event: "call_finished", callId: String(callId).slice(-8), why, lines: lines.length, note: r }));
-    await this.state.storage.put("state", "finished");
+    const startedAt = await this.state.storage.get("startedAt");
+    const durationSec = startedAt ? Math.max(1, Math.round((Date.now() - startedAt) / 1000)) : null;
+    try {
+      await saveTranscript(this.env, callId, lines, durationSec);
+      await patchInbox(this.env, userId, callId, { durationSec, transcriptLines: lines.length }, { create: false });
+    } catch (e) {
+      console.log(JSON.stringify({ event: "transcript_save_failed", callId: String(callId).slice(-8), detail: String(e?.message || e).slice(0, 80) }));
+    }
+    console.log(JSON.stringify({ event: "call_finished", callId: String(callId).slice(-8), why, lines: lines.length, note: r, durationSec }));
+    await this.state.storage.put({ state: "finished", endedAt: Date.now() });
     await this.state.storage.deleteAlarm();
+  }
+
+  /** Stored words of this call (older calls kept them only here), for GET /call. */
+  async linesRoute() {
+    const s = await this.state.storage.get(["lines", "startedAt", "endedAt"]);
+    const startedAt = s.get("startedAt") || null;
+    const endedAt = s.get("endedAt") || null;
+    return json({ lines: s.get("lines") || [], durationSec: startedAt && endedAt ? Math.max(1, Math.round((endedAt - startedAt) / 1000)) : null });
+  }
+
+  /** The "__line_claims__" room: /claim arms the demo line for one player; /claim-take is read by the next call. */
+  async claimRoute(path, b) {
+    const now = Date.now();
+    if (path === "/claim") {
+      const userId = String(b.userId || "").trim();
+      if (!validUserId(userId)) return json({ error: "userId required" }, 400);
+      await this.state.storage.put("claim", { userId, until: now + CLAIM_SEC * 1000 });
+      return json({ userId, armedSec: CLAIM_SEC });
+    }
+    const caller = String(b.caller || "");
+    const key = caller ? "caller:" + (await sha16(caller)) : "";
+    const claim = await this.state.storage.get("claim");
+    if (claim && claim.until > now) {
+      await this.state.storage.delete("claim");
+      if (key) await this.state.storage.put(key, { userId: claim.userId, at: now });
+      return json({ userId: claim.userId, via: "claim" });
+    }
+    if (key) {
+      const known = await this.state.storage.get(key);
+      if (known && now - known.at < 30 * 24 * 3600 * 1000) return json({ userId: known.userId, via: "caller" });
+    }
+    return json({ userId: "" });
   }
 
   async alarm() {
@@ -1079,14 +1227,18 @@ export const ACT_TYPES = ["set_strategy", "buy_strategy", "mint_free", "start_ag
 const RISKS = ["calm", "balanced", "risky"];
 const WINDOWS = [5, 15, 60, 240];
 
-const SOL_FACTS = `Game facts (state only these, never invent numbers): Solarchik is a rooftop runner on solar city roofs: jump, slide, dodge drones, wires and crumbling roofs, collect suns, three hearts per run. Running 1000 m unlocks CLOCK IN: a daily wallet signature that grows a streak; 7 days earn a 48-hour fee-free window, 30 days a 7-day window. The player also has a call secretary and AI trading agents (Strategy NFTs) that practise on Solana devnet with test money. Free agents pay 5% only on profitable closed trades; Pro costs 0.1 SOL once, no profit fee. Risk limits: at most 0.02 SOL per trade, 0.3 SOL spend and 0.3 SOL loss per day, auto-stop after 2 losses in a row. Never promise profit or tell the player to add money.`;
+const SOL_FACTS = `Game facts (state only these, never invent numbers): Solarchik is a rooftop runner on solar city roofs: jump, slide, dodge drones, wires and crumbling roofs, collect suns, three hearts per run. Running 1200 m unlocks CLOCK IN: a daily wallet signature that grows a streak; 7 days earn a 48-hour fee-free window, 30 days a 7-day window. The player also has a call secretary and AI trading agents (Strategy NFTs) that practise on Solana devnet with test money. Free agents pay 5% only on profitable closed trades; Pro costs 0.1 SOL once, no profit fee. Risk limits: at most 0.02 SOL per trade, 0.3 SOL spend and 0.3 SOL loss per day, auto-stop after 2 losses in a row. Never promise profit or tell the player to add money.`;
 
 const SOL_UK = `Ти — Сол (Sol), маленький теплий сонячний робот-компаньйон у грі Solarchik і справжній друг гравця.
 Пиши грамотною живою українською: правильні відмінки й узгодження, природний порядок слів, звертання на «ти». Без кальок з англійської, без русизмів, без канцеляриту. Англійські слова лише як назви: Solana, SOL, devnet, NFT, Pro, CLOCK IN.
-Відповідай саме на питання, 1–2 короткі речення (до 180 символів). Без markdown, списків і емодзі.
+Підмет — «ти», а не «твій» (помилка: «Твій сьогодні пробіг…»). Стать гравця невідома, тож уникай дієслів минулого часу про гравця (пробіг/пробігла): кажи «Сьогодні в тебе вже понад кілометр», «тобі вдалося», теперішній час.
+Агенти — це «агент» (чоловічий рід): «Агент „Метеостанція“ ще не твій», ніколи не узгоджуй прикметник з назвою агента («Метеостанція ще не ваш» — помилка). Ніколи не кажи «ви», «ваш», «натисніть» — лише «ти», «твій», «натисни».
+CLOCK IN — це щоденний підпис дня гаманцем після 1200 м забігу. Нагадуючи, кажи конкретно: «Пробіжи 1200 м і натисни „Підписати сьогодні“ — це CLOCK IN на сьогодні». Ніколи не кажи «підписати гаманець».
+Відповідай саме на питання, 1–2 короткі речення (до 180 символів). Без markdown, списків, емодзі й символів на кшталт #, *, /: назви агентів пиши як у CONTEXT, а номер — «номер 11».
 Попросили жарт — розкажи один короткий добрий жарт українською (можна про сонце, роботів чи дахи), без пояснень.`;
 const SOL_EN = `You are Sol, a small warm solar robot companion in the game Solarchik and the player's real friend.
-Reply in natural, casual English. Answer exactly what was asked in 1-2 short sentences (under 180 characters). No markdown, lists or emoji.
+Reply in natural, casual English. Answer exactly what was asked in 1-2 short sentences (under 180 characters). No markdown, lists, emoji or symbols like #, * or /: write an agent's number as "number 11".
+CLOCK IN is the daily signature of the day with the wallet after a 1200 m run. When you remind the player, say exactly what to do: "Run 1200 m, then tap Sign today to CLOCK IN." Never say "sign your wallet".
 If asked for a joke, tell one short, clean, original joke (sun, robots or rooftops are fine), no explanation.`;
 
 const SOL_ACT_RULES = `You CAN act on the player's agents through the app, and you must never say you can only watch or that agents cannot be controlled.
@@ -1354,9 +1506,27 @@ export const TTS_STYLE = {
  * (pcm = 24 kHz 16-bit mono little-endian, the app plays it as it arrives). Same text+lang+voice+fmt is served
  * from the Cloudflare cache. Header x-sol-tts names the engine and voice that spoke.
  */
+/**
+ * What the voice should say for a chat line: symbols are never read aloud ("Bitcoin-вікна #11" was read as
+ * "Bitcoin Вікна Коло 11"): #11 -> "номер 11" / "number 11", markdown and stray symbols dropped. Same rules as
+ * the app's SpeechText.
+ */
+export function speakable(text, lang) {
+  const uk = lang === "uk";
+  return String(text || "")
+    .replace(/#\s?(\d+)/g, (m, n) => (uk ? " номер " : " number ") + n)
+    .replace(/№\s?(\d+)/g, (m, n) => (uk ? " номер " : " number ") + n)
+    .replace(/(\p{L})-(\p{L})/gu, "$1 $2")
+    .replace(/[#*_`~|<>\[\]{}^\\•·→←↑↓]+/g, " ")
+    .replace(/[\p{Extended_Pictographic}\u{FE0F}]/gu, "")
+    .replace(/\s+([,.!?:;])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function solTtsRoute(env, request, ctx) {
   const url = new URL(request.url);
-  const text = clip(url.searchParams.get("text"), 400);
+  const text = speakable(clip(url.searchParams.get("text"), 400), solLangOf(url.searchParams.get("lang")));
   if (!text) return json({ ok: false, error: "text" }, 400);
   const lang = solLangOf(url.searchParams.get("lang"));
   const voice = SOL_VOICES.includes(url.searchParams.get("voice")) ? url.searchParams.get("voice") : SOL_DEFAULT_VOICE;
@@ -1436,19 +1606,20 @@ export default {
       }
       const type = body.type || "";
       const callId = body.data?.call_id || body.data?.session_id || "";
+      const sessionOnly = !body.data?.call_id;
       if (
         (type === "realtime.call.incoming" || type === "live.transport.incoming" || type === "live.call.incoming") &&
         callId
       ) {
         if (env.CALLS) {
           // Production: the call room decides once-only and watches the call (see CallRoom).
-          const room = env.CALLS.get(env.CALLS.idFromName(String(callId)));
-          return room.fetch("https://call-room/incoming", {
+          const room = env.CALLS.get(env.CALLS.idFromName(canonCallId(callId)));
+          return room.fetch("https://call-room/incoming" + (sessionOnly ? "?session=1" : ""), {
             method: "POST",
             body: JSON.stringify({ origin: url.origin, callId, sipHeaders: body.data?.sip_headers, dataKeys: Object.keys(body.data || {}) }),
           });
         }
-        const keys = ["dedup:call:" + callId];
+        const keys = ["dedup:call:" + canonCallId(callId)];
         const whId = request.headers.get("webhook-id");
         if (whId) keys.unshift("dedup:wh:" + whId.slice(0, 120));
         if (!(await firstDelivery(env, keys))) {
@@ -1490,7 +1661,63 @@ export default {
       const userId = url.searchParams.get("userId") || "";
       if (!userId) return json({ error: "userId required" }, 400);
       const raw = await env.BALANCES.get("inbox:" + userId);
-      return json({ userId, items: raw ? JSON.parse(raw) : [] });
+      console.log(JSON.stringify({ event: "app_seen", route: "inbox", userId: userId.slice(0, 80) }));
+      return json({ userId, items: cleanInbox(raw ? JSON.parse(raw) : []) });
+    }
+
+    if (request.method === "GET" && url.pathname === "/call") {
+      // One call with its words. Same access model as /inbox: the caller holds the player's random userId.
+      const userId = url.searchParams.get("userId") || "";
+      const callId = url.searchParams.get("callId") || "";
+      if (!validUserId(userId) || !callId) return json({ error: "userId and callId required" }, 400);
+      const items = cleanInbox(JSON.parse((await env.BALANCES.get("inbox:" + userId)) || "[]"));
+      const item = items.find((it) => it.callId === callId);
+      if (!item) return json({ error: "not found" }, 404);
+      let rec = null;
+      try {
+        rec = JSON.parse((await env.BALANCES.get("transcript:" + callId)) || "null");
+      } catch {
+        rec = null;
+      }
+      if (!rec && env.CALLS) {
+        // Calls before 0.21.9 kept their words only in the call room (named by the full id, now the canonical one).
+        for (const name of [...new Set([callId, canonCallId(callId)])]) {
+          try {
+            const r = await (await env.CALLS.get(env.CALLS.idFromName(name)).fetch("https://call-room/lines")).json();
+            if (Array.isArray(r?.lines) && r.lines.length) {
+              rec = await saveTranscript(env, callId, r.lines, r.durationSec ?? null);
+              break;
+            }
+          } catch {
+            /* no stored words */
+          }
+        }
+      }
+      return json({ userId, item, lines: rec?.lines || [], durationSec: item.durationSec ?? rec?.durationSec ?? null });
+    }
+
+    if (url.pathname === "/block" && (request.method === "GET" || request.method === "POST")) {
+      // Numbers the secretary rejects for this player (never charged). Same access model as /inbox.
+      const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+      const userId = String((request.method === "POST" ? body.userId : url.searchParams.get("userId")) || "").trim();
+      if (!validUserId(userId)) return json({ error: "userId required" }, 400);
+      if (request.method === "GET") return json({ userId, numbers: await blockedNumbers(env, userId) });
+      const number = e164(body.number);
+      if (!number) return json({ error: "number must be E.164, e.g. +380638500117" }, 400);
+      const numbers = await setBlocked(env, userId, number, body.blocked !== false);
+      return json({ userId, number, blocked: body.blocked !== false, numbers });
+    }
+
+    if (request.method === "POST" && url.pathname === "/call-claim") {
+      // "Call the secretary" in the app: the next call to the demo line (3 min) goes to this player's inbox.
+      const body = await request.json().catch(() => ({}));
+      const userId = String(body.userId || "").trim();
+      if (!validUserId(userId)) return json({ error: "userId required" }, 400);
+      const room = claimRoom(env);
+      if (!room) return json({ error: "claims unavailable" }, 503);
+      const r = await (await room.fetch("https://call-room/claim", { method: "POST", body: JSON.stringify({ userId }) })).json();
+      console.log(JSON.stringify({ event: "call_claim", userId: userId.slice(0, 80) }));
+      return json({ ...r, number: ownLine(env) });
     }
 
     if (request.method === "POST" && url.pathname === "/voicemail") {

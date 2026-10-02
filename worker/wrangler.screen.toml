@@ -14,6 +14,17 @@
 # GET /sol/tts (gpt-4o-mini-tts, Cloudflare-cached). Includes the owner's 81e336fa edits (app_seen logs, no-company prompts).
 # Rollback: npx wrangler rollback 81e336fa-670a-4e95-b818-e67a1ce609f2 --name solarchik-screen (the DO binding stays
 # deployed but unused by that code; older: 241bf359, 71b66276).
+# Live 75c667e3-57eb-4529-b923-d8e6479ae999 (3 Oct 2026, native 0.21.8 job, later edits): Sol prompt/TTS tweaks.
+# Live 79f83fac-12cf-499c-87ad-ecc43801f1b1 (3 Oct 2026, ~02:10 Kyiv, native 0.21.9 job): Calls archive support:
+# canonical call ids (rtc_/live_ twins share one CallRoom, session-only deliveries wait for the rtc_ twin), /inbox
+# drops the failed ghost twin, transcripts kept in KV (transcript:<callId>, 60 days) + durationSec, GET /call
+# (item + transcript, falls back to the old DO lines), GET/POST /block (blocked callers get 486, no charge, inbox
+# status "blocked"), POST /call-claim (demo line routes the next call within 180 s to the claiming player id),
+# Sol prompt copy fixes («ти», no gendered past tense, CLOCK IN = 1200 m + "Підписати сьогодні"), speakable() TTS
+# text (#11 -> "номер 11", no symbols), phone secretary uses polite «ви» consistently with callers.
+# Rollback: npx wrangler rollback 75c667e3-57eb-4529-b923-d8e6479ae999 --name solarchik-screen (pre-0.21.9; the
+# 0.21.9 app then loses /call, /block and /call-claim and shows its offline/empty states). Intermediate 0.21.9
+# deploy without the «ви» change: 41870b78-5c07-4bde-8352-48177bb6fdda.
 name = "solarchik-screen"
 main = "solarchik-screen.js"
 compatibility_date = "2026-09-19"
