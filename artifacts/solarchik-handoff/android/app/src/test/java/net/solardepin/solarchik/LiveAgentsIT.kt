@@ -69,6 +69,8 @@ class LiveAgentsIT {
         val t0 = now
         val desk = Desk(ctx, feed, { now }, FakeRpc())
         val names = Catalog.skus.associate { it.id to it.nameFor(AgentTier.FREE) }
+        // 0.21.8: paper runs need owned agents
+        for ((id, name) in names) net.solardepin.solarchik.agents.AgentStore(ctx).upsert(net.solardepin.solarchik.agents.OwnedAgent("Live$id", id, AgentTier.FREE, name, "owner", "devnet"))
         for ((id, name) in names) desk.start("paper:$id", id, AgentTier.FREE, name, Track.PAPER)
         val all = ArrayList<DeskEvent>()
         val closes = ArrayList<String>()

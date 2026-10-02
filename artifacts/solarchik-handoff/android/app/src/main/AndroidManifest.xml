@@ -21,6 +21,11 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <!-- 0.21.8: is a Solana Pay wallet installed? (else the top-up offers Phantom / Solflare + QR) -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="solana" />
+        </intent>
     </queries>
 
     <application

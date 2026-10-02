@@ -65,6 +65,11 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         const val CARD_W = 404
         /** Sol's caption chip width (dp). */
         const val CAPTION_W = 230
+        /** 0.21.8: the caption chip's minimum width (dp). */
+        const val CAPTION_MIN_W = 120
+
+        /** One short horizontal line: newlines/tabs and runs of spaces collapse, at most 140 chars. */
+        fun cleanCaption(text: String): String = text.replace(Regex("\\s+"), " ").trim().take(140)
         /** Death beat before the result card (ms): the fall reads, then the card. */
         const val DEATH_BEAT_MS = 1100L
         const val CARD_W_WIDE = 720
@@ -429,24 +434,27 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         announceV = label("", 38f, PRIMARY, track = 0.025f).apply { gravity = Gravity.CENTER; setShadowLayer(dp(4).toFloat(), 0f, dp(3).toFloat(), Color.parseColor("#8A143A8C")); visibility = GONE }
         hud.addView(announceV, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP))
 
-        // CLOCK IN unlocked banner (brief; the run keeps going under it)
+        // CLOCK IN unlocked banner (brief; the run keeps going under it).
+        // 0.21.8: a small one-line horizontal chip at the top that auto-hides (on the SM-X210 tablet the big
+        // two-line banner showed up as vertical text at the left edge); its lines can never wrap per letter.
         clockBanner = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
             visibility = GONE
+            background = chip()
+            setPadding(dp(14), dp(6), dp(14), dp(6))
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE
             isClickable = false
+            tag = "clock-banner"
         }
-        clockBanner.addView(label(ctx.getString(R.string.run_clock_unlocked), 40f, PRIMARY, track = 0.02f).apply {
-            gravity = Gravity.CENTER; setShadowLayer(dp(5).toFloat(), 0f, dp(3).toFloat(), Color.parseColor("#B3143A8C"))
+        clockBanner.addView(label(ctx.getString(R.string.run_clock_unlocked), 17f, PRIMARY, track = 0.02f).apply {
+            maxLines = 1; ellipsize = TextUtils.TruncateAt.END; setHorizontallyScrolling(false)
         })
-        clockBanner.addView(label(ctx.getString(R.string.run_clock_keep), 16f, FG, body).apply {
-            gravity = Gravity.CENTER
-            background = chip()
-            setPadding(dp(14), dp(6), dp(14), dp(6))
-        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
-        hud.addView(clockBanner, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP))
+        clockBanner.addView(label(ctx.getString(R.string.run_clock_keep), 13f, FG, body).apply {
+            maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(10) })
+        hud.addView(clockBanner, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(108) })
 
         // distance milestone: a glass chip that drops in under the top bar, then lifts away
         milestoneV = label("", 18f, PRIMARY, track = 0.03f).apply {
@@ -465,7 +473,8 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         buddy = ImageView(ctx).apply { scaleType = ImageView.ScaleType.FIT_CENTER; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
         captionRow.addView(buddy, LinearLayout.LayoutParams(dp(22), dp(24)).apply { marginEnd = dp(5) })
         captionV = label("", 11f, FG, body).apply {
-            background = chip(); setPadding(dp(8), dp(4), dp(8), dp(4)); maxWidth = dp(CAPTION_W)
+            // 0.21.8: never narrower than ~12 letters (a collapsed chip wrapped the line one letter per row)
+            background = chip(); setPadding(dp(8), dp(4), dp(8), dp(4)); maxWidth = dp(CAPTION_W); minWidth = dp(CAPTION_MIN_W)
             setLineSpacing(0f, 1.1f); ellipsize = TextUtils.TruncateAt.END; maxLines = 2
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
@@ -640,7 +649,6 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         // web: countdown top 28%, banner top 26%, slide button centred on 48%
         countdownV.translationY = h * 0.28f - countdownV.top
         announceV.translationY = h * 0.26f - announceV.top
-        clockBanner.translationY = h * 0.2f - clockBanner.top
         slideBtn.translationY = h * 0.48f - slideBtn.height / 2f - slideBtn.top
         val w = r - l
         if (w > 0 && h > 0) {
@@ -677,7 +685,7 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
     }
 
     fun setCaption(text: String) {
-        captionV.text = text
+        captionV.text = cleanCaption(text)
         captionRow.visibility = if (text.isEmpty() || last?.phase == Phase.DEAD) GONE else VISIBLE
     }
 

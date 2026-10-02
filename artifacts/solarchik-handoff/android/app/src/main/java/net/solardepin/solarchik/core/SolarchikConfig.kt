@@ -67,5 +67,13 @@ object SolarchikConfig {
     /** Sol "do things" mode: model → one structured action; the app confirms and executes (0.21.7). */
     const val SOL_ACT_URL = "https://solarchik-market.vercel.app/api/native/sol-act"
 
+    /**
+     * 0.21.8: Sol's brain (OpenAI gpt-4.1-mini on the solarchik-screen worker, NDJSON stream, one
+     * propose_action tool). Primary for every Sol message; the market sol-act route is the fallback.
+     */
+    const val SOL_BRAIN_URL = "https://solarchik-screen.davidbell1603.workers.dev/sol/chat"
+    /** 0.21.8: Sol's voice (OpenAI gpt-4o-mini-tts, 24 kHz PCM streamed; edge-cached per line). */
+    const val SOL_TTS_URL = "https://solarchik-screen.davidbell1603.workers.dev/sol/tts"
+
     fun lamports(sol: Double): Long = Math.round(sol * LAMPORTS_PER_SOL)
 }

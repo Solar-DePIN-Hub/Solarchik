@@ -24,6 +24,7 @@ import net.solardepin.solarchik.sol.ActType
 import net.solardepin.solarchik.sol.SolActClient
 import net.solardepin.solarchik.sol.SolAction
 import net.solardepin.solarchik.sol.SolActions
+import net.solardepin.solarchik.sol.SolBrain
 import net.solardepin.solarchik.ui.SolActionDesk
 import net.solardepin.solarchik.ui.SolScreen
 import org.junit.Assert.assertEquals
@@ -185,7 +186,7 @@ class SolActionsTest {
 
     @Test fun buyShowsCardAndNothingRunsUntilTheTap() {
         val (a, s) = open()
-        s.actClient = SolActClient(post = { _, _ -> """{"ok":true,"reply":"","action":{"type":"buy_strategy","listing":"sZ4R4sbUtuGc8ygfmwHvG34zqL5LoSBRF5YkHDTDfVH"}}""" })
+        s.brain = SolBrain(market = SolActClient(post = { _, _ -> """{"ok":true,"reply":"","action":{"type":"buy_strategy","listing":"sZ4R4sbUtuGc8ygfmwHvG34zqL5LoSBRF5YkHDTDfVH"}}""" }), stream = SolBrain.NO_WORKER)
         s.send("buy the Calm Hourly BTC NFT")
         settle()
         val card = requireNotNull(find(a.window.decorView, "sol-act-card")) { "no confirmation card" }
@@ -203,7 +204,7 @@ class SolActionsTest {
 
     @Test fun strategyCardShowsDiffAndThe240hLock() {
         val (a, s) = open()
-        s.actClient = SolActClient(post = { _, _ -> """{"ok":true,"reply":"","action":{"type":"set_strategy","agent":"$MINE","risk":"calm","windows":[60]}}""" })
+        s.brain = SolBrain(market = SolActClient(post = { _, _ -> """{"ok":true,"reply":"","action":{"type":"set_strategy","agent":"$MINE","risk":"calm","windows":[60]}}""" }), stream = SolBrain.NO_WORKER)
         s.send("change my BTC agent to low risk 1h")
         settle()
         val card = requireNotNull(find(a.window.decorView, "sol-act-card"))
@@ -219,7 +220,7 @@ class SolActionsTest {
     @Test @Config(qualifiers = "uk-w411dp-h914dp-xxhdpi")
     fun ukrainianCard() {
         val (a, s) = open()
-        s.actClient = SolActClient(post = { _, _ -> null }) // route down: the phone parser still understands
+        s.brain = SolBrain(market = SolActClient(post = { _, _ -> null }), stream = SolBrain.NO_WORKER) // route down: the phone parser still understands
         s.send("постав моєму агенту низький ризик 1 год")
         settle()
         val card = requireNotNull(find(a.window.decorView, "sol-act-card"))
@@ -232,12 +233,91 @@ class SolActionsTest {
 
     @Test fun statusIsAnsweredAtOnceWithoutACard() {
         val (a, s) = open()
-        s.actClient = SolActClient(post = { _, _ -> """{"ok":true,"reply":"","action":{"type":"agent_status","agent":"$MINE"}}""" })
+        s.brain = SolBrain(market = SolActClient(post = { _, _ -> """{"ok":true,"reply":"","action":{"type":"agent_status","agent":"$MINE"}}""" }), stream = SolBrain.NO_WORKER)
         s.send("how is my agent doing?")
         settle()
         assertNull(find(a.window.decorView, "sol-act-card"))
         val all = texts(a.window.decorView).joinToString("\n")
         assertTrue(all, all.contains("Momentum Rider 5m is paused"))
+    }
+
+    /* ---------------- 0.21.8: one brain, streamed; ownership ---------------- */
+
+    private fun worker(vararg lines: String): suspend (String, String, (String) -> Unit) -> Boolean = { _, _, on -> lines.forEach(on); true }
+
+    @Test fun brainStreamsTheWorkerThenFallsBackInOrder() = runBlocking {
+        var body = ""
+        val deltas = mutableListOf<String>()
+        val up = SolBrain(market = SolActClient(post = { _, _ -> error("market must not be asked") }), stream = { _, b, on ->
+            body = b
+            on("""{"d":"Sure. "}"""); on("garbage"); on("""{"d":"I'll start it."}""")
+            on("""{"done":true,"ok":true,"reply":"Sure. I'll start it.","action":{"type":"start_agent","agent":"paper:sku-pred-alpha"},"model":"gpt-4.1-mini","ttftMs":500}""")
+            true
+        })
+        val r = up.ask("start bitcoin windows", "uk", "yard", ctxA, emptyList(), "note") { deltas += it }
+        assertEquals(SolBrain.Source.WORKER, r.source)
+        assertEquals(listOf("Sure. ", "Sure. I'll start it."), deltas)
+        assertEquals(SolAction(ActType.START_AGENT, agent = "paper:sku-pred-alpha"), r.action)
+        assertEquals("gpt-4.1-mini", r.model)
+        assertNotNull(r.ttftMs)
+        assertTrue(body, body.contains("\"stream\":true") && body.contains("\"language\":\"uk\"") && body.contains("\"owned\"") && body.contains("\"context\":\"note\""))
+        // worker invents an agent -> the phone drops the action but keeps the words
+        val bad = SolBrain(stream = worker("""{"done":true,"ok":true,"reply":"Done!","action":{"type":"start_agent","agent":"ghost"}}"""), market = SolActClient(post = { _, _ -> null }))
+        val rb = bad.ask("start ghost", "en", "yard", ctxA, emptyList())
+        assertNull(rb.action); assertEquals(SolBrain.Source.WORKER, rb.source)
+        // worker down -> market
+        val m = SolBrain(stream = SolBrain.NO_WORKER, market = SolActClient(post = { _, _ -> """{"ok":true,"reply":"Ready.","action":{"type":"buy_strategy","listing":"AV8Eg"},"model":"g"}""" }))
+        val rm = m.ask("buy momentum", "en", "yard", ctxA, emptyList())
+        assertEquals(SolBrain.Source.MARKET, rm.source); assertEquals("AV8Eg", rm.action?.listing)
+        // worker says ok:false (503) and market down -> phone parser, labelled offline
+        val off = SolBrain(stream = worker("""{"done":true,"ok":false}"""), market = SolActClient(post = { _, _ -> null }))
+        val ro = off.ask("pause my agent", "en", "yard", ctxA, emptyList())
+        assertTrue(ro.offline); assertEquals(SolAction(ActType.STOP_AGENT, agent = "CalmAsset111"), ro.action)
+        val chit = off.ask("tell me a joke", "en", "yard", ctxA, emptyList())
+        assertTrue(chit.offline); assertNull(chit.action)
+    }
+
+    @Test fun smallTalkGoesToTheWorkerNotTheFriend() {
+        val (a, s) = open()
+        s.brain = SolBrain(stream = worker("""{"d":"Your agents work while you sleep — "}""", """{"d":"start one on the Agents tab."}""",
+            """{"done":true,"ok":true,"reply":"Your agents work while you sleep — start one on the Agents tab.","action":null,"model":"gpt-4.1-mini"}"""),
+            market = SolActClient(post = { _, _ -> error("market must not be asked") }))
+        s.send("what can my agents do?")
+        settle()
+        val all = texts(a.window.decorView).joinToString("\n")
+        assertTrue(all, all.contains("Your agents work while you sleep"))
+        assertFalse(all, all.contains("only watch"))
+        assertEquals(SolBrain.Source.WORKER, s.lastReply?.source)
+    }
+
+    @Test fun startingAnUnownedAgentOffersMintOrProFirst() {
+        val (a, s) = open()
+        s.brain = SolBrain(stream = worker("""{"done":true,"ok":true,"reply":"","action":{"type":"start_agent","agent":"paper:sku-pred-alpha"}}"""), market = SolActClient(post = { _, _ -> null }))
+        s.send("start Bitcoin Windows")
+        settle()
+        val card = requireNotNull(find(a.window.decorView, "sol-act-card")) { "no card" }
+        assertTrue(requireNotNull(s.pending).acquire)
+        assertNotNull("mint free option", find(card, "offer-mint-free"))
+        assertNotNull("buy pro option", find(card, "offer-buy-pro"))
+        assertNull("no plain confirm for an unowned agent", find(card, "sol-act-confirm"))
+        val all = texts(a.window.decorView).joinToString("\n")
+        assertTrue(all, all.contains("don't own"))
+        assertTrue("nothing started before the tap", a.desk.state().run("paper:sku-pred-alpha")?.running != true)
+        shot(a, "sol-act-acquire-en")
+    }
+
+    @Test fun startingAnOwnedPaperAgentIsAPlainConfirm() {
+        val (a, s) = open()
+        AgentStore(a).upsert(OwnedAgent("AlphaFree1", "sku-pred-alpha", "free", "Bitcoin Windows #11", ScreensTest.WALLET, "devnet", "sig", System.currentTimeMillis(), OwnedAgent.STATUS_VERIFIED))
+        s.actions.invalidate()
+        s.brain = SolBrain(stream = worker("""{"done":true,"ok":true,"reply":"Starting it — tap Confirm.","action":{"type":"start_agent","agent":"paper:sku-pred-alpha"}}"""), market = SolActClient(post = { _, _ -> null }))
+        s.send("start Bitcoin Windows")
+        settle()
+        val card = requireNotNull(find(a.window.decorView, "sol-act-card"))
+        assertFalse(requireNotNull(s.pending).acquire)
+        find(card, "sol-act-confirm")!!.performClick()
+        settle()
+        assertTrue(a.desk.state().run("paper:sku-pred-alpha")?.running == true)
     }
 
     private fun shot(a: MainActivity, name: String) {

@@ -23,8 +23,8 @@ android {
         applicationId = "net.solardepin.solarchik"
         minSdk = 26
         targetSdk = 35
-        versionCode = 72
-        versionName = "0.21.7"
+        versionCode = 73
+        versionName = "0.21.8"
         buildConfigField("boolean", "MAINNET_PAID_MINT", "false")
     }
 
@@ -41,6 +41,9 @@ android {
             it.systemProperty("solarchik.liveWaitSec", (project.findProperty("liveWaitSec") as String?) ?: "40")
             it.systemProperty("solarchik.runshots", (project.findProperty("runshots") as String?) ?: layout.buildDirectory.dir("screens-run").get().asFile.path)
             it.systemProperty("solarchik.runvideo", (project.findProperty("runvideo") as String?) ?: "")
+            it.systemProperty("solarchik.runlong", (project.findProperty("runlong") as String?) ?: "")
+            it.systemProperty("solarchik.runlongFrom", (project.findProperty("runlongFrom") as String?) ?: "13500")
+            it.systemProperty("solarchik.runlongTo", (project.findProperty("runlongTo") as String?) ?: "23500")
             it.systemProperty("solarchik.shots", (project.findProperty("shots") as String?) ?: layout.buildDirectory.dir("screens").get().asFile.path)
         }
     }
@@ -110,6 +113,8 @@ dependencies {
     implementation("io.github.funkatronics:kborsh:0.1.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
+    // 0.21.8: QR code for the secretary top-up link (pure Java, no Play services)
+    implementation("com.google.zxing:core:3.5.3")
     implementation("androidx.work:work-runtime-ktx:2.10.5")
     // 0.21.7: installs src/main/baseline-prof.txt so ART compiles the run/UI code ahead of time
     implementation("androidx.profileinstaller:profileinstaller:1.4.0")

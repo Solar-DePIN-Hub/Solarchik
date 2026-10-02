@@ -52,6 +52,8 @@ data class ActAgent(
     val tier: String = "free",
     val track: String = "paper",
     val aprSince: Double? = null,
+    /** 0.21.8: false for a catalog agent the player has not minted or bought yet (start offers mint/buy). */
+    val owned: Boolean = true,
 ) {
     val risk: String get() = (spec?.get("risk") as? JsonPrimitive)?.content.orEmpty()
     val windows: List<Int> get() = SolActions.windowsOf(spec)
@@ -69,7 +71,7 @@ data class ActContext(val agents: List<ActAgent>, val market: List<ActListing>, 
         putJsonArray("agents") {
             agents.take(12).forEach { a ->
                 add(buildJsonObject {
-                    put("id", a.id); put("name", a.name); put("running", a.running); put("strategyNft", a.strategyNft)
+                    put("id", a.id); put("name", a.name); put("running", a.running); put("strategyNft", a.strategyNft); put("owned", a.owned)
                     if (a.risk.isNotBlank()) put("risk", a.risk)
                     if (a.windows.isNotEmpty()) putJsonArray("windows") { a.windows.forEach { add(it) } }
                     a.trades?.let { put("trades", it) }
@@ -106,6 +108,8 @@ data class ActionPlan(
     val locksSale: Boolean = false,
     /** Why it cannot run (string key for the UI), or null when it can. */
     val blocked: String? = null,
+    /** 0.21.8: START on an agent the player does not own yet: the card offers Mint free / Buy Pro, then starts. */
+    val acquire: Boolean = false,
 )
 
 object SolActions {
@@ -237,7 +241,7 @@ object SolActions {
         return when (action.type) {
             ActType.BUY_STRATEGY -> ActionPlan(action, listing = listing, priceLamports = listing?.priceLamports, blocked = if (listing == null) "gone" else null)
             ActType.MINT_FREE -> ActionPlan(action, priceLamports = 0, blocked = if (!ctx.canMintFree) "free_used" else null)
-            ActType.START_AGENT -> ActionPlan(action, agent, blocked = if (agent?.running == true) "already_running" else null)
+            ActType.START_AGENT -> ActionPlan(action, agent, blocked = if (agent?.running == true) "already_running" else null, acquire = agent != null && !agent.owned && agent.running != true)
             ActType.STOP_AGENT -> ActionPlan(action, agent, blocked = if (agent?.running == false) "already_stopped" else null)
             ActType.AGENT_STATUS -> ActionPlan(action, agent)
             ActType.SET_STRATEGY -> {

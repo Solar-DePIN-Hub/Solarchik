@@ -47,6 +47,26 @@ object Secretary {
     fun setLastUsd(ctx: Context, usd: Double) = prefs(ctx).edit().putString("usd", usd.toString())
         .putBoolean("needTopup", usd < NOTE_USD && needTopup(ctx)).apply()
 
+    /** The last balance read from the worker (Settings + Home show it before the next fetch lands). */
+    fun lastBalance(ctx: Context): ScreenApi.Balance? {
+        val p = prefs(ctx)
+        val usd = p.getString("usd", null)?.toDoubleOrNull() ?: return null
+        val trial = p.getString("trialUsd", null)?.toDoubleOrNull() ?: 0.0
+        val paid = p.getString("paidUsd", null)?.toDoubleOrNull() ?: (usd - trial).coerceAtLeast(0.0)
+        return ScreenApi.Balance(usd, paid, trial, trial > 0)
+    }
+    fun setLastBalance(ctx: Context, b: ScreenApi.Balance) {
+        prefs(ctx).edit().putString("paidUsd", b.paidUsd.toString()).putString("trialUsd", b.trialUsd.toString()).apply()
+        setLastUsd(ctx, b.usd)
+    }
+
+    /** Secretary voice language as last saved/read ("auto", "uk", "en"). */
+    fun lang(ctx: Context): String = prefs(ctx).getString("lang", null)?.takeIf { it in ScreenApi.LANGS } ?: "auto"
+    fun setLang(ctx: Context, lang: String) { if (lang in ScreenApi.LANGS) prefs(ctx).edit().putString("lang", lang).apply() }
+
+    /** Wallet apps offered when no app handles solana: links (Play Store ids). */
+    val WALLET_APPS = listOf("Phantom" to "app.phantom", "Solflare" to "com.solflare.mobile")
+
     fun needTopup(ctx: Context): Boolean = prefs(ctx).getBoolean("needTopup", false)
     fun setNeedTopup(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("needTopup", on).apply()
 

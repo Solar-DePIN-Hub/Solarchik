@@ -43,7 +43,7 @@ class SolScreen(host: MainActivity) : Screen(host) {
     private var retelling = false
     /** Sol's action desk (0.21.7): context, plans, confirmed execution. */
     internal var actions = net.solardepin.solarchik.ui.SolActionDesk(host)
-    internal var actClient = net.solardepin.solarchik.sol.SolActClient()
+    internal var brain = net.solardepin.solarchik.sol.SolBrain()
     /** The action waiting for the player's tap. Nothing runs until [confirm]. */
     var pending: net.solardepin.solarchik.sol.ActionPlan? = null
         private set
@@ -136,6 +136,26 @@ class SolScreen(host: MainActivity) : Screen(host) {
     override fun onShow() {
         render()
         if (MainActivity.tickerEnabled) retellOnce()
+        takeHandoff()
+    }
+
+    /** 0.21.8: an action asked for by voice during a run gets its confirmation card here, re-planned fresh. */
+    internal fun takeHandoff() {
+        if (sending || executing || pending != null) return
+        val h = net.solardepin.solarchik.sol.SolHandoff.take() ?: return
+        host.scope.launch {
+            val c = actions.context()
+            val action = h.action.takeIf { a -> a.agent == null || c.agent(a.agent) != null } ?: return@launch
+            store.add(ChatTurn("user", h.said, h.at))
+            val plan = net.solardepin.solarchik.sol.SolActions.plan(action, c)
+            val why = blockedText(plan)
+            if (why != null) say(why, speakIt = false)
+            else {
+                pending = plan
+                say(if (plan.acquire) ctx.getString(R.string.sol_act_ready_acquire, plan.agent?.name.orEmpty()) else ctx.getString(R.string.sol_act_ready, planTitle(plan)), speakIt = false)
+            }
+            render()
+        }
     }
 
     override fun onHide() {
@@ -223,64 +243,77 @@ class SolScreen(host: MainActivity) : Screen(host) {
             speak(rule, auto = true)
             return
         }
-        if (net.solardepin.solarchik.sol.SolActions.looksLikeCommand(msg)) {
-            act(msg, history)
-            return
-        }
-        sending = true
-        status.text = "…"
-        status.visibility = View.VISIBLE
-        render()
-        host.scope.launch {
-            try {
-                val today = host.save.today()
-                val r = chat.ask(msg, host.lang, store.playerId(), store.conversationId(today), history, "yard", currentReport().script)
-                store.add(ChatTurn("assistant", r.text, System.currentTimeMillis(), fallback = r.fallback))
-                if (!r.fallback) speak(r.text, auto = true)
-            } finally {
-                sending = false
-                status.visibility = View.GONE
-                render()
-            }
-        }
+        act(msg, history)
     }
 
-    /* ---------------- Sol does things (0.21.7) ---------------- */
+    /* ---------------- one brain (0.21.8) ---------------- */
 
     private fun say(text: String, link: String = "", speakIt: Boolean = true) {
         store.add(ChatTurn("assistant", text, System.currentTimeMillis(), link = link, action = true))
         if (speakIt) speak(text, auto = true)
     }
 
-    /** Request → structured action (server model, phone fallback) → confirmation card. Executes nothing. */
+    /** Last brain answer (tests, diagnostics): source, model, time to first token. */
+    internal var lastReply: net.solardepin.solarchik.sol.SolBrain.Reply? = null
+        private set
+
+    /**
+     * 0.21.8: everything except the instant rules goes through [brain] — worker (OpenAI, streamed), then the
+     * market model, then the phone parser. Text streams into the status line and the voice starts on the
+     * first finished sentence. An action becomes a confirmation card; nothing executes without the tap.
+     */
     private fun act(msg: String, history: List<ChatTurn>) {
         sending = true
         pending = null
         status.text = "…"
         status.visibility = View.VISIBLE
         render()
+        val v = if (store.voiceOn) (voice ?: SolVoice(host).also { voice = it }) else null
+        v?.stop()
+        v?.beginStream()
+        var streamed = ""
         host.scope.launch {
             try {
                 val c = actions.context()
-                val r = actClient.ask(msg, host.lang, c, history)
+                val r = brain.ask(msg, host.lang, "yard", c, history, currentReport().script.take(500)) { soFar ->
+                    streamed = soFar
+                    status.text = soFar
+                    v?.feed(soFar, host.lang, final = false)
+                }
+                lastReply = r
                 val action = r.action
+                // finish the streamed voice with the final text (or speak a different final line)
+                fun answer(text: String, link: String = "") {
+                    store.add(ChatTurn("assistant", text, System.currentTimeMillis(), link = link, action = true))
+                    if (v == null) return
+                    if (streamed.isNotBlank() && text.startsWith(streamed.trim().take(24))) v.feed(text, host.lang, final = true)
+                    else if (streamed.isBlank()) v.speak(text, host.lang)
+                    else v.enqueue(text, host.lang)
+                }
                 when {
                     action == null -> {
-                        if (r.offline) {
-                            // The action route is unreachable and the phone could not read it: plain chat answers.
-                            val chatR = chat.ask(msg, host.lang, store.playerId(), store.conversationId(host.save.today()), history, "yard", currentReport().script)
-                            store.add(ChatTurn("assistant", chatR.text, System.currentTimeMillis(), fallback = chatR.fallback))
-                            if (!chatR.fallback) speak(chatR.text, auto = true)
-                        } else say(r.reply.ifBlank { ctx.getString(R.string.sol_act_unclear) })
+                        if (r.offline || r.reply.isBlank()) {
+                            if (r.offline) store.add(ChatTurn("assistant", SolChat.offlineLine(host.lang), System.currentTimeMillis(), fallback = true))
+                            else answer(ctx.getString(R.string.sol_act_unclear))
+                        } else answer(r.reply)
                     }
-                    !action.type.needsConfirm -> say(c.agent(action.agent)?.let { actions.status(it) } ?: ctx.getString(R.string.sol_act_unclear))
+                    !action.type.needsConfirm -> {
+                        val st = c.agent(action.agent)?.let { actions.status(it) } ?: ctx.getString(R.string.sol_act_unclear)
+                        if (v != null && streamed.isNotBlank()) v.feed(streamed, host.lang, final = true)
+                        store.add(ChatTurn("assistant", st, System.currentTimeMillis(), action = true))
+                        v?.enqueue(st, host.lang)
+                    }
                     else -> {
                         val plan = net.solardepin.solarchik.sol.SolActions.plan(action, c)
                         val why = blockedText(plan)
-                        if (why != null) say(why)
-                        else {
+                        if (why != null) {
+                            if (v != null && streamed.isNotBlank()) v.feed(streamed, host.lang, final = true)
+                            store.add(ChatTurn("assistant", why, System.currentTimeMillis(), action = true))
+                            v?.enqueue(why, host.lang)
+                        } else {
                             pending = plan
-                            say(ctx.getString(R.string.sol_act_ready, planTitle(plan)))
+                            answer(r.reply.takeIf { it.isNotBlank() && !plan.acquire && r.source == net.solardepin.solarchik.sol.SolBrain.Source.WORKER }
+                                ?: if (plan.acquire) ctx.getString(R.string.sol_act_ready_acquire, plan.agent?.name.orEmpty()) else ctx.getString(R.string.sol_act_ready, planTitle(plan)))
                         }
                     }
                 }
@@ -331,6 +364,19 @@ class SolScreen(host: MainActivity) : Screen(host) {
         tag = "sol-act-card"
         addView(Ui.label(ctx, ctx.getString(R.string.sol_act_card), Ui.GOLD))
         addView(Ui.top(Ui.text(ctx, planTitle(p), 15f, Ui.TEXT, 800), 4))
+        val sku = p.agent?.let { net.solardepin.solarchik.core.Catalog.baseOf(it.skuId) }
+        if (p.acquire && sku != null) {
+            // 0.21.8: "start X" for an agent I don't own — the same offer as the Agents tab
+            addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.offer_body), 12f), 4))
+            OfferCard.acquireOptions(host, sku, executing) { tier -> confirmAcquire(tier) }.forEach { o ->
+                val b = Ui.button(ctx, o.label, if (o.primary) Ui.Btn.PRIMARY else Ui.Btn.SECONDARY, R.drawable.ic_bolt_small) { o.go() }.apply { tag = o.tag }
+                Ui.setEnabled(b, o.enabled)
+                addView(Ui.top(b, 8))
+            }
+            addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sol_act_wallet), 11f), 6))
+            addView(Ui.top(Ui.button(ctx, ctx.getString(R.string.sol_act_cancel), Ui.Btn.GHOST) { cancelPending() }.apply { tag = "sol-act-cancel" }, 8))
+            return@apply
+        }
         p.listing?.takeIf { p.action.type == net.solardepin.solarchik.sol.ActType.SET_STRATEGY }?.let {
             addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sol_act_template, it.name), 12f), 4))
         }
@@ -365,9 +411,21 @@ class SolScreen(host: MainActivity) : Screen(host) {
         render()
     }
 
+    /** Mint free / Buy Pro on the offer card, then start (still only on the player's tap). */
+    fun confirmAcquire(tier: String) {
+        val p = pending ?: return
+        if (executing || !p.acquire) return
+        runConfirmed { actions.acquireAndStart(p, tier) }
+    }
+
     /** The ONLY path that executes an action: the player's tap on Confirm. */
     fun confirm() {
         val p = pending ?: return
+        if (p.acquire) return
+        runConfirmed { actions.execute(p) }
+    }
+
+    private fun runConfirmed(work: suspend () -> net.solardepin.solarchik.ui.ActResult) {
         if (executing) return
         executing = true
         status.text = ctx.getString(R.string.sol_act_working)
@@ -375,7 +433,7 @@ class SolScreen(host: MainActivity) : Screen(host) {
         render()
         host.scope.launch {
             val r = try {
-                actions.execute(p)
+                work()
             } catch (t: Throwable) {
                 if (t is kotlinx.coroutines.CancellationException) throw t
                 net.solardepin.solarchik.ui.ActResult(false, ctx.getString(R.string.sol_act_failed, host.errorText(t)))

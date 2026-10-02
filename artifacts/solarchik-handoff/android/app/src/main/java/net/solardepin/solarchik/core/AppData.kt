@@ -21,6 +21,7 @@ object AppData {
         "solarchik-desk",
         "solarchik-notes",
         "solarchik-sol",
+        "solarchik-voice",
         "solarchik.desk",
         "solarchik.player",
         "solarchik.secretary",
@@ -44,5 +45,7 @@ object AppData {
         }
         // Sol's cached voice clips (texts Sol said to this player)
         runCatching { java.io.File(app.cacheDir, "sol-voice").deleteRecursively() }
+        runCatching { java.io.File(app.cacheDir, "sol-voice-oa").deleteRecursively() }
+        net.solardepin.solarchik.sol.SolHandoff.take()
     }
 }

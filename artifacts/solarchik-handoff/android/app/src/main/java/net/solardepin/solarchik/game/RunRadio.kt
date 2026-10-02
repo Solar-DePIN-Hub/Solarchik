@@ -5,27 +5,41 @@ import android.os.Handler
 import android.os.Looper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import net.solardepin.solarchik.R
+import net.solardepin.solarchik.agents.AgentStore
+import net.solardepin.solarchik.agents.Ownership
+import net.solardepin.solarchik.core.AgentTier
+import net.solardepin.solarchik.core.Catalog
 import net.solardepin.solarchik.game.run.BanterKind
 import net.solardepin.solarchik.game.run.Ev
 import net.solardepin.solarchik.game.run.Phase
 import net.solardepin.solarchik.game.run.RunAudio
 import net.solardepin.solarchik.game.run.RunBanter
 import net.solardepin.solarchik.game.run.ScriptLine
+import net.solardepin.solarchik.sol.ActAgent
+import net.solardepin.solarchik.sol.ActContext
+import net.solardepin.solarchik.sol.SolBrain
 import net.solardepin.solarchik.sol.SolChat
 import net.solardepin.solarchik.sol.SolChatStore
 import net.solardepin.solarchik.sol.SolEars
+import net.solardepin.solarchik.sol.SolHandoff
 import net.solardepin.solarchik.sol.SolRules
 import net.solardepin.solarchik.sol.SolVoice
-import net.solardepin.solarchik.core.StreakRules
+import net.solardepin.solarchik.agents.engine.Track
 
 /**
- * Port of the web RunRadio: Sol talks during the run (a cheer at the start, a line on a fall,
- * scripted moments like the last heart, one every ~35 s) and the mic button asks Sol something
- * mid-run (only while paused; see RunActivity). Every line is live AI (SolChat, scene "run") from a
- * cue written in the app language, so the reply comes back in that language. Only when Sol is
- * unreachable does the line fall back to the runBanter packs / scripted strings, tagged "Offline".
- * Spoken with Sol's neural voice (system TTS offline) and shown as a small caption.
+ * Sol talks during the run (0.21.8 rewrite).
+ *
+ *  - Time-critical hints (hurt, combo, bonus, progress, last heart, first roof) are LOCAL lines spoken at
+ *    once (their audio is prefetched at the start), and dropped if they are stale (> [Policy.HINT_MAX_AGE_MS])
+ *    or the run is over. A slow AI answer to "wire ahead" can no longer arrive seconds after the wire.
+ *  - The AI ([SolBrain], scene "run") is used only for GO, the clock moment, DEAD and the player's own
+ *    questions; a late GO/clock answer falls back to the local line.
+ *  - Player questions are queued (never dropped) and hints never interrupt them. Listening lasts up to
+ *    12 s and keeps the partial transcript. An action asked for mid-run waits in [SolHandoff] for the
+ *    Sol tab's confirmation card.
+ *  - Captions in the wrong language are replaced by the local line.
  * UI thread only.
  */
 class RunRadio(
@@ -37,21 +51,25 @@ class RunRadio(
     private val onListening: (Boolean) -> Unit,
 ) {
     private val main = Handler(Looper.getMainLooper())
-    private val chat = SolChat()
+    internal var brain = SolBrain()
     private val store = SolChatStore(context)
     private var voice: SolVoice? = null
     private var ears: SolEars? = null
     private var last: RunHud? = null
     private var started = false
+    private var over = false
     private var lastBanter = 0L
     private var banterAfter = 0L
     private var chatOpen = false
     private var chatTurn = 0
+    private var asking = 0
     private var talkingUntil = 0L
     private var lastHeartSaid = false
+    /** Next local line per kind, chosen ahead so its audio is already cached when it is needed. */
+    private val nextLine = mutableMapOf<BanterKind, String>()
     var live = false
     var paused = false
-        set(v) { field = v; if (v) hush() }
+        set(v) { field = v; if (v && !chatOpen && asking == 0) hush() }
     var listening = false
         private set
     private var heard = ""
@@ -61,7 +79,7 @@ class RunRadio(
     private val periodic = object : Runnable {
         override fun run() {
             val h = last
-            if (live && !paused && h != null && h.phase == Phase.RUNNING) banter(RunBanter.periodicKind(h.bonus, h.combo, h.hearts), h)
+            if (live && !paused && h != null && h.phase == Phase.RUNNING) banter(RunBanter.periodicKind(h.bonus, h.combo, h.hearts), h, System.currentTimeMillis())
             main.postDelayed(this, 35_000)
         }
     }
@@ -69,15 +87,36 @@ class RunRadio(
 
     fun begin() {
         started = false
+        over = false
         lastHeartSaid = false
         main.removeCallbacks(periodic)
         main.postDelayed(periodic, 35_000)
+        prefetchLines()
+    }
+
+    private fun voice(): SolVoice = voice ?: SolVoice(context).also { voice = it }
+
+    /** Warms the TTS cache for the local lines this run will most likely use. */
+    private fun prefetchLines() {
+        val chapter = last?.chapter
+        for (k in Policy.PREFETCH) {
+            val line = RunBanter.pick(k, lang, chapter).takeIf { it.isNotEmpty() } ?: continue
+            nextLine[k] = line
+            voice().prefetch(line, lang)
+        }
+        for (s in ScriptLine.values()) voice().prefetch(scriptText(s), lang)
+    }
+
+    private fun localLine(kind: BanterKind, hud: RunHud): String {
+        val line = nextLine.remove(kind) ?: RunBanter.pick(kind, lang, hud.chapter)
+        RunBanter.pick(kind, lang, hud.chapter).takeIf { it.isNotEmpty() }?.let { nextLine[kind] = it; voice().prefetch(it, lang) }
+        return line
     }
 
     private fun show(text: String) {
         onCaption(text)
         main.removeCallbacks(clearCaption)
-        main.postDelayed(clearCaption, (2600L + 45L * text.length).coerceAtMost(5200L))
+        main.postDelayed(clearCaption, (2600L + 45L * text.length).coerceAtMost(6500L))
     }
 
     private fun hush() {
@@ -86,38 +125,53 @@ class RunRadio(
         audio?.duck(false)
     }
 
+    private fun duckFor(spoken: String) {
+        val ms = (55L * spoken.split(Regex("\\s+")).size + 400).coerceAtMost(9000)
+        talkingUntil = maxOf(talkingUntil, System.currentTimeMillis() + ms)
+        audio?.duck(true)
+        main.removeCallbacks(unduck)
+        main.postDelayed(unduck, talkingUntil - System.currentTimeMillis())
+    }
+
+    /** A hint/banter line: replaces what is playing (never used while the player is talking to Sol). */
     private fun speak(text: String, offline: Boolean = false) {
         val spoken = SolRules.tidy(text).trim()
         if (spoken.isEmpty()) return
         hush()
         show(if (offline) context.getString(R.string.run_offline_tag) + " · " + spoken else spoken)
-        val ms = (55L * spoken.split(Regex("\\s+")).size + 400).coerceAtMost(9000)
-        talkingUntil = System.currentTimeMillis() + ms
-        audio?.duck(true)
-        main.removeCallbacks(unduck)
-        main.postDelayed(unduck, ms)
-        val v = voice ?: SolVoice(context).also { voice = it }
-        v.speak(spoken, lang)
+        duckFor(spoken)
+        voice().speak(spoken, lang)
+    }
+
+    /** An answer to the player: appended after earlier answers, never cut by hints. */
+    private fun answer(text: String) {
+        val spoken = SolRules.tidy(text).trim()
+        if (spoken.isEmpty()) return
+        show(spoken)
+        duckFor(spoken)
+        voice().enqueue(spoken, lang)
     }
 
     private fun talking() = System.currentTimeMillis() < talkingUntil
-    private fun inPlayerChat() = chatOpen || System.currentTimeMillis() < banterAfter
+    private fun inPlayerChat() = chatOpen || asking > 0 || System.currentTimeMillis() < banterAfter
 
-    private fun context(h: RunHud) = RunBanter.context(h.meters, h.chapter, h.combo, h.suns, h.hearts, lang)
+    private fun runContext(h: RunHud) = RunBanter.context(h.meters, h.chapter, h.combo, h.suns, h.hearts, lang)
 
     /** Game events of one step plus the HUD after it. */
     fun push(events: List<Ev>, hud: RunHud) {
         last = hud
+        val now = System.currentTimeMillis()
+        if (Ev.DEAD in events) over = true
         val line = RunBanter.scripted(hud.meters.toDouble(), hud.death, hud.hearts, events, GameSave.GOAL_M, lastHeartSaid)
         if (line == ScriptLine.LAST_HEART) lastHeartSaid = true
-        if (line != null) scripted(line, hud)
+        if (line != null) scripted(line, hud, now)
         if (hud.phase == Phase.RUNNING && !started) {
             started = true
-            banter(BanterKind.GO, hud)
+            banter(BanterKind.GO, hud, now)
         }
         for (ev in events) {
             if (line != null && ev == Ev.DEAD) continue
-            RunBanter.eventToBanter(ev)?.let { banter(it, hud) }
+            RunBanter.eventToBanter(ev)?.let { banter(it, hud, now) }
         }
     }
 
@@ -125,24 +179,24 @@ class RunRadio(
         last = hud
         if (hud.phase == Phase.RUNNING && !started) {
             started = true
-            banter(BanterKind.GO, hud)
+            banter(BanterKind.GO, hud, System.currentTimeMillis())
         }
     }
 
-    /** Scripted moment: live AI line from a localized cue; the scripted string only offline. */
-    private fun scripted(line: ScriptLine, hud: RunHud) {
+    /** Scripted moment: local line at once; only the clock moment asks the AI (with a deadline). */
+    private fun scripted(line: ScriptLine, hud: RunHud, at: Long) {
         if (!live || listening || inPlayerChat()) return
-        val cue = when (line) {
-            ScriptLine.CLOCK_READY -> context.getString(R.string.run_cue_clock_ready, GameSave.GOAL_M)
-            ScriptLine.FIRST_ROOF -> context.getString(R.string.run_cue_first_roof)
-            ScriptLine.LAST_HEART -> context.getString(R.string.run_cue_last_heart)
+        lastBanter = at
+        if (!Policy.aiForScript(line)) {
+            if (!Policy.stale(at, System.currentTimeMillis(), Policy.HINT_MAX_AGE_MS, over, false)) speak(scriptText(line))
+            return
         }
-        lastBanter = System.currentTimeMillis()
-        talkingUntil = System.currentTimeMillis() + 2500 // hold other banter until the reply lands
+        talkingUntil = at + Policy.AI_DEADLINE_MS
+        val cue = context.getString(R.string.run_cue_clock_ready, GameSave.GOAL_M)
         scope.launch {
-            val r = runCatching { ask(cue, hud) }.getOrNull()
-            if (inPlayerChat() || paused && line == ScriptLine.LAST_HEART) return@launch
-            if (r != null && !r.fallback && r.text.isNotBlank()) speak(r.text) else speak(scriptText(line), offline = true)
+            val r = withTimeoutOrNull(Policy.AI_DEADLINE_MS) { runCatching { ask(cue, hud) }.getOrNull() }
+            if (inPlayerChat() || paused) return@launch
+            speak(Policy.caption(r?.reply, lang) ?: scriptText(line))
         }
     }
 
@@ -152,18 +206,25 @@ class RunRadio(
         ScriptLine.LAST_HEART -> context.getString(R.string.banter_last_heart)
     }
 
-    private fun banter(kind: BanterKind, hud: RunHud) {
+    private fun banter(kind: BanterKind, hud: RunHud, at: Long) {
         if (!live || paused || listening || inPlayerChat()) return
-        val now = System.currentTimeMillis()
-        if (kind != BanterKind.GO && kind != BanterKind.DEAD && now - lastBanter < 32_000) return
+        if (over && kind != BanterKind.DEAD) return
+        if (kind != BanterKind.GO && kind != BanterKind.DEAD && at - lastBanter < 32_000) return
         if (talking() && kind != BanterKind.DEAD) return
+        lastBanter = at
+        if (!Policy.aiForBanter(kind)) {
+            localLine(kind, hud).takeIf { it.isNotEmpty() }?.let { speak(it) }
+            return
+        }
         val cue = cueFor(kind, hud)
-        lastBanter = now
+        val deadline = if (kind == BanterKind.DEAD) Policy.DEAD_DEADLINE_MS else Policy.AI_DEADLINE_MS
+        talkingUntil = at + deadline
         scope.launch {
-            val r = runCatching { ask(cue, hud) }.getOrNull()
+            val r = withTimeoutOrNull(deadline) { runCatching { ask(cue, hud) }.getOrNull() }
             if (inPlayerChat() || paused && kind != BanterKind.DEAD) return@launch
-            if (r != null && !r.fallback && r.text.isNotBlank()) speak(r.text)
-            else RunBanter.pick(kind, lang, hud.chapter).takeIf { it.isNotEmpty() }?.let { speak(it, offline = true) }
+            if (over && kind != BanterKind.DEAD) return@launch
+            val ai = Policy.caption(r?.reply, lang)
+            if (ai != null) speak(ai) else localLine(kind, hud).takeIf { it.isNotEmpty() }?.let { speak(it) }
         }
     }
 
@@ -177,12 +238,22 @@ class RunRadio(
         else -> context.getString(R.string.run_cue_progress, h.meters)
     }
 
-    private suspend fun ask(message: String, hud: RunHud?) = chat.ask(
-        message, lang, store.playerId(), store.conversationId(StreakRules.dayKey(System.currentTimeMillis())),
-        store.turns().takeLast(6), scene = "run", context = hud?.let { context(it) }.orEmpty(),
-    )
+    private suspend fun ask(message: String, hud: RunHud?): SolBrain.Reply =
+        brain.ask(message, lang, "run", runActContext(), store.turns().takeLast(6), hud?.let { runContext(it) }.orEmpty())
 
-    // ---- mic (web startListen / stopListen) ----
+    /** What Sol may refer to mid-run: the paper agents and whether I own them (no chain calls in a run). */
+    private fun runActContext(): ActContext {
+        val records = runCatching { AgentStore(context).agents() }.getOrDefault(emptyList())
+        val agents = Catalog.skus.map { sku ->
+            ActAgent(
+                id = "paper:${sku.id}", name = sku.name, running = false, skuId = sku.id, tier = sku.tierFor(AgentTier.FREE),
+                track = Track.PAPER, owned = Ownership.ownsSku(records, sku.id),
+            )
+        }
+        return ActContext(agents, emptyList(), false)
+    }
+
+    // ---- mic ----
 
     /** Call after RECORD_AUDIO was granted. */
     fun startListen() {
@@ -191,23 +262,24 @@ class RunRadio(
         if (!e.available()) return
         chatTurn += 1
         chatOpen = true
-        hush()
+        if (asking == 0) hush()
         heard = ""
         listening = true
         onListening(true)
         show(context.getString(R.string.run_listening))
         audio?.play("tick")
         val turn = chatTurn
-        e.listen(lang, onPartial = { heard = it }) { text ->
+        e.listen(lang, onPartial = { heard = it; if (it.isNotBlank()) onCaption(it) }) { text ->
             if (turn != chatTurn || !listening) return@listen
             listening = false
             onListening(false)
             main.removeCallbacks(listenTimeout)
             val said = text?.takeIf { it.isNotBlank() } ?: heard
-            if (said.isNotBlank()) askPlayer(said) else endChat(turn, false)
+            heard = ""
+            if (said.isNotBlank()) askPlayer(said) else endChat(false)
         }
         main.removeCallbacks(listenTimeout)
-        main.postDelayed(listenTimeout, 5000)
+        main.postDelayed(listenTimeout, Policy.LISTEN_MS)
     }
 
     fun stopListen() {
@@ -218,24 +290,36 @@ class RunRadio(
         ears?.stop()
         val said = heard.trim()
         heard = ""
-        if (said.isNotEmpty()) askPlayer(said) else endChat(chatTurn, false)
+        if (said.isNotEmpty()) askPlayer(said) else endChat(false)
     }
 
+    /** Every question gets an answer, in order (answers are appended to the voice queue). */
     private fun askPlayer(text: String) {
-        val turn = chatTurn
-        chatOpen = true
+        chatOpen = false
+        asking++
         show(text)
         audio?.play("tick")
         scope.launch {
-            val r = runCatching { ask(text, last) }.getOrNull()
-            if (turn != chatTurn) return@launch
-            if (r == null) audio?.play("hurt") else speak(r.text)
-            endChat(turn)
+            try {
+                val r = runCatching { ask(text, last) }.getOrNull()
+                val action = r?.action
+                if (action != null && action.type.needsConfirm) {
+                    SolHandoff.put(text, action)
+                    answer(context.getString(R.string.run_action_later))
+                } else {
+                    val said = Policy.caption(r?.reply, lang)
+                    if (said != null) answer(said)
+                    else if (r == null || r.offline) { audio?.play("hurt"); answer(SolChat.offlineLine(lang)) }
+                }
+            } finally {
+                asking--
+                endChat(true)
+            }
         }
     }
 
-    private fun endChat(turn: Int, cooldown: Boolean = true) {
-        if (turn != chatTurn) return
+    private fun endChat(cooldown: Boolean) {
+        if (asking > 0 || listening) return
         chatOpen = false
         if (cooldown) {
             banterAfter = System.currentTimeMillis() + 30_000
@@ -247,5 +331,26 @@ class RunRadio(
         main.removeCallbacksAndMessages(null)
         ears?.stop()
         voice?.shutdown()
+    }
+
+    /** Pure decisions, unit-tested (RunRadioPolicyTest). */
+    object Policy {
+        const val HINT_MAX_AGE_MS = 800L
+        const val AI_DEADLINE_MS = 2_500L
+        const val DEAD_DEADLINE_MS = 6_000L
+        const val LISTEN_MS = 12_000L
+        val PREFETCH = listOf(BanterKind.GO, BanterKind.HURT, BanterKind.COMBO, BanterKind.BONUS, BanterKind.CHAPTER, BanterKind.DEAD)
+
+        /** Only these moments are worth a model round trip; everything time-critical is local. */
+        fun aiForBanter(kind: BanterKind): Boolean = kind == BanterKind.GO || kind == BanterKind.DEAD
+        fun aiForScript(line: ScriptLine): Boolean = line == ScriptLine.CLOCK_READY
+
+        /** A hint is dropped once it is older than [maxAgeMs] or the run ended (unless it is about the end). */
+        fun stale(at: Long, now: Long, maxAgeMs: Long, over: Boolean, aboutEnd: Boolean): Boolean =
+            now - at > maxAgeMs || (over && !aboutEnd)
+
+        /** An AI caption is used only when it is non-blank and in the run's language. */
+        fun caption(reply: String?, lang: String): String? =
+            reply?.trim()?.takeIf { it.isNotEmpty() && SolChat.fitsLanguage(it, if (lang == "uk") "uk" else "en") }
     }
 }

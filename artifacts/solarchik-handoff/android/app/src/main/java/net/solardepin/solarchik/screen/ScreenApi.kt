@@ -29,6 +29,42 @@ object ScreenApi {
 
     data class Voicemail(val caller: String, val text: String, val at: Long)
 
+    /** GET /balance: total credit, the paid part and the free trial part (0.21.8). */
+    data class Balance(val usd: Double, val paidUsd: Double, val trialUsd: Double, val trial: Boolean)
+
+    /** Secretary voice languages the worker accepts (GET/POST /secretary-lang). */
+    val LANGS = listOf("auto", "uk", "en")
+
+    fun balanceInfo(userId: String): Balance? {
+        val (code, body) = request("GET", "$BASE/balance?userId=${enc(userId)}", null)
+        return parseBalanceInfo(code, body)
+    }
+
+    fun lang(userId: String): String? {
+        val (code, body) = request("GET", "$BASE/secretary-lang?userId=${enc(userId)}", null)
+        return parseLang(code, body)
+    }
+
+    fun setLang(userId: String, lang: String): String? {
+        val (code, body) = request("POST", "$BASE/secretary-lang", JSONObject().put("userId", userId).put("lang", lang).toString())
+        return parseLang(code, body)
+    }
+
+    fun parseBalanceInfo(code: Int, body: String): Balance? {
+        if (code !in 200..299) return null
+        val o = parse(body)
+        val usd = o.optDouble("usd", Double.NaN)
+        if (!usd.isFinite()) return null
+        val trialUsd = o.optDouble("trialUsd", 0.0).takeIf { it.isFinite() } ?: 0.0
+        val paid = o.optDouble("paidUsd", Double.NaN).takeIf { it.isFinite() } ?: (usd - trialUsd).coerceAtLeast(0.0)
+        return Balance(usd, paid, trialUsd, o.optBoolean("trial", trialUsd > 0))
+    }
+
+    fun parseLang(code: Int, body: String): String? {
+        if (code !in 200..299) return null
+        return parse(body).optString("lang").trim().lowercase().takeIf { it in LANGS }
+    }
+
     fun balance(userId: String): Double? {
         val (code, body) = request("GET", "$BASE/balance?userId=${enc(userId)}", null)
         return parseBalance(code, body)

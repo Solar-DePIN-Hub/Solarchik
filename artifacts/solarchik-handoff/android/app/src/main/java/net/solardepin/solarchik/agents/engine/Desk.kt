@@ -52,6 +52,9 @@ class Desk(
             val owned = agents.agents().firstOrNull { it.asset == key && it.cluster == "devnet" && it.status != OwnedAgent.STATUS_MISSING }
                 ?: return@withLock Result.failure(DeskError(DeskError.Kind.NOT_OWNED))
             if (owned.tier != tier) return@withLock Result.failure(DeskError(DeskError.Kind.NOT_OWNED))
+        } else if (!net.solardepin.solarchik.agents.Ownership.ownsSku(agents.agents(), skuId)) {
+            // 0.21.8: paper runs need an owned agent as well (mint free or buy Pro first)
+            return@withLock Result.failure(DeskError(DeskError.Kind.NOT_OWNED))
         }
         val s = store.read()
         val now = clock()

@@ -173,7 +173,14 @@ class RunArt(private val assets: AssetManager) {
     /** A blurred copy: [div]x smaller (halving steps average properly), drawn back at full size. */
     private fun soft(img: Img, div: Int): Img = Img(scaled(img.bmp, max(1, img.bmp.width / div), max(1, img.bmp.height / div)), img.w, img.h)
 
-    private fun mask(b: Bitmap): Bitmap = b.extractAlpha().also { if (it !== b) b.recycle() }
+    /**
+     * ALPHA_8 copy. 0.21.8: widths are padded to a multiple of 4 so every row of the 8-bit texture is
+     * word aligned (some GPU drivers sheared or garbled unaligned A8 uploads into grids of dots on tablets).
+     */
+    private fun mask(b: Bitmap): Bitmap {
+        val src = if (b.width % 4 != 0) Bitmap.createScaledBitmap(b, alignedW(b.width), b.height, true).also { if (it !== b) b.recycle() } else b
+        return src.extractAlpha().also { if (it !== src) src.recycle() }
+    }
 
     private fun maskLayer(path: String, lw: Float, k: Float): Img? {
         val src = decode(path, k * lw / 2560f) ?: return null
@@ -304,6 +311,8 @@ class RunArt(private val assets: AssetManager) {
     }
 
     companion object {
+        /** [w] rounded up to a multiple of 4 (word-aligned A8 rows). */
+        fun alignedW(w: Int): Int = (w + 3) / 4 * 4
         /** Width of one tile of every skyline layer, in world units. */
         const val LAYER_W = 1280f
         /** Facade tile size in world units. */

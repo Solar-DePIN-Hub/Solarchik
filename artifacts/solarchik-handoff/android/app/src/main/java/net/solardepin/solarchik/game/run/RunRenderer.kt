@@ -1069,8 +1069,9 @@ class RunRenderer(
     }
 
     private fun paintCitySky(c: Canvas, w: Double, h: Double, mood: Double, camX: Double, clock: Double, flash: Double = 0.0) {
-        if (skyCacheH != h) { skyCache.clear(); skyCacheH = h }
-        val key = (mood * 16).toInt() + ((stormNow * 8).roundToInt() shl 6) + ((pal[P_HOR] and 0xFF) shl 10)
+        // 0.21.8: bounded (the storm roll-in and lightning made a new gradient nearly every frame)
+        if (skyCacheH != h || skyCache.size > 64) { skyCache.clear(); skyCacheH = h }
+        val key = (mood * 16).toInt() + ((stormNow * 8).roundToInt() shl 6) + (((pal[P_HOR] and 0xFF) shr 2) shl 10)
         val sh = skyCache.getOrPut(key) {
             LinearGradient(0f, 0f, 0f, h.toFloat(), intArrayOf(pal[P_TOP], pal[P_MID], pal[P_HOR], pal[P_HOR]), floatArrayOf(0f, 0.4f, 0.66f, 1f), Shader.TileMode.CLAMP)
         }
@@ -1111,7 +1112,9 @@ class RunRenderer(
                 val x = ((-camX * (0.04 + k * 0.02) - clock * sp + k * 410) % (w + 700) + w + 700) % (w + 700) - 600
                 cloud(c, k % 2, x, h * (0.04 + k * 0.07), 1.5 - k * 0.12, (0.75 - k * 0.1) * sa, if (k % 2 == 0) 0xFF22344E.toInt() else 0xFF2C4A62.toInt())
             }
-            rampRect(c, 0.0, h * 0.18, w, h * 0.42, 0xFF3A7484.toInt(), 0.0, 0.16 * sa)
+            // 0.21.8: the glow fades in AND out (it ended in a hard horizontal edge at 0.42 h)
+            rampRect(c, 0.0, h * 0.18, w, h * 0.32, 0xFF3A7484.toInt(), 0.0, 0.16 * sa)
+            rampRect(c, 0.0, h * 0.32, w, h * 0.5, 0xFF3A7484.toInt(), 0.16 * sa, 0.0)
         }
     }
 
@@ -1193,29 +1196,26 @@ class RunRenderer(
         val seed = hash(p.x * 0.0137 + 3.1)
         val style = (seed * 3).toInt().coerceIn(0, 2)
         val fTop = top + 15
-        // facade
-        val fs = art.facadeShader[style]
-        if (fs != null) {
-            shaderAt(fs, bx0 + seed * 40, fTop)
-            facadePaint.shader = fs
-            facadePaint.colorFilter = cf
-            c.drawRect(bx0.toFloat(), fTop.toFloat(), bx1.toFloat(), (h + 4).toFloat(), facadePaint)
-            facadePaint.shader = null
+        if (p.w <= LONG_ROOF) {
+            drawFacade(c, bx0, bx1, fTop, h, seed, style, cf)
+        } else {
+            // 0.21.8: a long roof (the drone arena is 4200 units) reads as a row of distinct buildings,
+            // not one endless window grid (owner, SM-X210: "the background turns into a blue grid")
+            var sx = p.x
+            val end = p.x + p.w
+            while (sx < end) {
+                val sSeed = hash(sx * 0.0137 + 3.1)
+                val segW = min(end - sx, 460 + sSeed * 260)
+                val x0 = max(bx0, sx - (p.x - x) - if (sx == p.x) 3.0 else 0.0)
+                val x1 = min(bx1, sx + segW - (p.x - x) + if (sx + segW >= end) 3.0 else 0.0)
+                if (x1 > -40 && x0 < viewW + 40) {
+                    val st = (sSeed * 3).toInt().coerceIn(0, 2)
+                    drawFacade(c, x0, x1, fTop, h, sSeed, st, cf)
+                    if (sx + segW < end) c.drawRect((x1 - 5).toFloat(), fTop.toFloat(), x1.toFloat(), (h + 4).toFloat(), solid(0xFF06050A.toInt(), 0.55))
+                }
+                sx += segW
+            }
         }
-        val lit = pal[P_LIT] / 255.0
-        val ls = art.facadeLitShader[style]
-        if (ls != null && lit > 0.02) {
-            shaderAt(ls, bx0 + seed * 40, fTop)
-            litPaint.shader = ls
-            litPaint.color = color(0xFFFFC27A.toInt(), lit * 0.9)
-            c.drawRect(bx0.toFloat(), fTop.toFloat(), bx1.toFloat(), (h + 4).toFloat(), litPaint)
-            litPaint.shader = null
-        }
-        // form: rim light on the sun side, shadow on the far side, a dark band under the cornice
-        val night = (pal[P_NEON] / 255.0)
-        c.drawRect(bx0.toFloat(), fTop.toFloat(), (bx0 + 2.5).toFloat(), (h + 4).toFloat(), solid(pal[P_RIM], 0.32 * (1 - night * 0.4)))
-        for (k in 0 until 3) c.drawRect((bx1 - 4 - k * 4).toFloat(), fTop.toFloat(), (bx1 - k * 4).toFloat(), (h + 4).toFloat(), solid(0xFF0A0810.toInt(), 0.1 + 0.06 * k))
-        c.drawRect(bx0.toFloat(), fTop.toFloat(), bx1.toFloat(), (fTop + 4).toFloat(), solid(0xFF0A0810.toInt(), 0.35))
         // rooftop props behind the walk line
         val back = top + 2
         val panel = art.panel
@@ -1253,6 +1253,33 @@ class RunRenderer(
             facadePaint.shader = null
         }
         c.drawRect(bx0.toFloat(), top.toFloat(), bx1.toFloat(), (top + 1.2).toFloat(), solid(pal[P_RIM], 0.45))
+    }
+
+    /** A facade block [x0]..[x1] from [fTop] down to the street: painted tile, lit windows, rim and shadow. */
+    private fun drawFacade(c: Canvas, x0: Double, x1: Double, fTop: Double, h: Double, seed: Double, style: Int, cf: android.graphics.ColorFilter?) {
+        val art = spr.art
+        val fs = art.facadeShader[style]
+        if (fs != null) {
+            shaderAt(fs, x0 + seed * 40, fTop)
+            facadePaint.shader = fs
+            facadePaint.colorFilter = cf
+            c.drawRect(x0.toFloat(), fTop.toFloat(), x1.toFloat(), (h + 4).toFloat(), facadePaint)
+            facadePaint.shader = null
+        }
+        val lit = pal[P_LIT] / 255.0
+        val ls = art.facadeLitShader[style]
+        if (ls != null && lit > 0.02) {
+            shaderAt(ls, x0 + seed * 40, fTop)
+            litPaint.shader = ls
+            litPaint.color = color(0xFFFFC27A.toInt(), lit * 0.9)
+            c.drawRect(x0.toFloat(), fTop.toFloat(), x1.toFloat(), (h + 4).toFloat(), litPaint)
+            litPaint.shader = null
+        }
+        // form: rim light on the sun side, shadow on the far side, a dark band under the cornice
+        val night = (pal[P_NEON] / 255.0)
+        c.drawRect(x0.toFloat(), fTop.toFloat(), (x0 + 2.5).toFloat(), (h + 4).toFloat(), solid(pal[P_RIM], 0.32 * (1 - night * 0.4)))
+        for (k in 0 until 3) c.drawRect((x1 - 4 - k * 4).toFloat(), fTop.toFloat(), (x1 - k * 4).toFloat(), (h + 4).toFloat(), solid(0xFF0A0810.toInt(), 0.1 + 0.06 * k))
+        c.drawRect(x0.toFloat(), fTop.toFloat(), x1.toFloat(), (fTop + 4).toFloat(), solid(0xFF0A0810.toInt(), 0.35))
     }
 
     /** City rules: a cracked solar-glass canopy bridge that gives way after a landing. */
@@ -1806,7 +1833,11 @@ class RunRenderer(
     private var camT = -1.0
     private var camLift = 0.0
 
+    /** Logical width of the frame being drawn (culling for long roofs). */
+    private var viewW = 2000.0
+
     private fun drawWorld(c: Canvas, w: Double, h: Double, s: RunState, clock: Double, skin: RunSkin) {
+        viewW = w
         alpha = 1f
         track(s, clock)
         val trauma = if (reducedMotion) 0.0 else s.shake * s.shake
@@ -2262,6 +2293,8 @@ class RunRenderer(
          */
         const val HERO_H = 106.0
         const val HERO_FRAC = 0.156
+        /** 0.21.8: roofs wider than this are drawn as several facade blocks (world units). */
+        const val LONG_ROOF = 900.0
         // palette slots
         private const val POP_SLOTS = 24
         private const val P_TOP = 0

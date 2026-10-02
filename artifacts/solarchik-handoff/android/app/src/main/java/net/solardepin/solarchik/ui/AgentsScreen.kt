@@ -260,7 +260,10 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
         addView(Ui.top(bar, 10))
     }
 
-    /** Paper: every catalog strategy as a trial (or the owned NFT). Devnet: owned devnet NFTs only. */
+    /**
+     * Paper: every catalog strategy is listed, but 0.21.8 only STARTS owned ones (any cluster); the rest
+     * show a "Get this agent" card (mint free / buy Pro). Devnet: owned devnet NFTs only.
+     */
     private fun runnable(st: DeskState): List<AgentRun> {
         val w = host.wallet
         if (track == Track.PAPER) {
@@ -291,7 +294,8 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
                 else -> ctx.getString(R.string.desk_status_stopped) to Ui.MUTED
             }
             pills.addView(Ui.pill(ctx, stLabel, stColor, filled = r.running || r.open != null))
-            if (r.track == Track.PAPER && r.key.startsWith("paper:")) pills.addView(Ui.pill(ctx, ctx.getString(R.string.desk_trial), Ui.CYAN))
+            val ownedPaper = r.track != Track.PAPER || net.solardepin.solarchik.agents.Ownership.ownsSku(host.store.agents(), r.skuId)
+            if (r.track == Track.PAPER && r.key.startsWith("paper:")) pills.addView(Ui.pill(ctx, ctx.getString(if (ownedPaper) R.string.desk_owned else R.string.desk_not_owned_pill), if (ownedPaper) Ui.GREEN else Ui.MUTED))
             pills.addView(Ui.pill(ctx, ctx.getString(if (r.tier == AgentTier.PRO) R.string.tier_pro else R.string.tier_free), if (r.tier == AgentTier.PRO) Ui.GOLD else Ui.CYAN))
             col.addView(pills)
             col.addView(Ui.top(Ui.text(ctx, AgentNames.display(ctx, r.name), 15f, Ui.TEXT, 800), 6))
@@ -308,6 +312,7 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
             row.addView(Ui.weight(col))
             addView(row)
             val btn = if (r.running) Ui.button(ctx, ctx.getString(R.string.desk_stop), Ui.Btn.GHOST) { stopRun(r) }
+            else if (!ownedPaper) Ui.button(ctx, ctx.getString(R.string.desk_get_agent), Ui.Btn.SECONDARY, R.drawable.ic_bolt_small) { offerAgent(r) }.apply { tag = "desk-get-agent" }
             else Ui.button(ctx, ctx.getString(R.string.desk_start), Ui.Btn.SECONDARY, R.drawable.ic_bolt_small) { startRun(r) }
             addView(Ui.top(btn, 12))
         }
@@ -322,6 +327,43 @@ class AgentsScreen(host: MainActivity) : Screen(host) {
                 }
                 .onFailure { host.toast(if (it is DeskError) ctx.getString(R.string.desk_not_owned) else host.errorText(it)) }
             render()
+        }
+    }
+
+    /** 0.21.8: the shared confirmation card as a dialog: mint free / buy Pro, then the paper run starts. */
+    internal var offerDialog: android.app.AlertDialog? = null
+        private set
+
+    private fun offerAgent(r: AgentRun) {
+        val sku = Catalog.baseOf(r.skuId) ?: return
+        var dlg: android.app.AlertDialog? = null
+        val card = OfferCard.view(
+            ctx,
+            ctx.getString(R.string.offer_title, AgentNames.display(ctx, sku.name)),
+            ctx.getString(R.string.offer_body),
+            ctx.getString(R.string.sol_act_wallet),
+            OfferCard.acquireOptions(host, sku, busySku != null) { tier -> dlg?.dismiss(); acquireAndStart(sku, tier) },
+        ) { dlg?.dismiss() }
+        dlg = android.app.AlertDialog.Builder(host)
+            .setView(android.widget.ScrollView(ctx).apply { setPadding(dp(8), dp(8), dp(8), dp(8)); addView(card) })
+            .create()
+        offerDialog = dlg
+        dlg.show()
+    }
+
+    private fun acquireAndStart(sku: net.solardepin.solarchik.core.AgentSku, tier: String) {
+        if (busySku != null) return
+        busySku = sku.skuId(tier)
+        render()
+        host.scope.launch {
+            val res = host.minter.mint(host.sender, sku, tier)
+            busySku = null
+            res.onSuccess { rec ->
+                host.toast(ctx.getString(R.string.mint_ok, rec.name))
+                host.desk.start("paper:${sku.id}", sku.id, tier, sku.nameFor(tier), Track.PAPER)
+                    .onSuccess { host.toast(ctx.getString(R.string.desk_started, AgentNames.display(ctx, sku.nameFor(tier)), ctx.getString(R.string.track_paper))); host.deskChanged() }
+            }.onFailure { host.toast(host.errorText(it)) }
+            host.renderAll()
         }
     }
 

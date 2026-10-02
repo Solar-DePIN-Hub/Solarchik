@@ -37,7 +37,11 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     private lateinit var notesState: LinearLayout
     private lateinit var secretaryBox: LinearLayout
     private var secCredit: Double? = null
+    private var secBal: ScreenApi.Balance? = null
+    private var secLoading = false
+    private var secLangBusy = false
     private var secBusy = false
+    private var refreshAfterPay = false
     private var voicemails: List<ScreenApi.Voicemail>? = null
     private lateinit var fwdInput: android.widget.EditText
     private lateinit var fwdStatus: TextView
@@ -108,6 +112,12 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             addView(Ui.top(volumeRow(R.string.settings_run_sfx, host.save.runSfxVol) { host.save.runSfxVol = it }, 8))
         })
 
+        addView(section(R.string.settings_sol_voice, R.drawable.ic_nav_sol, Ui.GOLD).apply {
+            addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.settings_sol_voice_body)).apply { setLineSpacing(0f, 1.25f) }, 8))
+            voiceBox = Ui.column(ctx)
+            addView(Ui.top(voiceBox, 10))
+        })
+
         addView(section(R.string.settings_language, R.drawable.ic_nav_yard, Ui.GREEN).apply {
             addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.settings_language_body)), 8))
             // In-app picker (0.21.7): stored choice, applied to UI, Sol chat/voice and agent texts.
@@ -141,6 +151,43 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         addView(section(R.string.settings_about, R.drawable.ic_launcher, Ui.GOLD, tint = false).apply {
             addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.settings_about_body, BuildConfig.VERSION_NAME)), 8))
         })
+    }
+
+    /* ---------------- Sol's voice (0.21.8): OpenAI voice picker, preview, last engine + latency ---------------- */
+    private lateinit var voiceBox: LinearLayout
+    private var previewVoice: net.solardepin.solarchik.sol.SolVoice? = null
+
+    internal fun renderVoice() {
+        if (!this::voiceBox.isInitialized) return
+        voiceBox.removeAllViews()
+        val cur = net.solardepin.solarchik.sol.OpenAiVoice.voice(ctx)
+        net.solardepin.solarchik.sol.OpenAiVoice.VOICES.chunked(2).forEach { pair ->
+            val r = Ui.row(ctx, gap = 8)
+            pair.forEach { v ->
+                r.addView(Ui.weight(Ui.button(ctx, v.replaceFirstChar { it.uppercase() }, if (v == cur) Ui.Btn.SECONDARY else Ui.Btn.GHOST) {
+                    net.solardepin.solarchik.sol.OpenAiVoice.setVoice(ctx, v)
+                    renderVoice()
+                    previewSolVoice()
+                }.apply { tag = "voice-$v" }))
+            }
+            voiceBox.addView(Ui.top(r, 6))
+        }
+        voiceBox.addView(Ui.top(Ui.button(ctx, ctx.getString(R.string.settings_sol_voice_preview), Ui.Btn.GHOST, R.drawable.ic_nav_sol) { previewSolVoice() }.apply { tag = "voice-preview" }, 8))
+        val src = net.solardepin.solarchik.sol.VoiceStats.source(ctx)
+        val ms = net.solardepin.solarchik.sol.VoiceStats.ms(ctx)
+        val engine = when {
+            src.startsWith("openai") -> ctx.getString(R.string.voice_engine_openai)
+            src == "gemini" -> ctx.getString(R.string.voice_engine_gemini)
+            src == "system" -> ctx.getString(R.string.voice_engine_system)
+            else -> ""
+        }
+        voiceBox.addView(Ui.top(Ui.muted(ctx, if (engine.isEmpty()) ctx.getString(R.string.voice_last_none) else ctx.getString(R.string.voice_last, engine, if (ms >= 0) "$ms" else "—"), 11f).apply { tag = "voice-last" }, 8))
+    }
+
+    private fun previewSolVoice() {
+        val v = previewVoice ?: net.solardepin.solarchik.sol.SolVoice(host).also { previewVoice = it }
+        v.speak(ctx.getString(R.string.settings_sol_voice_sample), host.lang)
+        voiceBox.postDelayed({ renderVoice() }, 4000)
     }
 
     private fun section(title: Int, icon: Int, color: Int, tint: Boolean = true): LinearLayout = Ui.card(ctx).apply {
@@ -195,7 +242,8 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     override fun onShow() {
         render()
         refreshBalance()
-        if (Secretary.supported() && (PlayerIds.screeningOn(ctx) || Secretary.pendingRef(ctx) != null)) refreshSecretary()
+        // 0.21.8: the live balance is read every time Settings opens (it showed a stale or empty value)
+        if (Secretary.supported()) refreshSecretary()
     }
 
     private fun refreshBalance() {
@@ -205,9 +253,14 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         }
     }
 
+    override fun onHide() {
+        previewVoice?.stop()
+    }
+
     override fun render() {
         if (!this::walletBox.isInitialized) return
         renderNotes()
+        renderVoice()
         renderSecretary()
         renderForward()
         val w = host.wallet
@@ -311,22 +364,46 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             Secretary.setAiNotes(ctx, want)
         }, 12))
 
-        val credit = secCredit ?: Secretary.lastUsd(ctx)
-        val creditRow = Ui.row(ctx)
+        // ---- credit (0.21.8): live /balance with paid + trial parts, loading feedback, tap to refresh ----
+        val bal = secBal ?: Secretary.lastBalance(ctx)
+        val creditRow = Ui.row(ctx, gap = 8).apply { gravity = android.view.Gravity.CENTER_VERTICAL }
         creditRow.addView(Ui.weight(Ui.label(ctx, ctx.getString(R.string.sec_credit))))
-        creditRow.addView(Ui.text(ctx, credit?.let { "$" + Fmt.sol(it, 2) } ?: "—", 20f, Ui.TEXT, 900).apply {
+        if (bal != null && bal.trial) creditRow.addView(Ui.pill(ctx, ctx.getString(R.string.sec_trial), Ui.CYAN))
+        creditRow.addView(Ui.text(ctx, if (secLoading && bal == null) "…" else bal?.let { "$" + Fmt.sol(it.usd, 2) } ?: "—", 20f, Ui.TEXT, 900).apply {
+            tag = "sec-credit"
             setOnClickListener { refreshSecretary() }
         })
         box.addView(Ui.top(creditRow, 12))
+        if (bal != null) box.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sec_credit_parts, "$" + Fmt.sol(bal.paidUsd, 2), "$" + Fmt.sol(bal.trialUsd, 2)), 12f), 2))
+        val refresh = Ui.button(ctx, ctx.getString(if (secLoading) R.string.sec_refreshing else R.string.sec_refresh), Ui.Btn.GHOST) { refreshSecretary() }
+        Ui.setEnabled(refresh, !secLoading)
+        box.addView(Ui.top(refresh, 8))
         if (Secretary.needTopup(ctx)) {
             box.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.sec_need_topup), 13f, Ui.AMBER, 700), 6))
         }
+        // ---- voice language of the phone secretary (worker /secretary-lang) ----
+        box.addView(Ui.top(Ui.label(ctx, ctx.getString(R.string.sec_lang)), 14))
+        val langs = Ui.row(ctx, gap = 8)
+        val curLang = Secretary.lang(ctx)
+        listOf("auto" to R.string.sec_lang_auto, "uk" to R.string.sec_lang_uk, "en" to R.string.sec_lang_en).forEach { (code, label) ->
+            val b = Ui.button(ctx, ctx.getString(label), if (code == curLang) Ui.Btn.SECONDARY else Ui.Btn.GHOST) { setSecLang(code) }
+            Ui.setEnabled(b, !secLangBusy)
+            langs.addView(Ui.weight(b))
+        }
+        box.addView(Ui.top(langs, 6))
+        // ---- the full player id (the worker keys the credit and inbox by it) ----
+        val pid = PlayerIds.get(ctx)
+        box.addView(Ui.top(Ui.label(ctx, ctx.getString(R.string.sec_player_id)), 14))
+        // the id on its own full-width line (a weighted text next to the button collapsed to zero width)
+        box.addView(Ui.top(Ui.text(ctx, pid, 12f, Ui.CYAN, 700).apply { setTextIsSelectable(true); tag = "sec-player-id" }, 6))
+        box.addView(Ui.top(Ui.button(ctx, ctx.getString(R.string.copy), Ui.Btn.GHOST) { copy(pid) }.apply { tag = "sec-player-copy" }, 6))
+
         val pay = Ui.row(ctx, gap = 10)
         pay.addView(Ui.weight(Ui.button(ctx, ctx.getString(R.string.sec_topup, Secretary.TOPUP_USD), Ui.Btn.SECONDARY, R.drawable.ic_wallet) { startTopup() }))
+        box.addView(Ui.top(pay, 12))
         val check = Ui.button(ctx, ctx.getString(if (secBusy) R.string.sec_checking else R.string.sec_check), Ui.Btn.GHOST) { checkPayment() }
         Ui.setEnabled(check, !secBusy && Secretary.pendingRef(ctx) != null)
-        pay.addView(Ui.weight(check))
-        box.addView(Ui.top(pay, 10))
+        box.addView(Ui.top(check, 8))
         box.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sec_topup_how), 12f), 6))
 
         val reports = CallReports.list(ctx).take(8)
@@ -465,12 +542,54 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         val ref = Secretary.newReference()
         val uri = Secretary.payUri(PlayerIds.get(ctx), ref)
         Secretary.setPendingRef(ctx, ref)
-        runCatching { host.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri))) }
-            .onFailure {
-                copy(uri)
-                host.toast(ctx.getString(R.string.sec_no_wallet))
-            }
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
+        val handled = runCatching { intent.resolveActivity(host.packageManager) != null }.getOrDefault(false)
+        if (!handled || runCatching { host.startActivity(intent) }.isFailure) showNoWallet(uri)
         render()
+    }
+
+    /** 0.21.8: no wallet app: offer Phantom / Solflare, the payment link and its QR (pay from another phone). */
+    private fun showNoWallet(uri: String) {
+        val col = Ui.column(ctx).apply { setPadding(dp(20), dp(8), dp(20), dp(4)) }
+        col.addView(Ui.muted(ctx, ctx.getString(R.string.sec_no_wallet_body), 13f).apply { setLineSpacing(0f, 1.25f) })
+        Secretary.WALLET_APPS.forEach { (name, pkg) ->
+            col.addView(Ui.top(Ui.button(ctx, ctx.getString(R.string.sec_install_wallet, name), Ui.Btn.SECONDARY, R.drawable.ic_wallet) {
+                val market = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg"))
+                runCatching { host.startActivity(market) }.onFailure { host.openUrl("https://play.google.com/store/apps/details?id=$pkg") }
+            }, 10))
+        }
+        col.addView(Ui.top(Ui.button(ctx, ctx.getString(R.string.sec_copy_link), Ui.Btn.GHOST) { copy(uri) }, 10))
+        Qr.bitmap(uri, dp(220))?.let { bmp ->
+            col.addView(Ui.top(android.widget.ImageView(ctx).apply {
+                setImageBitmap(bmp)
+                contentDescription = ctx.getString(R.string.sec_qr)
+                setBackgroundColor(android.graphics.Color.WHITE)
+                setPadding(dp(10), dp(10), dp(10), dp(10))
+            }, 12), LinearLayout.LayoutParams(dp(240), dp(240)).apply { gravity = android.view.Gravity.CENTER_HORIZONTAL })
+            col.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sec_qr), 12f).apply { gravity = android.view.Gravity.CENTER }, 4))
+        }
+        col.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sec_then_check), 12f), 10))
+        android.app.AlertDialog.Builder(host)
+            .setTitle(R.string.sec_no_wallet_title)
+            .setView(android.widget.ScrollView(ctx).apply { addView(col) })
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.sec_check) { _, _ -> checkPayment() }
+            .show()
+    }
+
+    private fun setSecLang(lang: String) {
+        if (secLangBusy || lang == Secretary.lang(ctx)) return
+        secLangBusy = true
+        val before = Secretary.lang(ctx)
+        Secretary.setLang(ctx, lang)
+        render()
+        host.scope.launch {
+            val saved = withContext(Dispatchers.IO) { ScreenApi.setLang(PlayerIds.get(ctx), lang) }
+            if (saved == null) { Secretary.setLang(ctx, before); host.toast(ctx.getString(R.string.sec_offline)) }
+            else { Secretary.setLang(ctx, saved); host.toast(ctx.getString(R.string.sec_lang_saved)) }
+            secLangBusy = false
+            render()
+        }
     }
 
     private fun checkPayment() {
@@ -486,11 +605,13 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
                     Secretary.setPendingRef(ctx, null)
                     Secretary.setLastUsd(ctx, out.usd)
                     secCredit = out.usd
+                    secBal = null
+                    refreshAfterPay = true
                     host.toast(ctx.getString(R.string.sec_paid, "$" + Fmt.sol(out.added, 2)))
                 }
                 ScreenApi.Topup.AlreadyUsed -> {
                     Secretary.setPendingRef(ctx, null)
-                    withContext(Dispatchers.IO) { ScreenApi.balance(userId) }?.let { secCredit = it; Secretary.setLastUsd(ctx, it) }
+                    withContext(Dispatchers.IO) { ScreenApi.balanceInfo(userId) }?.let { secBal = it; secCredit = it.usd; Secretary.setLastBalance(ctx, it) }
                     host.toast(ctx.getString(R.string.sec_paid_already))
                 }
                 ScreenApi.Topup.NotFound -> host.toast(ctx.getString(R.string.sec_not_found))
@@ -499,16 +620,24 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             }
             secBusy = false
             render()
+            if (refreshAfterPay) { refreshAfterPay = false; refreshSecretary() }
         }
     }
 
     private fun refreshSecretary() {
+        if (secLoading) return
         val userId = PlayerIds.get(ctx)
+        secLoading = true
+        render()
         host.scope.launch {
-            val bal = withContext(Dispatchers.IO) { ScreenApi.balance(userId) }
+            val bal = withContext(Dispatchers.IO) { ScreenApi.balanceInfo(userId) }
+            val lang = withContext(Dispatchers.IO) { ScreenApi.lang(userId) }
             val vm = withContext(Dispatchers.IO) { ScreenApi.inbox(userId) }
-            if (bal != null) { secCredit = bal; Secretary.setLastUsd(ctx, bal) }
+            if (bal != null) { secBal = bal; secCredit = bal.usd; Secretary.setLastBalance(ctx, bal) }
+            else host.toast(ctx.getString(R.string.sec_offline))
+            if (lang != null && !secLangBusy) Secretary.setLang(ctx, lang)
             if (vm != null) voicemails = vm
+            secLoading = false
             render()
         }
     }

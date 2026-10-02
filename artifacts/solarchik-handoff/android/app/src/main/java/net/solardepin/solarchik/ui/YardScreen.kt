@@ -178,7 +178,12 @@ class YardScreen(host: MainActivity) : Screen(host) {
         if (!this::secState.isInitialized) return
         val sup = net.solardepin.solarchik.screen.Secretary.supported()
         val on = sup && net.solardepin.solarchik.screen.PlayerIds.screeningOn(ctx) && net.solardepin.solarchik.screen.Secretary.holdsRole(ctx)
-        secState.text = ctx.getString(when { !sup -> R.string.home_sec_unsupported; on -> R.string.home_sec_on; else -> R.string.home_sec_off })
+        val state = ctx.getString(when { !sup -> R.string.home_sec_unsupported; on -> R.string.home_sec_on; else -> R.string.home_sec_off })
+        // 0.21.8: the same live credit as Settings (read on every Home visit)
+        val bal = if (sup) net.solardepin.solarchik.screen.Secretary.lastBalance(ctx) else null
+        secState.text = if (bal == null) state else ctx.getString(
+            R.string.home_sec_with_credit, state, "$" + Fmt.sol(bal.usd, 2) + if (bal.trial) " · " + ctx.getString(R.string.sec_trial) else "",
+        )
         val running = host.desk.state().runs.count { it.running }
         agentsState.text = if (running > 0) ctx.resources.getQuantityString(R.plurals.home_agents_running, running, running) else ctx.getString(R.string.home_agents_none)
         val book = net.solardepin.solarchik.agents.SliceStore(ctx).book()
@@ -265,14 +270,30 @@ class YardScreen(host: MainActivity) : Screen(host) {
         setOnClickListener { host.select(MainActivity.Tab.SOL) }
     }
 
+    private var secFetchAt = 0L
+
     override fun onShow() {
         render()
+        refreshSecCredit()
         ticker.removeCallbacks(tick)
         ticker.postDelayed(tick, 1000)
     }
 
     override fun onHide() {
         ticker.removeCallbacks(tick)
+    }
+
+    /** Live secretary credit for the Home card (at most every 20 s). */
+    private fun refreshSecCredit() {
+        if (!net.solardepin.solarchik.screen.Secretary.supported()) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - secFetchAt < 20_000) return
+        secFetchAt = now
+        val id = net.solardepin.solarchik.screen.PlayerIds.get(ctx)
+        host.scope.launch {
+            val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { net.solardepin.solarchik.screen.ScreenApi.balanceInfo(id) }
+            if (b != null) { net.solardepin.solarchik.screen.Secretary.setLastBalance(ctx, b); renderHome() }
+        }
     }
 
     override fun render() {

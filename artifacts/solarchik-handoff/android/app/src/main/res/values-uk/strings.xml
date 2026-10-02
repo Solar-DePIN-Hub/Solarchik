@@ -209,7 +209,6 @@
     <string name="desk_stats">Позицій: %1$d · %2$d+ / %3$d− · %4$s SOL</string>
     <string name="desk_devnet_empty">Створи NFT стратегії в devnet (вкладка «Стратегії»), щоб запустити її тут. Папір працює без мінту.</string>
     <string name="desk_devnet_connect">Підключи гаманець devnet, щоб запускати свої NFT.</string>
-    <string name="desk_trial">Пробна</string>
     <string name="desk_started">%1$s запущено: %2$s</string>
     <string name="desk_stopped">%1$s зупинено. Відкрита позиція все одно закриється вчасно.</string>
     <string name="desk_not_owned">Для devnet потрібен твій власний NFT.</string>
@@ -340,7 +339,6 @@
     <string name="sec_rationale_body">Android попросить обрати Solarchik застосунком для перевірки дзвінків. Він бачить лише номери, яких немає у ваших контактах, і лише сам номер, ніколи не розмову. Вимкнути можна тут або в системних налаштуваннях будь-коли.</string>
     <string name="sec_rationale_go">Далі</string>
     <string name="sec_role_denied">Перевірку дзвінків не ввімкнено.</string>
-    <string name="sec_no_wallet">Не знайдено Solana-гаманця. Посилання на оплату скопійовано.</string>
     <string name="sec_paid">Оплату отримано: додано %1$s.</string>
     <string name="sec_paid_already">Цю оплату вже зараховано.</string>
     <string name="sec_not_found">Оплату ще не знайдено. Зачекайте хвилину й перевірте знову.</string>
@@ -472,11 +470,11 @@
     <string name="ms_distance">Рекорд %1$d м</string>
     <string name="ms_suns">Збери %1$d сонць</string>
     <string name="ms_streak">Серія CLOCK IN %1$d дн.</string>
-    <string name="run_clock_unlocked">CLOCK IN відкрито!</string>
+    <string name="run_clock_unlocked">Підпис дня відкрито!</string>
     <string name="run_clock_keep">Підпиши будь-коли · біжи далі</string>
     <string name="run_sign_badge">Підписати</string>
     <string name="run_signed_badge">Підписано</string>
-    <string name="run_sign_badge_a11y">CLOCK IN відкрито. Пауза і підпис дня.</string>
+    <string name="run_sign_badge_a11y">Підпис дня відкрито. Пауза і підпис.</string>
     <string name="run_signing">Підписую…</string>
     <string name="run_connect_yard">Підключи гаманець у Дворі</string>
     <string name="run_no_wallet">Гаманець ще не підключено. Підключи його у Дворі, щоб підписати.</string>
@@ -576,8 +574,6 @@
     <string name="run_cue_combo">У мене комбо %1$d.</string>
     <string name="run_cue_hurt">Мене влучило, сердець лишилося: %1$d.</string>
     <string name="run_cue_progress">Я вже на %1$d м, попереду нові дахи.</string>
-    <string name="run_cue_last_heart">Мене влучило, лишилося останнє серце.</string>
-    <string name="run_cue_first_roof">Я впав уже на першому даху.</string>
     <string name="run_cue_clock_ready">Я пробіг %1$d м, тепер можна підписати день.</string>
     <string name="settings_language_phone">Як у телефоні</string>
     <string name="sol_greet_cue">Привітай мене у дворі одним коротким теплим реченням. Моя серія підписів: %1$d дн.</string>
@@ -671,4 +667,41 @@
     <string name="home_streak_title">Серія</string>
     <plurals name="home_agents_running"><item quantity="one">%d працює</item><item quantity="few">%d працюють</item><item quantity="many">%d працюють</item><item quantity="other">%d працюють</item></plurals>
     <plurals name="home_streak_days"><item quantity="one">%d день · тримай</item><item quantity="few">%d дні · тримай</item><item quantity="many">%d днів · тримай</item><item quantity="other">%d дня · тримай</item></plurals>
+    <!-- 0.21.8 secretary settings -->
+    <string name="sec_trial">Пробний</string>
+    <string name="sec_credit_parts">Оплачено %1$s · пробний %2$s</string>
+    <string name="sec_refresh">Оновити баланс</string>
+    <string name="sec_refreshing">Оновлюю…</string>
+    <string name="sec_lang">Мова секретаря</string>
+    <string name="sec_lang_auto">Авто</string>
+    <string name="sec_lang_uk">Українська</string>
+    <string name="sec_lang_en">English</string>
+    <string name="sec_lang_saved">Мову секретаря збережено</string>
+    <string name="sec_player_id">ID гравця</string>
+    <string name="copy">Копіювати</string>
+    <string name="sec_no_wallet_title">На телефоні немає Solana-гаманця</string>
+    <string name="sec_no_wallet_body">Поповнення оплачується в USDC із Solana-гаманця. Встанови Phantom або Solflare чи оплати з іншого телефона: скопіюй посилання або скануй QR-код. Потім повернись і натисни «Перевірити оплату».</string>
+    <string name="sec_install_wallet">Встановити %1$s</string>
+    <string name="sec_copy_link">Копіювати посилання на оплату</string>
+    <string name="sec_qr">Скануй Solana-гаманцем</string>
+    <string name="sec_then_check">Після оплати натисни «Перевірити оплату».</string>
+    <string name="home_sec_with_credit">%1$s · баланс %2$s</string>
+    <string name="desk_owned">Ваш</string>
+    <string name="desk_not_owned_pill">Не ваш</string>
+    <string name="desk_get_agent">Отримати агента</string>
+    <string name="offer_title">Отримати %1$s</string>
+    <string name="offer_body">Цей агент ще не ваш. Створіть його безкоштовно або купіть Pro — після підтвердження в гаманці він одразу запрацює на папері.</string>
+    <string name="offer_mint_free">Створити безкоштовно й запустити</string>
+    <string name="offer_buy_pro">Купити Pro · %1$s SOL і запустити</string>
+    <string name="sol_act_ready_acquire">%1$s ще не ваш — оберіть на картці нижче «Створити безкоштовно» або «Купити Pro»; агент запуститься одразу після підтвердження в гаманці.</string>
+    <string name="settings_sol_voice">Голос Сола</string>
+    <string name="settings_sol_voice_body">Сол говорить голосом OpenAI (gpt-4o-mini-tts), який стрімиться з нашого сервера; відповідь звучить приблизно за секунду. Без інтернету використовується голос телефона.</string>
+    <string name="settings_sol_voice_preview">Прослухати зразок</string>
+    <string name="settings_sol_voice_sample">Привіт! Я Сол. Твої агенти працюють, а я триматиму тебе в курсі.</string>
+    <string name="voice_engine_openai">голос OpenAI</string>
+    <string name="voice_engine_gemini">голос Gemini</string>
+    <string name="voice_engine_system">голос телефона (запасний)</string>
+    <string name="voice_last">Остання фраза: %1$s · перший звук за %2$s мс</string>
+    <string name="voice_last_none">Сол ще не говорив на цьому телефоні.</string>
+    <string name="run_action_later">Зрозумів — після забігу покладу це на вкладку Сола, щоб ти підтвердив.</string>
 </resources>

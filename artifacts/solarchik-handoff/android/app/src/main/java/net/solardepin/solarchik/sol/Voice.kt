@@ -28,59 +28,131 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * Sol's voice. Online: neural Gemini TTS from solarchik-market /api/native/sol-voice (warm voice,
- * WAV, cached per text+language+voice so repeated lines are instant). The phone's system TTS is only
- * the offline fallback. [speak] returns at once; audio starts when the clip is ready.
+ * Sol's voice (0.21.8). A sentence queue: lines are spoken one after another, never dropped, and a
+ * streamed reply starts speaking on its first sentence ([feed]).
+ *
+ * Engines, in order: OpenAI gpt-4o-mini-tts on the solarchik-screen worker (24 kHz PCM streamed into
+ * an AudioTrack, cached per line, voice [OpenAiVoice.voice], default "marin") → the market Gemini WAV
+ * ([NeuralVoice]) → the phone's system TTS (robotic; only when both servers fail). Which engine played
+ * and how long the first audio took is logged (`SolVoice`) and kept in [VoiceStats] for Settings.
  */
 class SolVoice(context: Context) {
     private val app = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var job: Job? = null
+    private val queue = kotlinx.coroutines.channels.Channel<Pair<String, String>>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+    private var worker: Job? = null
     private var player: MediaPlayer? = null
+    @Volatile private var track: android.media.AudioTrack? = null
     private var system: SystemVoice? = null
+    /** How much of the streamed reply [feed] has queued already. */
+    private var fedChars = 0
+    @Volatile var speaking = false
+        private set
+    /** Bumped by [stop]: a line being written to the track sees it and quits. */
+    @Volatile private var gen = 0
     var missingLanguage: String? = null
         private set
-    /** Model that voiced the last line ("system" offline). For logs/tests only. */
+    /** Engine that voiced the last line: "openai:<voice>", "gemini" or "system". */
     var lastSource: String = ""
         private set
 
-    /** Returns false only when we already know this phone can't voice [lang] offline. */
+    /** Replaces whatever is playing with [text] (split into sentences). False only if [lang] has no offline voice. */
     fun speak(text: String, lang: String): Boolean {
         stop()
-        val line = text.trim()
-        if (line.isEmpty()) return true
-        job = scope.launch {
-            val file = NeuralVoice.clip(app, line, lang)
-            if (file != null) play(file) else {
-                lastSource = "system"
-                val sys = system ?: SystemVoice(app).also { system = it }
-                if (!sys.speak(line, lang)) missingLanguage = lang
-            }
-        }
+        enqueue(text, lang)
         return missingLanguage != lang
     }
 
-    /** Warm the cache for a line that is likely to be spoken soon. */
-    fun prefetch(text: String, lang: String) {
-        scope.launch { NeuralVoice.clip(app, text.trim(), lang) }
+    /** Adds [text] after what is already queued (RunRadio: player answers are never dropped). */
+    fun enqueue(text: String, lang: String) {
+        sentences(text).forEach { queue.trySend(it to lang) }
+        ensureWorker()
     }
 
-    private fun play(file: java.io.File) {
-        runCatching {
-            val mp = MediaPlayer()
-            mp.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-            mp.setDataSource(file.absolutePath)
-            mp.setOnCompletionListener { it.release(); if (player === it) player = null }
-            mp.setOnPreparedListener { it.start() }
-            mp.prepareAsync()
-            player = mp
-            lastSource = "neural"
+    /** Streaming reply: [soFar] is the whole text so far; complete sentences are queued as they arrive. */
+    fun feed(soFar: String, lang: String, final: Boolean) {
+        if (soFar.length < fedChars) fedChars = 0
+        val rest = soFar.substring(fedChars)
+        val cut = if (final) rest.length else lastSentenceEnd(rest)
+        if (cut <= 0) return
+        val chunk = rest.substring(0, cut)
+        fedChars += cut
+        enqueue(chunk, lang)
+    }
+
+    /** Starts a fresh streamed reply (resets [feed]) without interrupting a line already playing. */
+    fun beginStream() { fedChars = 0 }
+
+    private fun ensureWorker() {
+        if (worker?.isActive == true) return
+        worker = scope.launch {
+            while (true) {
+                val (line, lang) = queue.tryReceive().getOrNull() ?: break
+                speaking = true
+                try { playLine(line, lang) } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) {}
+            }
+            speaking = false
         }
     }
 
+    private suspend fun playLine(line: String, lang: String) {
+        val t0 = android.os.SystemClock.elapsedRealtime()
+        var firstAudio = -1L
+        val v = OpenAiVoice.voice(app)
+        val g = gen
+        val ok = withContext(Dispatchers.IO) {
+            OpenAiVoice.play(app, line, lang, v, alive = { gen == g }, onTrack = { track = it }) { if (firstAudio < 0) firstAudio = android.os.SystemClock.elapsedRealtime() - t0 }
+        }
+        if (gen != g) return
+        track = null
+        if (ok) { note("openai:$v", firstAudio); return }
+        val file = NeuralVoice.clip(app, line, lang)
+        if (file != null) {
+            note("gemini", android.os.SystemClock.elapsedRealtime() - t0)
+            playFile(file)
+            return
+        }
+        note("system", android.os.SystemClock.elapsedRealtime() - t0)
+        val sys = system ?: SystemVoice(app).also { system = it }
+        if (!sys.speakAndWait(line, lang)) missingLanguage = lang
+    }
+
+    private fun note(source: String, ms: Long) {
+        lastSource = source
+        VoiceStats.record(app, source, ms)
+        runCatching { android.util.Log.i("SolVoice", "engine=$source firstAudioMs=$ms") }
+    }
+
+    private suspend fun playFile(file: java.io.File) = kotlinx.coroutines.suspendCancellableCoroutine<Unit> { cont ->
+        val mp = runCatching {
+            MediaPlayer().apply {
+                setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                setDataSource(file.absolutePath)
+                setOnCompletionListener { it.release(); if (player === it) player = null; if (cont.isActive) cont.resumeWith(Result.success(Unit)) }
+                setOnErrorListener { _, _, _ -> if (cont.isActive) cont.resumeWith(Result.success(Unit)); true }
+                setOnPreparedListener { it.start() }
+                prepareAsync()
+            }
+        }.getOrNull()
+        if (mp == null) { cont.resumeWith(Result.success(Unit)); return@suspendCancellableCoroutine }
+        player = mp
+        cont.invokeOnCancellation { runCatching { mp.stop() }; runCatching { mp.release() } }
+    }
+
+    /** Warm the cache for a line that is likely to be spoken soon (OpenAI voice). */
+    fun prefetch(text: String, lang: String) {
+        val v = OpenAiVoice.voice(app)
+        scope.launch(Dispatchers.IO) { sentences(text).forEach { OpenAiVoice.fetchToCache(app, it, lang, v) } }
+    }
+
     fun stop() {
-        job?.cancel()
-        job = null
+        gen++
+        while (queue.tryReceive().isSuccess) { /* drop queued lines */ }
+        worker?.cancel()
+        worker = null
+        speaking = false
+        fedChars = 0
+        track?.let { runCatching { it.pause(); it.flush() } }
         player?.let { runCatching { it.stop() }; runCatching { it.release() } }
         player = null
         system?.stop()
@@ -94,14 +166,186 @@ class SolVoice(context: Context) {
 
     companion object {
         fun localeOf(lang: String): Locale = if (lang == "uk") Locale("uk", "UA") else Locale.US
+
+        private val END = Regex("[.!?…]+[\\\"»”)]*(\\s+|$)")
+
+        /** Index just past the last complete sentence in [text] (0 when none is complete yet). */
+        fun lastSentenceEnd(text: String): Int {
+            // a terminator at the very end may still grow ("3." → "3.5"): only one followed by a space counts
+            var last = 0
+            for (m in END.findAll(text)) if (m.groupValues[1].isNotEmpty()) last = m.range.last + 1
+            return last
+        }
+
+        /** Speakable sentences (short fragments are merged into the next one). */
+        fun sentences(text: String): List<String> {
+            val t = text.replace(Regex("\\s+"), " ").trim()
+            if (t.isEmpty()) return emptyList()
+            val out = mutableListOf<String>()
+            var from = 0
+            for (m in END.findAll(t)) {
+                val end = m.range.last + 1
+                val s = t.substring(from, end).trim()
+                if (s.isNotEmpty()) {
+                    if (out.isNotEmpty() && out.last().length < 18) out[out.lastIndex] = out.last() + " " + s else out += s
+                }
+                from = end
+            }
+            val tail = t.substring(from).trim()
+            if (tail.isNotEmpty()) { if (out.isNotEmpty() && out.last().length < 18) out[out.lastIndex] = out.last() + " " + tail else out += tail }
+            return out
+        }
     }
+}
+
+/** Last voice engine and first-audio latency, for Settings (0.21.8). */
+object VoiceStats {
+    private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences("solarchik-voice", Context.MODE_PRIVATE)
+    fun record(ctx: Context, source: String, ms: Long) { prefs(ctx).edit().putString("source", source).putLong("ms", ms).putLong("at", System.currentTimeMillis()).apply() }
+    fun source(ctx: Context): String = prefs(ctx).getString("source", "").orEmpty()
+    fun ms(ctx: Context): Long = prefs(ctx).getLong("ms", -1)
+}
+
+/**
+ * OpenAI gpt-4o-mini-tts through the worker (`/sol/tts?fmt=pcm`): 24 kHz mono s16le, streamed and
+ * played while it downloads; every line is cached (cacheDir/sol-voice-oa, newest 160) so repeats and
+ * prefetched run banter play instantly.
+ */
+object OpenAiVoice {
+    const val RATE = 24_000
+    val VOICES = listOf("marin", "cedar", "coral", "shimmer")
+    const val DEFAULT = "marin"
+    private const val KEEP = 160
+    private val client by lazy { Rpc.client.newBuilder().callTimeout(30, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).build() }
+    /** Test seam: replaces the HTTP call (returns the whole PCM). */
+    @Volatile var fetcher: (suspend (String, String, String) -> ByteArray?)? = null
+
+    fun voice(ctx: Context): String = ctx.applicationContext.getSharedPreferences("solarchik-voice", Context.MODE_PRIVATE).getString("voice", null)?.takeIf { it in VOICES } ?: DEFAULT
+    fun setVoice(ctx: Context, v: String) { if (v in VOICES) ctx.applicationContext.getSharedPreferences("solarchik-voice", Context.MODE_PRIVATE).edit().putString("voice", v).apply() }
+
+    fun url(text: String, lang: String, voice: String): String =
+        SolarchikConfig.SOL_TTS_URL + "?fmt=pcm&lang=" + (if (lang == "uk") "uk" else "en") + "&voice=" + voice + "&text=" + java.net.URLEncoder.encode(text.take(400), "UTF-8")
+
+    fun key(text: String, lang: String, voice: String): String =
+        MessageDigest.getInstance("SHA-1").digest("oa|$lang|$voice|$text".toByteArray()).joinToString("") { "%02x".format(it) }
+
+    private fun dir(ctx: Context) = java.io.File(ctx.cacheDir, "sol-voice-oa").apply { mkdirs() }
+    fun cached(ctx: Context, text: String, lang: String, voice: String): java.io.File? =
+        java.io.File(dir(ctx), key(text, lang, voice) + ".pcm").takeIf { it.length() > 2000 }
+
+    private fun trim(ctx: Context) {
+        dir(ctx).listFiles { f -> f.name.endsWith(".pcm") }?.sortedByDescending { it.lastModified() }?.drop(KEEP)?.forEach { it.delete() }
+    }
+
+    /** Downloads [text] into the cache without playing it. */
+    fun fetchToCache(ctx: Context, text: String, lang: String, voice: String): java.io.File? {
+        if (text.isBlank()) return null
+        cached(ctx, text, lang, voice)?.let { return it }
+        return runCatching {
+            val bytes = fetcher?.let { f -> kotlinx.coroutines.runBlocking { f(text, lang, voice) } } ?: client.newCall(Request.Builder().url(url(text, lang, voice)).build()).execute().use { res ->
+                if (res.isSuccessful && res.header("content-type").orEmpty().startsWith("audio/")) res.body?.bytes() else null
+            }
+            if (bytes == null || bytes.size < 2000) return null
+            val out = java.io.File(dir(ctx), key(text, lang, voice) + ".pcm")
+            val tmp = java.io.File(out.path + ".part")
+            tmp.writeBytes(bytes); tmp.renameTo(out); trim(ctx)
+            out
+        }.getOrNull()
+    }
+
+    /**
+     * Plays [text] (blocking, IO thread): from the cache, or streamed from the worker while caching.
+     * [onFirstAudio] fires when the first samples are handed to the track. False = nothing played.
+     */
+    fun play(ctx: Context, text: String, lang: String, voice: String, alive: () -> Boolean = { true }, onTrack: (android.media.AudioTrack) -> Unit = {}, onFirstAudio: () -> Unit = {}): Boolean {
+        if (text.isBlank()) return true
+        val hit = cached(ctx, text, lang, voice)
+        val track = newTrack() ?: return false
+        onTrack(track)
+        var frames = 0L
+        try {
+            track.play()
+            var odd: Int = -1
+            fun put(b: ByteArray, o: Int, l: Int) {
+                // non-blocking writes, so a stop() (pause + flush) never leaves this thread stuck
+                var off = o; var len = l
+                while (len > 0 && alive()) {
+                    val n = track.write(b, off, len, android.media.AudioTrack.WRITE_NON_BLOCKING)
+                    if (n < 0) throw java.io.IOException("track $n")
+                    if (n == 0) Thread.sleep(8)
+                    off += n; len -= n
+                }
+                if (!alive()) throw java.io.InterruptedIOException("stopped")
+            }
+            fun write(buf: ByteArray, n: Int) {
+                var off = 0
+                var len = n
+                if (odd >= 0 && len > 0) { put(byteArrayOf(odd.toByte(), buf[0]), 0, 2); frames++; off = 1; len--; odd = -1 }
+                val even = len and 1.inv()
+                if (even > 0) { if (frames == 0L) onFirstAudio(); put(buf, off, even); frames += even / 2 }
+                if (len and 1 == 1) odd = buf[off + even].toInt() and 0xFF
+            }
+            if (hit != null) {
+                hit.setLastModified(System.currentTimeMillis())
+                val b = hit.readBytes(); write(b, b.size)
+            } else {
+                val f = fetcher
+                if (f != null) {
+                    val b = kotlinx.coroutines.runBlocking { f(text, lang, voice) } ?: return false.also { track.release() }
+                    if (b.size < 2000) { track.release(); return false }
+                    write(b, b.size)
+                } else {
+                    val req = Request.Builder().url(url(text, lang, voice)).build()
+                    val ok = client.newCall(req).execute().use { res ->
+                        if (!res.isSuccessful || !res.header("content-type").orEmpty().startsWith("audio/")) return@use false
+                        val src = res.body?.byteStream() ?: return@use false
+                        val out = java.io.File(dir(ctx), key(text, lang, voice) + ".pcm")
+                        val tmp = java.io.File(out.path + ".part")
+                        var total = 0L
+                        tmp.outputStream().use { file ->
+                            val buf = ByteArray(4800)
+                            while (true) {
+                                val n = src.read(buf)
+                                if (n < 0) break
+                                if (n == 0) continue
+                                file.write(buf, 0, n); total += n
+                                write(buf, n)
+                            }
+                        }
+                        if (total > 2000) { tmp.renameTo(out); trim(ctx) } else tmp.delete()
+                        total > 2000
+                    }
+                    if (!ok) { track.release(); return false }
+                }
+            }
+            // let the tail play out
+            val deadline = android.os.SystemClock.elapsedRealtime() + frames * 1000 / RATE + 1500
+            while (alive() && track.playState == android.media.AudioTrack.PLAYSTATE_PLAYING && track.playbackHeadPosition < frames && android.os.SystemClock.elapsedRealtime() < deadline) Thread.sleep(20)
+            return frames > 0
+        } catch (_: Throwable) {
+            return frames > 0
+        } finally {
+            runCatching { track.stop() }
+            runCatching { track.release() }
+        }
+    }
+
+    private fun newTrack(): android.media.AudioTrack? = runCatching {
+        val min = android.media.AudioTrack.getMinBufferSize(RATE, android.media.AudioFormat.CHANNEL_OUT_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
+        android.media.AudioTrack.Builder()
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            .setAudioFormat(android.media.AudioFormat.Builder().setSampleRate(RATE).setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT).setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO).build())
+            .setBufferSizeInBytes(maxOf(min, RATE)) // ~0.5 s
+            .setTransferMode(android.media.AudioTrack.MODE_STREAM)
+            .build()
+    }.getOrNull()
 }
 
 /** Neural clips from the server, cached in cacheDir/sol-voice (newest 80 kept). */
 object NeuralVoice {
     const val VOICE = "Sulafat"
     private const val KEEP = 80
-    private val client by lazy { Rpc.client.newBuilder().callTimeout(25, TimeUnit.SECONDS).build() }
+    private val client by lazy { Rpc.client.newBuilder().callTimeout(9, TimeUnit.SECONDS).build() }
     /** Test seam: replaces the HTTP call. */
     @Volatile var fetcher: (suspend (String, String) -> ByteArray?)? = null
 
@@ -153,16 +397,34 @@ object NeuralVoice {
 private class SystemVoice(context: Context) {
     private var ready = false
     private var pending: Pair<String, String>? = null
+    private val done = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<Unit>>()
     private val tts: TextToSpeech = TextToSpeech(context) { status ->
         ready = status == TextToSpeech.SUCCESS
         pending?.let { (t, l) -> pending = null; speak(t, l) }
+    }.also {
+        it.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+            override fun onStart(id: String?) {}
+            override fun onDone(id: String?) { id?.let { done.remove(it)?.complete(Unit) } }
+            @Deprecated("Deprecated in Java") override fun onError(id: String?) { id?.let { done.remove(it)?.complete(Unit) } }
+        })
     }
 
-    fun speak(text: String, lang: String): Boolean {
+    fun speak(text: String, lang: String, id: String = "sol-" + text.hashCode()): Boolean {
         if (!ready) { pending = text to lang; return true }
         val r = tts.setLanguage(SolVoice.localeOf(lang))
         if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) return false
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sol-" + text.hashCode())
+        tts.speak(text, TextToSpeech.QUEUE_ADD, null, id)
+        return true
+    }
+
+    /** Speaks and suspends until the line is done (or ~10 s). */
+    suspend fun speakAndWait(text: String, lang: String): Boolean {
+        val id = "sol-" + System.nanoTime()
+        val d = kotlinx.coroutines.CompletableDeferred<Unit>()
+        done[id] = d
+        if (!speak(text, lang, id)) { done.remove(id); return false }
+        kotlinx.coroutines.withTimeoutOrNull(2_000L + text.length * 90L) { d.await() }
+        done.remove(id)
         return true
     }
 

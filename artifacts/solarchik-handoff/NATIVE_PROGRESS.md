@@ -571,3 +571,47 @@ Everything stays native Kotlin (Canvas + SoundPool/MediaPlayer). No engine was a
 - **Not done.**
   - Sol actions are not mirrored in the web chat yet; the web route is ready to use.
   - A native free agent (app collection) cannot get a strategy change until it is moved to the server collection, and the card says so.
+
+## 0.21.8 (versionCode 73): one Sol brain (OpenAI), streamed OpenAI voice, ownership, secretary settings, run fixes
+
+Owner feedback from the 0.21.7 phone test (9 items) plus the secretary's duplicate-call bug.
+
+- **Secretary worker** (web-fees `c2f5d44`, Cloudflare `solarchik-screen` version `79a77437-e167-4f58-88dc-50905b082e88`; rollback with `npx wrangler rollback 81e336fa-670a-4e95-b818-e67a1ce609f2 --name solarchik-screen`).
+  - **Duplicate `realtime.call.incoming`.** A real call got two webhooks 166 ms apart. The second accept failed, refunded the call and overwrote the good inbox entry with "Missed call … (refunded)". Now a `CallRoom` Durable Object runs once per callId and keeps `call:<id>` markers (accepting / accepted / failed). A duplicate never charges, refunds or patches the inbox, and the charge happens exactly once.
+  - **Notes.** A stronger NOTE_FIRST rule in the prompt. A sideband WebSocket transcribes the call. If the call ends without `save_call_note`, `finishNote` writes a gpt-4o-mini summary, or "Call answered; the caller left no details." It runs on close or by an alarm 16 min after accept.
+  - The called number is read from P-Called-Party-ID. Prompts ask only for name + reason, and the callback defaults to the caller's number. There is no company field.
+  - Worker tests: 28 + 19 pass.
+  - **Not yet seen on a real call:** the sideband note.
+- **Worker `/sol/chat`** (gpt-4.1-mini, fallback gpt-4o-mini, `propose_action` tool, NDJSON stream `{"d":…}` then `{"done":true,…}`). **Worker `/sol/tts`** (gpt-4o-mini-tts, default voice marin, PCM 24 kHz s16le streamed and edge-cached). `/balance` and `/secretary-lang` (auto/uk/en).
+- **#1 Ownership.** `agents/Ownership.kt`. `Desk.start` refuses an unowned PAPER start (`NOT_OWNED`).
+  - The Agents tab shows Owned / Not owned. "Get this agent" opens the shared `ui/OfferCard.kt` (Mint free when allowed, never for paid-only Combo; Buy Pro 0.1 SOL; Cancel), and after the wallet approves it starts on paper.
+  - Sol's context sends `owned`. "Start X" on an unowned agent shows the same options inside Sol's card (`SolActionDesk.acquireAndStart`). Nothing runs without the tap.
+- **#2 One Sol brain.** `sol/SolBrain.kt`: worker stream, then the market sol-act route, then the phone parser. All chat goes through it, and the friend worker ("you can only watch") is off the path.
+  - Small talk streams into the status line, and the voice starts on the first sentence. An action becomes a card; status is answered at once. Offline replies are labelled.
+  - Live (2026-10-03 ~00:30 Kyiv): TTFT 0.68 s, full reply 1.1 s. "start Weather Station" (not owned) → `start_agent` in 0.84 s.
+- **#3 Voice.** `sol/Voice.kt`: `SolVoice` is a sentence queue (speak/enqueue/feed).
+  - Engines in order: OpenAI PCM streamed into an AudioTrack (non-blocking writes, interruptible, cached in `cacheDir/sol-voice-oa`, newest 160) → Gemini WAV → system TTS.
+  - Settings › Sol's voice offers Marin/Cedar/Coral/Shimmer with a sample, plus the last engine and first-audio latency (`VoiceStats`).
+  - Live TTS first byte 0.50–0.78 s (uk/en, 3 fresh lines); cache hits ~0.04 s.
+- **#4 Run radio.** `game/RunRadio.kt` rewrite (`RunRadio.Policy`).
+  - Time-critical hints (hurt/combo/bonus/progress/last heart/first roof) are local lines spoken at once, with prefetched audio. Stale hints (> 0.8 s, or after DEAD) are dropped.
+  - AI only for GO / clock / DEAD (2.5 s / 6 s deadline, then the local line) and for player questions. Player questions are queued and never cut by hints.
+  - Listening lasts 12 s and keeps the partial transcript. Wrong-language AI captions are replaced by the local line.
+  - A mid-run action waits in `sol/SolHandoff.kt` and appears as a card on the Sol tab.
+  - Root cause of the late "Обережно, дріт попереду": an AI answer to the periodic progress cue arriving seconds later.
+- **#5 "Corrupted" runner on the tablet.** The software render at 1920×1200 is clean from 0 to 2350 m (`RunLongRenderTest`; ALPHA_8 masks are 4-px aligned).
+  - The owner's blue grid with black dots and a thick red line matches the drone boss arena (~1000–1420 m): one 4200-unit roof drawn as a single endless window facade, plus the boss laser band.
+  - Long roofs are now separate facade blocks with seams, the storm glow fades at both edges, the sky cache is bounded, and `RunArt.mask` pads widths to ×4.
+  - **Not verified** on a real GPU.
+- **#6 CLOCK IN banner.** A one-line horizontal chip (title 17sp + subtitle 13sp, maxLines 1, top-centre). Captions have a min width and are collapsed/capped at 140 chars. UK string: "Підпис дня відкрито!".
+- **#7 Settings › Secretary.**
+  - Live balance on every open, with Refresh, a Trial pill and a "Paid $x · trial $y" line.
+  - Voice language Auto/Українська/English (worker POST).
+  - Full player ID with Copy. The ID was collapsing to zero width next to the button, so it now has its own line.
+  - Top-up with no wallet app → install Phantom/Solflare, copy link, QR (zxing). "Check payment" is a separate button. A `<queries>` entry is added for `solana:`.
+  - Home card shows "state · balance $X · Trial".
+- **Delete my data** also wipes `solarchik-voice` and `cacheDir/sol-voice-oa` (ComplianceTest caught it).
+- **#9** The web SecretaryDesk `save.secCredit` mismatch is noted, not changed here.
+- **Checks (native-full, 0.21.8 / versionCode 73).** `testDebugUnitTest`: 288 tests, 9 skipped (opt-in tools/live checks), 0 failures. New: SolActionsTest +4 (brain order, worker small talk, unowned → offer, owned → confirm), VoiceTest, RunRadioPolicyTest, RunLongRenderTest, Screens0218Test (EN+UK), DeskTest `paperNeedsAnOwnedAgent`. `lintDebug`: 0 errors, 5 warnings (baseline icon density, two AppLocale notes from 0.21.7, two old unused strings). `assembleDebug` and `assembleRelease` OK.
+- **APKs (box test key, not production).** `solarchik-0.21.8-release-boxkey.apk` 6,691,235 bytes, sha256 `e1b757ebd5e078c26bb4a92f25f1f3266df89c0ea1a9df592b9c25a2eebc1c45`, signer `CN=Solarchik BOX TEST KEY (not production)`. `solarchik-0.21.8-debug.apk` 10,777,974 bytes, sha256 `1bb2193bb70bba22e4c13cf105e2c750a52f6b6e25678cc84fc394898dab59a7`. Screens: `/workspace/apk-test/shots-0.21.8/`.
+- **Not verified on a device:** the GPU look of the tablet run, MWA mint/buy from the offer card, audio quality of the OpenAI voice by ear, the source of the vertical CLOCK IN text the owner saw, and the sideband fallback note on a real call.

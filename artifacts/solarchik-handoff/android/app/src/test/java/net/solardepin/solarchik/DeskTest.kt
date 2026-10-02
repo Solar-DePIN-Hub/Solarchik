@@ -59,7 +59,23 @@ class DeskTest {
         d.tick().closed.single()
     }
 
+    /** 0.21.8: paper runs need the agent (any cluster). */
+    private fun ownPaper() = AgentStore(ctx).upsert(OwnedAgent("AssetPaper11111111111111111111111111111111", "sku-pred-alpha", "free", "Bitcoin Windows #11", owner, "devnet"))
+
+    @Test fun paperNeedsAnOwnedAgent() = runBlocking {
+        val d = desk()
+        val refused = d.start("paper:sku-pred-alpha", "sku-pred-alpha", "free", "Bitcoin Windows #11", Track.PAPER).exceptionOrNull()
+        assertTrue(refused is DeskError && refused.kind == DeskError.Kind.NOT_OWNED)
+        assertTrue(d.state().runs.none { it.running })
+        // a Pro copy of the same strategy (bought, mainnet) also counts for the paper track
+        AgentStore(ctx).upsert(OwnedAgent("AssetMain11111111111111111111111111111111", "sku-pred-alpha-pro", "pro", "Bitcoin Windows #11 Pro", owner, "mainnet"))
+        assertTrue(d.start("paper:sku-pred-alpha", "sku-pred-alpha", "free", "Bitcoin Windows #11", Track.PAPER).isSuccess)
+        // another strategy is still not owned
+        assertTrue(d.start("paper:sku-pred-beta", "sku-pred-beta", "free", "x", Track.PAPER).isFailure)
+    }
+
     @Test fun paperRowsAreRecordedNotOwed() = runBlocking {
+        ownPaper()
         val d = desk()
         d.start("paper:sku-pred-alpha", "sku-pred-alpha", "free", "Bitcoin Windows #11", Track.PAPER)
         val (c, row) = cycle(d, 1.0)
@@ -111,6 +127,7 @@ class DeskTest {
     }
 
     @Test fun lossesFeedTheLossBrake() = runBlocking {
+        ownPaper()
         val d = desk()
         d.start("paper:sku-pred-alpha", "sku-pred-alpha", "free", "Bitcoin Windows #11", Track.PAPER)
         val (c1, r1) = cycle(d, -1.0)
@@ -169,6 +186,7 @@ class DeskTest {
     }
 
     @Test fun positionFromUnknownSourceDoesNotBreakTicks() = runBlocking {
+        ownPaper()
         val d = desk()
         d.start("paper:sku-pred-alpha", "sku-pred-alpha", "free", "Bitcoin Windows #11", Track.PAPER)
         d.tick(); now += 15 * min; btc *= 1.0045

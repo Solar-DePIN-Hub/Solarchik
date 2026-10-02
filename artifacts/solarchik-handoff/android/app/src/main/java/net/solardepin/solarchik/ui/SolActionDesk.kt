@@ -58,12 +58,17 @@ class SolActionDesk(
                 )
             }
         }
+        val records = host.store.agents()
         for (sku in Catalog.skus) {
             val key = "paper:${sku.id}"
             val run = desk.run(key)
+            // 0.21.8: a paper agent is only "mine" when I own its sku (free or Pro NFT); Sol offers the rest
+            val ownedRec = records.filter { it.status != OwnedAgent.STATUS_MISSING && Catalog.baseOf(it.skuId)?.id == sku.id }
+            val tier = if (ownedRec.any { it.tier == AgentTier.PRO }) AgentTier.PRO else sku.tierFor(AgentTier.FREE)
             agents += ActAgent(
                 id = key, name = AgentNames.display(ctx, sku.name), running = run?.running == true, trades = run?.let { it.wins + it.losses },
-                pnlSol = run?.pnl, skuId = sku.id, tier = sku.tierFor(AgentTier.FREE), track = Track.PAPER,
+                pnlSol = run?.pnl, skuId = sku.id, tier = tier, track = Track.PAPER,
+                owned = net.solardepin.solarchik.agents.Ownership.ownsSku(records, sku.id),
             )
         }
         val market = runCatching { StrategyCard.parseMarket(api("market-list", JsonObject(emptyMap()))) }.getOrDefault(emptyList())
@@ -146,6 +151,28 @@ class SolActionDesk(
         }
         invalidate()
         return result
+    }
+
+    /**
+     * 0.21.8: "start X" for an agent I don't own — runs only after the player picked Mint free / Buy Pro on
+     * the confirmation card: mint (wallet approval), then start the paper run with the minted tier.
+     */
+    suspend fun acquireAndStart(plan: ActionPlan, tier: String): ActResult {
+        val a = plan.agent ?: return ActResult(false, ctx.getString(R.string.sol_act_unclear))
+        val sku = Catalog.baseOf(a.skuId) ?: return ActResult(false, ctx.getString(R.string.sol_act_unclear))
+        val minted = host.minter.mint(host.sender, sku, tier).getOrElse {
+            return ActResult(false, ctx.getString(R.string.sol_act_failed, host.errorText(it)))
+        }
+        val link = minted.sig.takeIf { it.isNotBlank() }?.let { host.explorerTx(it, minted.cluster) }.orEmpty()
+        invalidate()
+        return host.desk.start(a.id, sku.id, tier, sku.nameFor(tier), Track.PAPER).fold(
+            onSuccess = {
+                host.deskChanged()
+                ActResult(true, ctx.getString(R.string.sol_act_minted, AgentNames.display(ctx, minted.name)) + " " +
+                    ctx.getString(R.string.sol_act_started, a.name, ctx.getString(R.string.track_paper)), link)
+            },
+            onFailure = { ActResult(false, ctx.getString(R.string.sol_act_failed, host.errorText(it)), link) },
+        )
     }
 
     companion object {

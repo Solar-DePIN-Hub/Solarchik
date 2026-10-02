@@ -221,7 +221,6 @@
     <string name="desk_stats">Positions: %1$d · %2$d W / %3$d L · %4$s SOL</string>
     <string name="desk_devnet_empty">Mint a strategy NFT on devnet (Strategies tab) to run it here. Paper works without a mint.</string>
     <string name="desk_devnet_connect">Connect a devnet wallet to run your own strategy NFTs.</string>
-    <string name="desk_trial">Trial</string>
     <string name="desk_started">%1$s started on %2$s</string>
     <string name="desk_stopped">%1$s stopped. An open position still closes on time.</string>
     <string name="desk_not_owned">Devnet runs need your own minted NFT.</string>
@@ -351,7 +350,6 @@
     <string name="sec_rationale_body">Android will ask you to pick Solarchik as the call screening app. It only sees numbers that are not in your contacts and only the number itself, never the conversation. You can turn it off here or in system settings at any time.</string>
     <string name="sec_rationale_go">Continue</string>
     <string name="sec_role_denied">Call screening was not enabled.</string>
-    <string name="sec_no_wallet">No Solana wallet app found. The payment link was copied.</string>
     <string name="sec_paid">Payment received: %1$s added.</string>
     <string name="sec_paid_already">That payment was already credited.</string>
     <string name="sec_not_found">Payment not found yet. Give it a minute and check again.</string>
@@ -587,8 +585,6 @@
     <string name="run_cue_combo">I have a combo of %1$d going.</string>
     <string name="run_cue_hurt">I got hit, %1$d hearts left.</string>
     <string name="run_cue_progress">I am at %1$d m, new roofs ahead.</string>
-    <string name="run_cue_last_heart">I got hit and I am down to my last heart.</string>
-    <string name="run_cue_first_roof">I fell on the very first roof.</string>
     <string name="run_cue_clock_ready">I ran %1$d m, the day can be signed now.</string>
     <string name="settings_language_phone">Phone</string>
     <string name="sol_greet_cue">Greet me in the yard with one short warm line. My clock-in streak is %1$d days.</string>
@@ -682,4 +678,41 @@
     <string name="home_streak_title">Streak</string>
     <plurals name="home_agents_running"><item quantity="one">%d running</item><item quantity="other">%d running</item></plurals>
     <plurals name="home_streak_days"><item quantity="one">%d day · keep it</item><item quantity="other">%d days · keep it</item></plurals>
+    <!-- 0.21.8 secretary settings -->
+    <string name="sec_trial">Trial</string>
+    <string name="sec_credit_parts">Paid %1$s · trial %2$s</string>
+    <string name="sec_refresh">Refresh balance</string>
+    <string name="sec_refreshing">Refreshing…</string>
+    <string name="sec_lang">Secretary speaks</string>
+    <string name="sec_lang_auto">Auto</string>
+    <string name="sec_lang_uk">Українська</string>
+    <string name="sec_lang_en">English</string>
+    <string name="sec_lang_saved">Secretary language saved</string>
+    <string name="sec_player_id">Player ID</string>
+    <string name="copy">Copy</string>
+    <string name="sec_no_wallet_title">No Solana wallet on this phone</string>
+    <string name="sec_no_wallet_body">Top-ups are paid in USDC from a Solana wallet. Install Phantom or Solflare, or pay from another phone: copy the link or scan the QR code. Then come back and tap Check payment.</string>
+    <string name="sec_install_wallet">Install %1$s</string>
+    <string name="sec_copy_link">Copy payment link</string>
+    <string name="sec_qr">Scan with a Solana wallet</string>
+    <string name="sec_then_check">After paying, tap Check payment.</string>
+    <string name="home_sec_with_credit">%1$s · credit %2$s</string>
+    <string name="desk_owned">Owned</string>
+    <string name="desk_not_owned_pill">Not owned</string>
+    <string name="desk_get_agent">Get this agent</string>
+    <string name="offer_title">Get %1$s</string>
+    <string name="offer_body">You don\'t own this agent yet. Mint it free or buy Pro — after the wallet approves, it starts on paper right away.</string>
+    <string name="offer_mint_free">Mint free &amp; start</string>
+    <string name="offer_buy_pro">Buy Pro · %1$s SOL &amp; start</string>
+    <string name="sol_act_ready_acquire">You don\'t own %1$s yet — pick Mint free or Buy Pro on the card below; it starts right after the wallet approves.</string>
+    <string name="settings_sol_voice">Sol\'s voice</string>
+    <string name="settings_sol_voice_body">Sol speaks with an OpenAI voice (gpt-4o-mini-tts) streamed from our server; replies start in about a second. Without internet the phone\'s own voice is used.</string>
+    <string name="settings_sol_voice_preview">Play a sample</string>
+    <string name="settings_sol_voice_sample">Hi! I\'m Sol. Your agents are working, and I\'ll keep you posted.</string>
+    <string name="voice_engine_openai">OpenAI voice</string>
+    <string name="voice_engine_gemini">Gemini voice</string>
+    <string name="voice_engine_system">phone\'s voice (fallback)</string>
+    <string name="voice_last">Last line: %1$s · first sound in %2$s ms</string>
+    <string name="voice_last_none">Sol has not spoken yet on this phone.</string>
+    <string name="run_action_later">Got it — I\'ll put that on the Sol tab for you to confirm after the run.</string>
 </resources>
