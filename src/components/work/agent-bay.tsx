@@ -108,7 +108,7 @@ function strategyLine(runtime: AgentRuntime): string {
   if (!config) return "Стратегію ще не зчитано";
   if (runtime.kind === "prediction") {
     const s = config as StrategyBundle["prediction"];
-    if (s.focus === "events") return `Події · Grok від 65% · ставка ${s.maxStakeSol}`;
+    if (s.focus === "events") return `Події · ШІ від 65% · ставка ${s.maxStakeSol}`;
     const labels = (s.windows ?? [15]).map((w) => (w === 240 ? "4г" : `${w}хв`)).join(" · ");
     return `Біткоїн ${labels} · край ${s.edgeBps} bps · ставка ${s.maxStakeSol}`;
   }

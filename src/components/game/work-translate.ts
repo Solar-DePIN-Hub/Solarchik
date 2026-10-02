@@ -20,7 +20,8 @@ function replaceWhole(text: string, uk: string, en: string): string {
     }
     const before = at > 0 ? text[at - 1] : "";
     const after = text[at + uk.length] ?? "";
-    const stuckLeft = isLetter(uk[0] ?? "") && isLetter(before);
+    // A digit right before is fine ("2д" -> "2d"); a letter is not (part of another word).
+    const stuckLeft = isLetter(uk[0] ?? "") && /\p{L}/u.test(before);
     const stuckRight = isLetter(uk[uk.length - 1] ?? "") && isLetter(after);
     if (stuckLeft || stuckRight) {
       out += text.slice(i, at + 1);

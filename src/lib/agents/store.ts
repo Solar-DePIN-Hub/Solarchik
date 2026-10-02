@@ -4350,9 +4350,10 @@ export const useAgents = create<AgentsState>((set, get) => ({
           brainFlight = true;
           const asset = nft.asset;
           const freeNow = free;
-          set({ notice: "Grok розбирає ринок…" });
+          set({ notice: "ШІ розбирає ринок…" });
           void decideBet({
             data: {
+              locale: typeof document !== "undefined" ? document.documentElement.lang : undefined,
               focus: ask.focus,
               name: ask.name,
               risk: ask.risk,
@@ -4386,6 +4387,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
                 confidence: decision.confidence,
                 why: decision.why,
                 free: freeNow,
+                brain: res.ok ? res.brain : undefined,
               });
               set((s) => {
                 let fills = s.fills;
@@ -4403,7 +4405,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
                       clockMin: landed.clockMin,
                       anchorPx: landed.anchorPx,
                       anchorLabel: landed.anchorLabel,
-                      brain: "Grok",
+                      brain: res.ok ? (res.brain ?? "Grok") : "ШІ",
                     },
                   },
                   log: landed.log ? pushLog(s.log, landed.log) : s.log,
@@ -4422,7 +4424,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
             })
             .catch(() => {
               brainFlight = false;
-              set({ notice: "Grok не відповів. Ставку не відкриваю." });
+              set({ notice: "ШІ не відповів. Ставку не відкриваю." });
             });
         }
       }

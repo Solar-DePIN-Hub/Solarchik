@@ -1,5 +1,6 @@
 import { GROK_MODEL } from "./grok-model";
 import { grokChat } from "./grok-fetch";
+import { geminiTalk } from "./gemini-live.server";
 
 export type DecideTwap = {
   w30: { price: string | null; ageSec: number | null };
@@ -47,14 +48,16 @@ export type DecideRequest = {
   markets: DecideMarket[];
   askLo?: number;
   askHi?: number;
+  /** Player's UI locale ("uk" / "en"...). English players get an English `why`. */
+  locale?: string;
 };
 
 export type DecideResult =
-  | { ok: true; action: "yes" | "no" | "skip"; marketId: string; confidence: number; why: string }
+  | { ok: true; action: "yes" | "no" | "skip"; marketId: string; confidence: number; why: string; brain?: Brain }
   | { ok: false; error: string };
 
 export type CloseDecision =
-  | { ok: true; action: "sell" | "hold"; confidence: number; why: string }
+  | { ok: true; action: "sell" | "hold"; confidence: number; why: string; brain?: Brain }
   | { ok: false; error: string };
 
 const GROK_WAIT_MS = 12_000;
@@ -80,17 +83,35 @@ function inventedGate(why: string): boolean {
   return /\|\s*delta\s*\|\s*<\s*100|менше\s*(ніж\s*)?100|поріг.{0,16}100|мало\s*часу|надто\s*коротк|не відповідає порогу/i.test(why);
 }
 
+export type Brain = "Grok" | "Gemini";
+
+/** Language of the human-facing `why`. Checks below still read the Ukrainian `why`. */
+export type DecideLang = "uk" | "en";
+
+export function decideLang(locale: string | undefined | null): DecideLang {
+  return String(locale || "").toLowerCase().startsWith("uk") || !locale ? "uk" : "en";
+}
+
+const WHY_EN_ASK =
+  " Додай поле \"why_en\": те саме пояснення одним реченням англійською (English).";
+
+/**
+ * Grok first (XAI_API_KEY or the desk worker). If Grok is not reachable on this deploy, Gemini answers
+ * the same prompt, and the result says which model decided (never labelled Grok when Gemini answered).
+ */
 async function completeGrok(
   system: string,
   user: string,
-): Promise<{ ok: true; raw: string } | { ok: false; error: string }> {
+  maxTokens = 220,
+): Promise<{ ok: true; raw: string; brain: Brain } | { ok: false; error: string }> {
   const asked = Date.now();
+  let grokFail = "";
   try {
     const res = await grokChat(
       {
         model: GROK_MODEL,
         temperature: 0,
-        max_tokens: 220,
+        max_tokens: maxTokens,
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },
@@ -98,12 +119,23 @@ async function completeGrok(
       },
       GROK_WAIT_MS,
     );
-    if (!res.ok) return { ok: false, error: `Grok ${res.status}. Ставку не відкриваю.` };
-    const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    return { ok: true, raw: body.choices?.[0]?.message?.content ?? "" };
+    if (res.ok) {
+      const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      return { ok: true, raw: body.choices?.[0]?.message?.content ?? "", brain: "Grok" };
+    }
+    grokFail = `Grok ${res.status}`;
   } catch {
-    return { ok: false, error: grokSilent(asked) };
+    grokFail = grokSilent(asked).replace(/\.$/, "");
   }
+  const alt = await geminiTalk(system, user, maxTokens + 120).catch(() => null);
+  if (alt?.text) return { ok: true, raw: alt.text, brain: "Gemini" };
+  return { ok: false, error: `ШІ не відповів (${grokFail}, Gemini теж). Ставку не відкриваю.` };
+}
+
+/** Swap the model's Ukrainian sentence for its English copy inside the final line (prefixes stay for the dictionary). */
+function localizeWhy(why: string, uk: string, en: string | null, lang: DecideLang): string {
+  if (lang !== "en" || !en || !uk || !why.includes(uk)) return why;
+  return why.replace(uk, en);
 }
 
 function citesCrowdOdds(why: string): boolean {
@@ -271,9 +303,11 @@ export async function decideBetOnServer(input: DecideRequest): Promise<DecideRes
         markets,
       });
 
-  const first = await completeGrok(system, user);
+  const lang = decideLang(input.locale);
+  const ask = lang === "en" ? WHY_EN_ASK : "";
+  const first = await completeGrok(system + ask, user);
   if (!first.ok) return first;
-  const decision = readBet(first.raw);
+  const decision = readBet(first.raw, first.brain);
   if (!decision.ok) return decision;
   const priced = markets.some((m) => {
     const up = m.askUp;
@@ -289,11 +323,11 @@ export async function decideBetOnServer(input: DecideRequest): Promise<DecideRes
         `Час, дельта і TWAP не причина skip. skip, якщо ask твого боку поза ${band.lo}–${band.hi}, або ноги з цифр не видно.`,
         "Не вигадуй поріг і не пиши «мало часу». Не вигадуй ціну BTC і PnL.",
         "Відповідай лише JSON: {\"action\":\"yes\"|\"no\"|\"skip\",\"marketId\":\"id зі списку\",\"confidence\":0..1,\"why\":\"бік, priceToBeat і currentRef\"}.",
-      ].join(" "),
+      ].join(" ") + ask,
       user,
     );
     if (!again.ok) return again;
-    const second = readBet(again.raw);
+    const second = readBet(again.raw, again.brain);
     if (!second.ok) return second;
     if (second.action === "skip" && deniesPayload(second.why)) {
       const invented = inventedGate(second.why);
@@ -302,9 +336,10 @@ export async function decideBetOnServer(input: DecideRequest): Promise<DecideRes
         action: "skip",
         marketId: "",
         confidence: second.confidence,
+        brain: again.brain,
         why: invented
-          ? "Grok вигадав поріг. Ордера немає."
-          : "Grok проігнорував коридор ціни. Ордера немає.",
+          ? `${again.brain} вигадав поріг. Ордера немає.`
+          : `${again.brain} проігнорував коридор ціни. Ордера немає.`,
       };
     }
     return second;
@@ -314,24 +349,26 @@ export async function decideBetOnServer(input: DecideRequest): Promise<DecideRes
   }
   return decision;
 
-  function readBet(raw: string): DecideResult {
+  function readBet(raw: string, brain: Brain): DecideResult {
     const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) return { ok: false, error: "Grok не зібрав рішення." };
+    if (!match) return { ok: false, error: `${brain} не зібрав рішення.` };
     let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(match[0]) as Record<string, unknown>;
     } catch {
-      return { ok: false, error: "Grok не зібрав рішення." };
+      return { ok: false, error: `${brain} не зібрав рішення.` };
     }
     const marketId = typeof parsed.marketId === "string" ? parsed.marketId : "";
     const known = markets.some((m) => m.id === marketId);
     if (typeof parsed.confidence !== "number" || !Number.isFinite(parsed.confidence)) {
-      return { ok: false, error: "Grok не зібрав рішення." };
+      return { ok: false, error: `${brain} не зібрав рішення.` };
     }
     const confidence = Math.min(1, Math.max(0, parsed.confidence));
     let why = String(parsed.why ?? "").replace(/\s+/g, " ").trim().slice(0, 180);
+    const modelWhy = why;
+    const whyEn = typeof parsed.why_en === "string" ? parsed.why_en.replace(/\s+/g, " ").trim().slice(0, 180) || null : null;
     if (parsed.action !== "yes" && parsed.action !== "no" && parsed.action !== "skip") {
-      return { ok: false, error: "Grok не зібрав рішення." };
+      return { ok: false, error: `${brain} не зібрав рішення.` };
     }
     let action: "yes" | "no" | "skip" = parsed.action;
     if (action !== "skip" && !known) {
@@ -376,7 +413,8 @@ export async function decideBetOnServer(input: DecideRequest): Promise<DecideRes
       action,
       marketId: known ? marketId : "",
       confidence,
-      why: why || "Без пояснення.",
+      why: localizeWhy(why || "Без пояснення.", modelWhy, whyEn, lang),
+      brain,
     };
   }
 }
@@ -412,42 +450,24 @@ export async function decideCloseOnServer(input: {
     bid: input.bid,
     feeLabel: input.feeLabel,
   });
-  const asked = Date.now();
-  let res: Response;
-  try {
-    res = await grokChat(
-      {
-        model: GROK_MODEL,
-        temperature: 0,
-        max_tokens: 180,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      },
-      GROK_WAIT_MS,
-    );
-  } catch {
-    return { ok: false, error: grokSilent(asked) };
-  }
-  if (!res.ok) return { ok: false, error: `Grok ${res.status}. Закриття немає.` };
-  const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-  const raw = body.choices?.[0]?.message?.content ?? "";
+  const done = await completeGrok(system, user, 180);
+  if (!done.ok) return { ok: false, error: done.error.replace("Ставку не відкриваю.", "Закриття немає.") };
+  const { raw, brain } = done;
   const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) return { ok: false, error: "Grok не зібрав рішення." };
+  if (!match) return { ok: false, error: `${brain} не зібрав рішення.` };
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(match[0]) as Record<string, unknown>;
   } catch {
-    return { ok: false, error: "Grok не зібрав рішення." };
+    return { ok: false, error: `${brain} не зібрав рішення.` };
   }
   if (typeof parsed.confidence !== "number" || !Number.isFinite(parsed.confidence)) {
-    return { ok: false, error: "Grok не зібрав рішення." };
+    return { ok: false, error: `${brain} не зібрав рішення.` };
   }
   const confidence = Math.min(1, Math.max(0, parsed.confidence));
   let why = String(parsed.why ?? "").replace(/\s+/g, " ").trim().slice(0, 180);
   if (parsed.action !== "sell" && parsed.action !== "hold") {
-    return { ok: false, error: "Grok не зібрав рішення." };
+    return { ok: false, error: `${brain} не зібрав рішення.` };
   }
   let action: "sell" | "hold" = parsed.action;
   if (action === "sell" && confidence < 0.65) {
@@ -458,5 +478,5 @@ export async function decideCloseOnServer(input: {
     action = "hold";
     why = "Напрямок зі стакана не беру. Не продаю.";
   }
-  return { ok: true, action, confidence, why: why || "Без пояснення." };
+  return { ok: true, action, confidence, why: why || "Без пояснення.", brain };
 }

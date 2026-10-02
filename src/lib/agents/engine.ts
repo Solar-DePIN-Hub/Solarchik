@@ -266,7 +266,7 @@ export function matchWhirl(market: string, quote: Quote): Book | null {
       return {
         px: pool.price,
         label: pool.address,
-        pretty: `Шатбол ${pool.symbolA}/${pool.symbolB} ${fmtPx(pool.price)} · fee ${pool.feeBps} bps`,
+        pretty: `Whirlpool ${pool.symbolA}/${pool.symbolB} ${fmtPx(pool.price)} · fee ${pool.feeBps} bps`,
         via: "orca",
         mode: "edge",
       };
@@ -276,7 +276,7 @@ export function matchWhirl(market: string, quote: Quote): Book | null {
       return {
         px,
         label: `${pool.address}:inv`,
-        pretty: `Шатбол ${pool.symbolB}/${pool.symbolA} ${fmtPx(px)} · fee ${pool.feeBps} bps`,
+        pretty: `Whirlpool ${pool.symbolB}/${pool.symbolA} ${fmtPx(px)} · fee ${pool.feeBps} bps`,
         via: "orca",
         mode: "edge",
       };
@@ -314,9 +314,9 @@ export function predictionHint(strategy: PredictionStrategy, quote: Quote | null
   const s = clampStrategy({ prediction: strategy, dex: { pair: "SOL/USDC", dcaIntervalSec: 900, dcaAmountSol: 0.005, slippageBps: 50, side: "both" } }).prediction;
   if (s.focus === "events") {
     const m = eventSlate(quote.polymarkets)[0] ?? null;
-    if (!m) return "Поки немає подій поза біткоїном. Grok обере, коли Gamma їх віддасть.";
+    if (!m) return "Поки немає подій поза біткоїном. ШІ обере, коли Gamma їх віддасть.";
     const name = m.yes >= 0.5 ? m.yesLabel : m.noLabel;
-    return `Grok дивиться ринки поза біткоїном. Зараз найгучніший: «${m.question}» · ${name} ${(favoriteChance(m) * 100).toFixed(0)}%`;
+    return `ШІ дивиться ринки поза біткоїном. Зараз найгучніший: «${m.question}» · ${name} ${(favoriteChance(m) * 100).toFixed(0)}%`;
   }
   const live = quote.polymarkets.filter((m) => m.focus === "btc" && m.windowMin != null);
   if (!live.length) return "Gamma ще не віддала вікна Bitcoin Up/Down.";
@@ -451,7 +451,7 @@ function arbDex(
     return hold(`${head}. Чистий край ${bps.toFixed(1)} bps, поріг ${minBps}. Чекаю.`, mark);
   }
   if (!(best > minBps / 10_000)) {
-    return hold(`${head}. Чистий край ${bps.toFixed(1)} bps, поріг ${minBps}. Край.`, mark);
+    return hold(`${head}. Чистий край ${bps.toFixed(1)} bps, поріг ${minBps}. Край замалий.`, mark);
   }
   const liveMax = args.liveMaxSol ?? 0.005;
   const credit = args.creditSol ?? 0;
@@ -545,8 +545,8 @@ function predictionWindow(
   if (!(args.anchorPx && args.anchorPx > 0) || args.anchorLabel !== book.label) {
     const text =
       book.mode === "favorite"
-        ? `${nft.name}: дивлюсь ${book.pretty}. Grok поставить, лише якщо впевнений.`
-        : `${nft.name}: якір ${book.pretty}. Далі вікно ${s.windowMin} хв. Grok ставить лише коли впевнений.`;
+        ? `${nft.name}: дивлюсь ${book.pretty}. ШІ поставить, лише якщо впевнений.`
+        : `${nft.name}: якір ${book.pretty}. Далі вікно ${s.windowMin} хв. ШІ ставить лише коли впевнений.`;
     return {
       nft,
       log: { id: uid(), at: args.now, kind: "prediction", text },
@@ -563,10 +563,10 @@ function predictionWindow(
   }
   const moveBps = ((book.px - args.anchorPx) / args.anchorPx) * 10_000;
   if (args.decider === "wait") {
-    return hold("Grok читає ринок…", { clockMin: args.clockMin });
+    return hold("ШІ читає ринок…", { clockMin: args.clockMin });
   }
   if (args.decider === "capped") {
-    return hold("Grok більше не ставить у цій сесії. Без його рішення ставки немає.", { clockMin: args.clockMin });
+    return hold("ШІ більше не ставить у цій сесії. Без його рішення ставки немає.", { clockMin: args.clockMin });
   }
   if (args.decider === "grok") {
     const markets =
@@ -575,7 +575,7 @@ function predictionWindow(
         : args.quote.polymarkets.filter(
             (m) => m.focus === "btc" && m.windowMin != null && (s.windows ?? []).includes(m.windowMin),
           );
-    if (!markets.length) return hold("Немає ринку, який варто показувати Grok", { clockMin: 0 });
+    if (!markets.length) return hold("Немає ринку, який варто показувати ШІ", { clockMin: 0 });
     const ask: BrainAsk = {
       focus: s.focus === "events" ? "events" : "btc",
       name: nft.name,
@@ -591,20 +591,20 @@ function predictionWindow(
     return {
       nft,
       log: null,
-      line: "Grok читає ринок…",
+      line: "ШІ читає ринок…",
       clockMin: args.clockMin,
       anchorPx: args.anchorPx,
       anchorLabel: book.label,
       chain: null,
       counted: false,
-      brain: "Grok",
+      brain: "ШІ",
       fill: null,
       fillPatch: null,
       ask,
     };
   }
   if (args.decider !== "rule") {
-    return hold("Без рішення Grok ставку не відкриваю", { clockMin: 0 });
+    return hold("Без рішення ШІ ставку не відкриваю", { clockMin: 0 });
   }
   return predictionStep(nft, args.now, book, moveBps, free);
 }
@@ -688,7 +688,10 @@ export function commitBrain(args: {
   confidence: number;
   why: string;
   free: number;
+  /** Model that actually decided ("Grok" or "Gemini"). */
+  brain?: string;
 }): StepResult {
+  const who = args.brain || "Grok";
   const why = args.why.replace(/\s+/g, " ").trim().slice(0, 180);
   const market = args.quote.polymarkets.find((m) => m.id === args.marketId) ?? null;
   const book = market ? quoteToBook(market, market.focus === "btc" ? "edge" : "favorite") : null;
@@ -701,19 +704,19 @@ export function commitBrain(args: {
     anchorLabel: book?.label ?? null,
     chain: null,
     counted: false,
-    brain: "Grok",
+    brain: who,
     fill: null,
     fillPatch: null,
   });
   if (!book || args.action === "skip") {
-    return reset(why || "Grok: ставку не відкриваю");
+    return reset(why || `${who}: ставку не відкриваю`);
   }
   const confidence = Math.min(1, Math.max(0, args.confidence));
   if (confidence < 0.65) {
-    return reset(why || `Grok не впевнений (${Math.round(confidence * 100)}%). Ставку не відкриваю.`);
+    return reset(why || `${who} не впевнений (${Math.round(confidence * 100)}%). Ставку не відкриваю.`);
   }
   const stake = dynamicSize(capOf(args.nft), confidence, riskOf(args.nft), args.free);
-  if (stake < 0.005) return reset(why || "Grok бачить сторону, але вільних SOL замало");
+  if (stake < 0.005) return reset(why || `${who} бачить сторону, але вільних SOL замало`);
   const side = args.action;
   const gate = chainGate(args.nft, book, side, stake, args.now);
   if (gate) return reset(gate);
@@ -739,7 +742,7 @@ export function commitBrain(args: {
     pnl: 0,
     status: "open",
   };
-  const line = `Grok · ${why || side} · ставка ${stake}`;
+  const line = `${who} · ${why || side} · ставка ${stake}`;
   return {
     nft: noteOpen({ ...args.nft, openBook: open }, args.now),
     log: { id: uid(), at: args.now, kind: "prediction", text: line },
@@ -753,12 +756,12 @@ export function commitBrain(args: {
       stake,
       pnl: 0,
       win: false,
-      memo: `Grok lock ${side} ${stake}`,
+      memo: `${who} lock ${side} ${stake}`,
       fillId,
       asset: args.nft.asset,
     },
     counted: true,
-    brain: "Grok",
+    brain: who,
     fill,
     fillPatch: null,
   };

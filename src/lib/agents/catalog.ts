@@ -43,7 +43,7 @@ export function liveCatalog(): LiveSku[] {
     {
       id: "sku-pred-alpha",
       priceSol: 0,
-      blurb: "Біткоїн Up/Down лише 15 хв. Grok ставить від 65%.",
+      blurb: "Біткоїн Up/Down лише 15 хв. ШІ ставить від 65%.",
       nft: liveNft({
         asset: "PredAlphaTpl000000000000000000000001",
         classId: 1,
@@ -57,7 +57,7 @@ export function liveCatalog(): LiveSku[] {
     {
       id: "sku-pred-events",
       priceSol: 0,
-      blurb: "Події не про біткоїн і не спорт. Горизонт до 2 діб. Grok від 65%.",
+      blurb: "Події не про біткоїн і не спорт. Горизонт до 2 діб. ШІ від 65%.",
       nft: liveNft({
         asset: "PredEventsTpl00000000000000000000003",
         classId: 1,

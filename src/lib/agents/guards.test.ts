@@ -520,3 +520,17 @@ describe("native bundle default server", () => {
     assert.doesNotMatch(readFileSync(new URL("../../../.env.example", import.meta.url), "utf8"), /solarchik-super-app/);
   });
 });
+
+describe("prediction brain: honest model label and player language", () => {
+  it("falls back to Gemini when Grok is unreachable and reports which model decided", () => {
+    const src = readFileSync(new URL("./decide.server.ts", import.meta.url), "utf8");
+    const helper = src.slice(src.indexOf("async function completeGrok("), src.indexOf("function localizeWhy"));
+    assert.match(helper, /geminiTalk\(system, user/);
+    assert.match(helper, /brain: "Gemini"/);
+    assert.match(helper, /brain: "Grok"/);
+    assert.match(src, /brain,\n    \};/);
+    const store = readFileSync(new URL("./store.ts", import.meta.url), "utf8");
+    assert.match(store, /brain: res\.ok \? res\.brain : undefined/);
+    assert.match(store, /locale: typeof document !== "undefined" \? document\.documentElement\.lang : undefined,\n\s+focus: ask\.focus/);
+  });
+});
