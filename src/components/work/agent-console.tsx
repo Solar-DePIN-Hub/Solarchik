@@ -6,6 +6,7 @@ import type { AgentFill, AgentKind, AgentNft, RiskMode } from "@/lib/agents/type
 import { cn, formatSol } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { StrategyDesk } from "./strategy-desk";
+import { ChainStrategyPanel } from "./strategy-chain";
 import { IconPulse, IconSwap } from "./icons";
 
 const SIDE: Record<AgentFill["side"], string> = {
@@ -317,7 +318,10 @@ export function AgentConsole({ owned }: { owned: AgentNft[] }) {
             </div>
           </>
         ) : (
-          <StrategyDesk nft={selected} />
+          <>
+            <StrategyDesk nft={selected} />
+            {kindsForClass(selected.classId).includes("prediction") ? <ChainStrategyPanel key={selected.asset} nft={selected} /> : null}
+          </>
         )}
       </div>
     </section>

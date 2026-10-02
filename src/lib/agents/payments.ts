@@ -97,3 +97,21 @@ export const feeBalanceFn = createServerFn({ method: "POST" })
     const { feeBalanceOnServer } = await import("./positions.server");
     return feeBalanceOnServer(data.wallet);
   });
+
+/** Strategy NFTs + marketplace (one entry; the route list and sanitizing live in strategy.server). */
+export const strategyCallFn = createServerFn({ method: "POST" })
+  .validator((input: { route?: string; body?: Record<string, unknown> }) => ({
+    route: typeof input?.route === "string" ? input.route.slice(0, 40) : "",
+    body: input?.body && typeof input.body === "object" ? input.body : {},
+  }))
+  .handler(async ({ data }) => {
+    const { strategyRoute, STRATEGY_ROUTES } = await import("./strategy.server");
+    if (!(STRATEGY_ROUTES as readonly string[]).includes(data.route)) return { json: JSON.stringify({ ok: false, reason: "route" }) };
+    // Results carry Maps-free plain data; sent as JSON text so the server-fn serializer has one simple type.
+    let ip = "unknown";
+    if (data.route === "faucet-drip") {
+      const { getRequest } = await import("@tanstack/react-start/server");
+      ip = (getRequest()?.headers.get("x-forwarded-for") ?? "").split(",")[0]?.trim() || "unknown";
+    }
+    return { json: JSON.stringify(await strategyRoute(data.route, data.body, { ip })) };
+  });

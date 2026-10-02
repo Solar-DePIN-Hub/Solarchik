@@ -19,14 +19,17 @@ import {
   type PositionSide,
   type WindowStart,
 } from "./position-rules.ts";
+import { checkTrade, specFromAttrs, type SpecLane } from "./strategy-spec.ts";
 
 export type PositionDeps = {
   sql: GuardSql;
   now: number;
   /** Server's own Polymarket yes price for a `poly:` book, or null when unreadable. */
   price: (book: string) => Promise<number | null>;
-  /** Core asset owner and tier, or null when the asset does not exist. */
-  agent: (asset: string) => Promise<{ owner: string; free: boolean } | null>;
+  /** Core asset owner, tier and Attributes, or null when the asset does not exist. */
+  agent: (asset: string) => Promise<{ owner: string; free: boolean; attrs?: Map<string, string> } | null>;
+  /** Lane and BTC window of a `poly:` book (server's own Gamma read). Needed for Strategy NFTs. */
+  market?: (book: string) => Promise<{ lane: SpecLane; window: number } | null>;
 };
 
 type Row = {
@@ -63,7 +66,7 @@ export async function windowStarts(sql: GuardSql, wallet: string): Promise<Windo
   return rows.map((r) => ({ windowId: r.window_id, kind: r.kind === "d7" ? "d7" : "h48", startedMs: n(r.started_ms), endsMs: n(r.ends_ms) }));
 }
 
-async function closeRow(deps: PositionDeps, row: Row, exitPx: number | null): Promise<ClosedPosition | null> {
+export async function closeRow(deps: PositionDeps, row: Row, exitPx: number | null): Promise<ClosedPosition | null> {
   const side = readSide(row.side) ?? "yes";
   const pnl = exitPx == null ? 0 : pnlLamports(n(row.stake_lamports), side, row.entry_px, exitPx);
   const covered = startsCover(await windowStarts(deps.sql, row.wallet), n(row.opened_ms));
@@ -130,10 +133,26 @@ export async function openPosition(
   }
   const px = await deps.price(input.book).catch(() => null);
   if (!entryOk(px)) return { ok: false, reason: "Сервер не прочитав ціну ринку.", retry: true };
+  // Strategy NFT: the trade must follow the strategy stored on chain, or it is not recorded (no PnL, no APR).
+  const chain = agent.attrs ? specFromAttrs(agent.attrs) : null;
+  if (agent.attrs?.has("sh") && (!chain || !chain.hashOk)) return { ok: false, reason: "Стратегія в NFT пошкоджена (хеш не збігся).", retry: false };
+  if (chain) {
+    const info = deps.market ? await deps.market(input.book).catch(() => null) : null;
+    if (!info) return { ok: false, reason: "Сервер не прочитав ринок.", retry: true };
+    const check = checkTrade(chain.spec, {
+      side: input.side,
+      yesPx: px,
+      lane: info.lane,
+      window: info.window,
+      stakeSol: input.stakeLamports / 1e9,
+      hourUtc: new Date(now).getUTCHours(),
+    });
+    if (!check.ok) return { ok: false, reason: `Не за стратегією NFT: ${check.reason}`, retry: false };
+  }
   await sql.query(
-    `insert into agent_positions (id, wallet, asset, tier, book, side, stake_lamports, entry_px, opened_ms)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9) on conflict (id) do nothing`,
-    [input.fillId, input.wallet, input.asset, tier, input.book, input.side, input.stakeLamports, px, now],
+    `insert into agent_positions (id, wallet, asset, tier, book, side, stake_lamports, entry_px, opened_ms, strategy_hash)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) on conflict (id) do nothing`,
+    [input.fillId, input.wallet, input.asset, tier, input.book, input.side, input.stakeLamports, px, now, chain?.hash ?? null],
   );
   return { ok: true, entryPx: px, openedMs: now, tier };
 }

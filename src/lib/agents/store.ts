@@ -202,8 +202,10 @@ type AgentsState = {
   pauseAsset: (asset: string) => void;
   withdrawLocked: (asset: string) => Promise<void>;
   coachAsset: (asset: string, guidance: string) => Promise<{ ok: true; reply: string } | { ok: false; error: string }>;
-  listForSale: (asset: string) => void;
+  listForSale: (asset: string, priceSol?: number) => void;
   buyListing: (id: string) => void;
+  /** Re-reads one agent from chain (strategy, results, owner) into the desk. */
+  refreshAsset: (asset: string) => Promise<void>;
   confirmTrade: () => void;
   rejectTrade: () => void;
   setExternalWallet: (pubkey: string | null, sol: number | null) => void;
@@ -2087,13 +2089,26 @@ function pumpWrite() {
       const kp = await loadKeypair();
       if (!kp) return;
       const sig = await (await loadChain()).writeCore(kp, job.nft);
-      job.onSig(sig);
+      if (sig) job.onSig(sig);
     } catch (e) {
       job.onErr(errText(e));
     } finally {
       pumpWrite();
     }
   })();
+}
+
+/** Strategy NFT: a strategy change goes through the server (validated, signed, sale lock reset), not a direct write. */
+function pushChainStrategy(nft: AgentNft, okLine: string) {
+  const p = nft.strategy.prediction;
+  void (async () => {
+    const { specFromStrategy } = await import("./strategy-spec");
+    const { saveChainStrategy } = await import("./strategy-client");
+    const spec = specFromStrategy({ ...p, risk: p.risk ?? nft.brief?.risk });
+    const res = await saveChainStrategy(nft.asset, spec);
+    useAgents.setState({ notice: res.ok ? `${okLine} · ${res.sig.slice(0, 8)}… · замок продажу 240 год` : res.reason });
+    await useAgents.getState().refreshAsset(nft.asset);
+  })().catch((e) => useAgents.setState({ notice: errText(e) }));
 }
 
 function queueWrite(nft: AgentNft, onSig: (sig: string) => void, onErr: (msg: string) => void) {
@@ -3381,11 +3396,34 @@ export const useAgents = create<AgentsState>((set, get) => ({
       }));
       get().persist();
     } catch (e) {
+      // Public devnet airdrop limited: fall back to the server's rate-limited devnet faucet.
+      let why = "";
+      try {
+        const { serverFaucet } = await import("./strategy-client");
+        set({ notice: "Публічний кран Devnet зайнятий. Прошу кран сервера…" });
+        const r = await serverFaucet();
+        if (r.ok) {
+          const next = await readSol(kp.publicKey);
+          set((s) => ({
+            chainBusy: false,
+            sol: next ?? s.sol,
+            solKnown: next != null,
+            solMiss: next == null,
+            notice: `Кран сервера надіслав ${(r.lamports / 1e9).toFixed(3)} SOL · ${r.sig.slice(0, 8)}…`,
+            log: pushLog(s.log, { id: r.sig, at: Date.now(), kind: "system", text: `Кран сервера ${(r.lamports / 1e9).toFixed(3)} SOL · ${r.sig}` }),
+          }));
+          get().persist();
+          return;
+        }
+        why = ` Кран сервера: ${r.reason}`;
+      } catch {
+        /* keep the airdrop error */
+      }
       const next = await readSol(kp.publicKey);
       if (next == null) {
-        set({ chainBusy: false, solKnown: false, solMiss: true, notice: errText(e) });
+        set({ chainBusy: false, solKnown: false, solMiss: true, notice: errText(e) + why });
       } else {
-        set({ chainBusy: false, sol: next, solKnown: true, solMiss: false, notice: errText(e) });
+        set({ chainBusy: false, sol: next, solKnown: true, solMiss: false, notice: errText(e) + why });
       }
       get().persist();
     }
@@ -4494,12 +4532,33 @@ export const useAgents = create<AgentsState>((set, get) => ({
       agents,
       notice: "Пишу стратегію в Core…",
     }));
-    queueWrite(
-      next,
-      (sig) => set({ notice: `Стратегію записано в токен ${sig.slice(0, 8)}…` }),
-      (msg) => set({ notice: msg }),
-    );
+    if (nft.chainSpec) {
+      pushChainStrategy(next, "Стратегію записано в NFT");
+    } else {
+      queueWrite(
+        next,
+        (sig) => set({ notice: `Стратегію записано в токен ${sig.slice(0, 8)}…` }),
+        (msg) => set({ notice: msg }),
+      );
+    }
     get().persist();
+  },
+
+  async refreshAsset(asset) {
+    try {
+      const live = await (await loadChain()).fetchAgent(asset);
+      if (!live) return;
+      set((s) => {
+        const prior = s.nfts.find((n) => n.asset === asset);
+        const owner = s.wallet?.pubkey;
+        const merged: AgentNft = prior ? { ...prior, ...live, brief: prior.brief, openBook: prior.openBook ?? null, mintedAt: prior.mintedAt } : live;
+        if (owner && live.owner !== owner) return { nfts: s.nfts.filter((n) => n.asset !== asset) };
+        return { nfts: prior ? s.nfts.map((n) => (n.asset === asset ? merged : n)) : [...s.nfts, merged] };
+      });
+      get().persist();
+    } catch {
+      /* RPC quiet: keep the local copy */
+    }
   },
 
   setFocus(asset) {
@@ -4652,11 +4711,15 @@ export const useAgents = create<AgentsState>((set, get) => ({
         agents,
         notice: res.reply,
       }));
-      queueWrite(
-        next,
-        (sig) => set({ notice: `${res.reply} · токен ${sig.slice(0, 8)}…` }),
-        (msg) => set({ notice: msg }),
-      );
+      if (nft.chainSpec) {
+        pushChainStrategy(next, res.reply);
+      } else {
+        queueWrite(
+          next,
+          (sig) => set({ notice: `${res.reply} · токен ${sig.slice(0, 8)}…` }),
+          (msg) => set({ notice: msg }),
+        );
+      }
       get().persist();
       if (res.bet) void get().reviewPoly(res.bet);
       return { ok: true, reply: res.reply };
@@ -4667,11 +4730,27 @@ export const useAgents = create<AgentsState>((set, get) => ({
     }
   },
 
-  listForSale(asset) {
+  listForSale(asset, priceSol) {
     const wallet = get().wallet;
     if (!wallet || get().chainBusy) return;
     const nft = get().nfts.find((n) => n.asset === asset && n.owner === wallet.pubkey);
     if (!nft) return;
+    if (nft.chainSpec) {
+      // Strategy NFT: stays in the wallet, frozen under the server with a transfer delegate (escrow). 240 h after the last strategy change.
+      const left = nft.chainSpec.unlockSec * 1000 - Date.now();
+      if (left > 0) {
+        set({ notice: `Замок продажу ще ${Math.ceil(left / 3_600_000)} год після зміни стратегії.` });
+        return;
+      }
+      const price = priceSol && priceSol > 0 ? priceSol : quoteResaleSol(nft);
+      set({ chainBusy: true, notice: "Виставляю NFT (ескроу на сервері)…" });
+      void (async () => {
+        const { listOnChain } = await import("./strategy-client");
+        const res = await listOnChain(asset, price);
+        set({ chainBusy: false, notice: res.ok ? `${nft.name} на ринку за ${price} SOL · ${res.sig.slice(0, 8)}…` : res.reason });
+      })().catch((e) => set({ chainBusy: false, notice: errText(e) }));
+      return;
+    }
     const gate = listEligible(nft);
     if (!gate.ok) {
       set({ notice: gate.reason });

@@ -24,6 +24,18 @@ const ROUTES = new Set([
   "mint-status",
   "mint-prepare",
   "mint-reissue",
+  "faucet-drip",
+  "strategy-validate",
+  "strategy-info",
+  "strategy-prepare",
+  "strategy-confirm",
+  "strategy-sync",
+  "market-list",
+  "market-prepare-list",
+  "market-confirm-list",
+  "market-unlist",
+  "market-prepare-buy",
+  "market-confirm-buy",
 ]);
 const MAX_BODY = 16 * 1024;
 const allow = rateLimiter(DESK_PROXY_PER_MIN);
@@ -55,6 +67,13 @@ export default async function nativeApiMiddleware(
   if (!ROUTES.has(route)) return reply(404, { ok: false, error: "route" });
   const method = (event.req.method ?? "GET").toUpperCase();
   if (method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+  // Vercel cron: GET /api/native/strategy-sync with Authorization: Bearer CRON_SECRET.
+  if (route === "strategy-sync" && method === "GET") {
+    const secret = (process.env.CRON_SECRET || "").trim();
+    if (!secret || event.req.headers?.get("authorization") !== `Bearer ${secret}`) return reply(401, { ok: false, error: "auth" });
+    const { strategyRoute } = await import("../../src/lib/agents/strategy.server.ts");
+    return reply(200, await strategyRoute("strategy-sync", {}, { cron: true }));
+  }
   if (method !== "POST") return reply(405, { ok: false, error: "method" });
   const ip = (event.req.headers?.get("x-forwarded-for") ?? "").split(",")[0]?.trim() || "unknown";
   if (!allow(`${ip}:${route}`, Date.now())) return reply(429, { ok: false, error: "slow down" });
@@ -68,6 +87,10 @@ export default async function nativeApiMiddleware(
     return reply(400, { ok: false, error: "json" });
   }
   try {
+    if (route.startsWith("strategy-") || route.startsWith("market-") || route === "faucet-drip") {
+      const { strategyRoute } = await import("../../src/lib/agents/strategy.server.ts");
+      return reply(200, await strategyRoute(route, body, { ip }));
+    }
     const { readProof } = await import("../../src/lib/agents/wallet-proof.ts");
     if (route === "arb-fire") {
       const { cleanArbSymbol } = await import("../../src/lib/agents/arb-rules.ts");

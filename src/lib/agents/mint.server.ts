@@ -4,6 +4,7 @@ import { create, createCollection } from "@metaplex-foundation/mpl-core";
 import type { Keypair } from "@solana/web3.js";
 import { liveCatalog } from "./catalog";
 import { attrList } from "./core-attrs";
+import { mergeAttrs, specAttrs, specFromStrategy, unlockSecFor } from "./strategy-spec";
 import { ROYALTY_BPS } from "./fees.config";
 import { PAY_WALLET } from "@/lib/game/pay";
 import { COLLECTION_NAME, type AgentNft } from "./types";
@@ -144,8 +145,16 @@ async function freeAlreadyOwned(wallet: string, except = ""): Promise<boolean> {
   return owned.some((a) => a.asset !== except && core.isFreeTier(a));
 }
 
+/** Attributes of a fresh co-signed mint: catalog stats + the on-chain strategy v1 (sale lock from now). */
+export function mintAttributes(draft: AgentNft, nowMs: number): Attr[] {
+  const nowSec = Math.floor(nowMs / 1000);
+  const spec = specFromStrategy({ ...draft.strategy.prediction, risk: draft.brief?.risk });
+  return mergeAttrs(attrList(draft), specAttrs(spec, { version: 1, changedSec: nowSec, unlockSec: unlockSecFor(nowSec) }));
+}
+
 /** Builds the co-signed Core mint (and the one-time collection setup) for the room wallet to pay. */
-async function buildCosigned(input: {
+export async function buildCosigned(input: {
+  rpcUrl?: string;
   authority: Keypair;
   wallet: string;
   tier: MintTier;
@@ -154,7 +163,7 @@ async function buildCosigned(input: {
   attributes: Attr[];
 }): Promise<{ ok: true; asset: string; collection: string; txs: string[] } | { ok: false; reason: string }> {
   const { authority, wallet, tier, assetKey } = input;
-  const umi: Umi = createUmi(devnetUrl());
+  const umi: Umi = createUmi(input.rpcUrl ?? devnetUrl());
   const serverSigner = createSignerFromKeypair(umi, umi.eddsa.createKeypairFromSecretKey(authority.secretKey));
   const colKp = serverCollectionKeypair(authority);
   const colSigner = createSignerFromKeypair(umi, umi.eddsa.createKeypairFromSecretKey(colKp.secretKey));
@@ -187,15 +196,16 @@ async function buildCosigned(input: {
       name: input.name.slice(0, 32),
       uri: mintUri(tier),
       plugins: [
-        // Owner keeps updating stats as before; tier truth is the URI.
-        { type: "Attributes", attributeList: input.attributes, authority: { type: "Owner" } },
+        // Strategy + results are written only by the server (collection update authority).
+        { type: "Attributes", attributeList: input.attributes, authority: { type: "UpdateAuthority" } },
         {
           type: "Royalties",
           basisPoints: ROYALTY_BPS,
           creators: [{ address: publicKey(TREASURY), percentage: 100 }],
           ruleSet: { type: "None" },
         },
-        { type: "FreezeDelegate", frozen: true },
+        // Sale lock: frozen under the server until the 240 h after the strategy was set.
+        { type: "FreezeDelegate", frozen: true, authority: { type: "Address", address: serverSigner.publicKey } },
       ],
     })
       .setFeePayer(payer)
@@ -272,7 +282,8 @@ export async function prepareMintOnServer(input: { proof: WalletProof | null; sk
     metrics: { ...sku.nft.metrics, workedSec: 0, aprPct: null },
   };
   const assetKey = derivedKeypair(authority, tier === "free" ? freeAssetLabel(wallet) : proAssetLabel(paySig));
-  const built = await buildCosigned({ authority, wallet, tier, assetKey, name: draft.name, attributes: attrList(draft) });
+  const attributes = mintAttributes(draft, now);
+  const built = await buildCosigned({ authority, wallet, tier, assetKey, name: draft.name, attributes });
   if (!built.ok) return built;
   return { ok: true, mode: "cosign", tier, asset: built.asset, collection: built.collection, txs: built.txs };
 }

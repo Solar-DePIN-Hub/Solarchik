@@ -42,14 +42,33 @@ function asList(v: unknown): string[] {
   return [];
 }
 
-/** Yes/Up price of one Polymarket market, open or resolved (a resolved market reads 0 or 1). */
-export async function polyYesPrice(book: string): Promise<number | null> {
+const marketCache = new Map<string, { at: number; raw: Record<string, unknown> | null }>();
+
+async function polyMarket(book: string): Promise<Record<string, unknown> | null> {
   const id = book.replace(/^poly:/, "");
   if (!/^[\w-]{1,100}$/.test(id)) return null;
+  const hit = marketCache.get(id);
+  if (hit && Date.now() - hit.at < 3000) return hit.raw;
   const url = /^\d+$/.test(id) ? `${GAMMA}/markets/${id}` : `${GAMMA}/markets/slug/${encodeURIComponent(id)}`;
   const res = await fetch(url, { headers: { accept: "application/json", "user-agent": "Solarchik/1.0" }, signal: AbortSignal.timeout(8000) });
-  if (!res.ok) return null;
-  const raw = (await res.json()) as Record<string, unknown>;
+  const raw = res.ok ? ((await res.json()) as Record<string, unknown>) : null;
+  marketCache.set(id, { at: Date.now(), raw });
+  if (marketCache.size > 200) marketCache.delete(marketCache.keys().next().value as string);
+  return raw;
+}
+
+/** Lane and BTC window of a market, from its slug/question (server read). */
+export async function polyLane(book: string): Promise<{ lane: "crypto" | "events" | "weather"; window: number } | null> {
+  const raw = await polyMarket(book);
+  if (!raw) return null;
+  const { laneOfMarket } = await import("./strategy-spec");
+  return laneOfMarket({ slug: String(raw.slug ?? ""), question: String(raw.question ?? "") });
+}
+
+/** Yes/Up price of one Polymarket market, open or resolved (a resolved market reads 0 or 1). */
+export async function polyYesPrice(book: string): Promise<number | null> {
+  const raw = await polyMarket(book);
+  if (!raw) return null;
   const outcomes = asList(raw.outcomes);
   const prices = asList(raw.outcomePrices).map(Number);
   if (!outcomes.length || !prices.length) return null;
@@ -59,15 +78,16 @@ export async function polyYesPrice(book: string): Promise<number | null> {
   return Number.isFinite(px) && px >= 0 && px <= 1 ? px : null;
 }
 
-async function coreAgent(asset: string): Promise<{ owner: string; free: boolean } | null> {
+async function coreAgent(asset: string): Promise<{ owner: string; free: boolean; attrs: Map<string, string> } | null> {
   const { fetchCoreAgent, isFreeTier } = await import("./core-owned.server");
   const agent = await fetchCoreAgent(asset);
-  return agent ? { owner: agent.owner, free: isFreeTier(agent) } : null;
+  return agent ? { owner: agent.owner, free: isFreeTier(agent), attrs: agent.attrs } : null;
 }
 
-function deps(sql: GuardSql): PositionDeps {
-  return { sql, now: Date.now(), price: polyYesPrice, agent: coreAgent };
+export function positionDeps(sql: GuardSql): PositionDeps {
+  return { sql, now: Date.now(), price: polyYesPrice, agent: coreAgent, market: polyLane };
 }
+const deps = positionDeps;
 
 async function guard(
   proof: WalletProof | null,
@@ -115,7 +135,18 @@ export async function closePositionOnServer(input: { proof: WalletProof | null; 
   if (!g.ok) return g;
   try {
     const { closePosition } = await import("./positions-ledger.server");
-    return await closePosition(deps(g.sql), { wallet: g.wallet, fillId: input.fillId });
+    const res = await closePosition(deps(g.sql), { wallet: g.wallet, fillId: input.fillId });
+    if (res.ok) {
+      // Strategy NFT results go on chain after each close (best effort; the sync job retries).
+      try {
+        const rows = await g.sql.query<{ asset: string }>("select asset from agent_positions where id = $1", [input.fillId]);
+        const { syncStrategyAsset } = await import("./strategy.server");
+        if (rows[0]?.asset) await syncStrategyAsset(rows[0].asset, g.sql);
+      } catch {
+        /* chain write retried by /api/native/strategy-sync */
+      }
+    }
+    return res;
   } catch {
     return { ok: false, reason: "Сервер не відповів.", retry: true };
   }

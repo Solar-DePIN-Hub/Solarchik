@@ -123,3 +123,11 @@ export async function callFeeBalance(wallet: string): Promise<({ ok: true } & Fe
   const { feeBalanceFn } = await import("./payments");
   return feeBalanceFn({ data: { wallet } });
 }
+
+/** Strategy NFTs + marketplace: one route table on the server (strategy.server STRATEGY_ROUTES). */
+export async function callStrategy<T = { ok: boolean; reason?: string }>(route: string, body: Record<string, unknown>): Promise<T> {
+  if (NATIVE) return nativePost<T>(route, body, 60_000);
+  const { strategyCallFn } = await import("./payments");
+  const res = await strategyCallFn({ data: { route, body } });
+  return JSON.parse(res.json) as T;
+}

@@ -1,5 +1,6 @@
 import { clampStrategy, clampWindows, dynamicSize, STRATEGY_MINUTES_PER_TICK } from "./classes";
 import { rigDecide } from "./rig";
+import { checkTrade, laneOfMarket } from "./strategy-spec";
 import type { AgentFill, AgentKind, AgentNft, LogEntry, OpenBook, PredictionStrategy, StrategyBundle, Track } from "./types";
 
 /** Deck costs: 0.10% Backpack taker plus 5 bps for priority fee and a missed leg. */
@@ -133,7 +134,33 @@ type Book = {
   pretty: string;
   via: string;
   mode: "edge" | "favorite";
+  lane?: "crypto" | "events" | "weather";
+  windowMin?: number;
 };
+
+/** Strategy NFT: the trade must follow the strategy stored on chain (the server refuses the rest). Null = allowed. */
+function chainGate(nft: AgentNft, book: Book, side: string, stake: number, now: number): string | null {
+  const c = nft.chainSpec;
+  if (!c) return null;
+  if (!c.hashOk) return "Стратегія в NFT пошкоджена: ставку не відкриваю.";
+  const r = checkTrade(c.spec, {
+    side,
+    yesPx: book.px,
+    lane: book.lane ?? "crypto",
+    window: book.windowMin ?? 0,
+    stakeSol: stake,
+    hourUtc: new Date(now).getUTCHours(),
+  });
+  return r.ok ? null : `Стратегія NFT: ${r.reason}`;
+}
+
+/** Stake cap and risk: from the chain spec when the NFT has one. */
+function capOf(nft: AgentNft): number {
+  return nft.chainSpec ? Math.min(nft.chainSpec.spec.stakeSol, nft.strategy.prediction.maxStakeSol) : nft.strategy.prediction.maxStakeSol;
+}
+function riskOf(nft: AgentNft) {
+  return nft.chainSpec?.spec.risk ?? nft.brief?.risk ?? "balanced";
+}
 
 function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -552,7 +579,7 @@ function predictionWindow(
     const ask: BrainAsk = {
       focus: s.focus === "events" ? "events" : "btc",
       name: nft.name,
-      risk: nft.brief?.risk ?? "balanced",
+      risk: riskOf(nft),
       goal: (nft.brief?.goal ?? "").slice(0, 180),
       edgeBps: s.edgeBps,
       maxStakeSol: s.maxStakeSol,
@@ -598,6 +625,8 @@ function quoteToBook(m: PolyMarketQuote, mode: "edge" | "favorite"): Book {
       pretty: `Події «${m.question}» · ${name} ${(favoriteChance(m) * 100).toFixed(0)}%`,
       via: "gamma",
       mode,
+      lane: m.focus === "btc" ? "crypto" : laneOfMarket({ question: m.question }).lane,
+      windowMin: m.focus === "btc" ? (m.windowMin ?? 0) : 0,
     };
   }
   const span = m.windowMin === 240 ? "4 год" : `${m.windowMin ?? "?"} хв`;
@@ -607,6 +636,8 @@ function quoteToBook(m: PolyMarketQuote, mode: "edge" | "favorite"): Book {
     pretty: `Біткоїн ${span} · ${m.yesLabel} ${(m.yes * 100).toFixed(1)}%`,
     via: "gamma",
     mode,
+    lane: m.focus === "btc" ? "crypto" : laneOfMarket({ question: m.question }).lane,
+    windowMin: m.focus === "btc" ? (m.windowMin ?? 0) : 0,
   };
 }
 
@@ -681,14 +712,11 @@ export function commitBrain(args: {
   if (confidence < 0.65) {
     return reset(why || `Grok не впевнений (${Math.round(confidence * 100)}%). Ставку не відкриваю.`);
   }
-  const stake = dynamicSize(
-    args.nft.strategy.prediction.maxStakeSol,
-    confidence,
-    args.nft.brief?.risk ?? "balanced",
-    args.free,
-  );
+  const stake = dynamicSize(capOf(args.nft), confidence, riskOf(args.nft), args.free);
   if (stake < 0.005) return reset(why || "Grok бачить сторону, але вільних SOL замало");
   const side = args.action;
+  const gate = chainGate(args.nft, book, side, stake, args.now);
+  if (gate) return reset(gate);
   const fillId = uid();
   const pretty = book.pretty.slice(0, 180);
   const open: OpenBook = {
@@ -740,10 +768,10 @@ function predictionStep(nft: AgentNft, now: number, book: Book, moveBps: number,
   const decided = rigDecide({
     name: nft.name,
     tag: "LIVE",
-    strategy: nft.strategy.prediction,
+    strategy: { ...nft.strategy.prediction, maxStakeSol: capOf(nft) },
     pretty: book.pretty,
     moveBps,
-    risk: nft.brief?.risk ?? "balanced",
+    risk: riskOf(nft),
     free,
     mode: book.mode,
     yesPx: book.px,
@@ -767,6 +795,10 @@ function predictionStep(nft: AgentNft, now: number, book: Book, moveBps: number,
     };
   }
   const side = decided.action;
+  const gate = side === "yes" || side === "no" || side === "long" || side === "short" ? chainGate(nft, book, side, decided.stake, now) : null;
+  if (gate) {
+    return { nft, log: { id: uid(), at: now, kind: "prediction", text: gate }, line: gate, ...base, chain: null, counted: false, fill: null, fillPatch: null };
+  }
   if (side !== "yes" && side !== "no" && side !== "long" && side !== "short") {
     return {
       nft,

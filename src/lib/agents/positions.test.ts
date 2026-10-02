@@ -138,7 +138,7 @@ describe("positions ledger on Postgres (PGLite)", () => {
   });
   before(async () => {
     const pg = new PGlite();
-    for (const f of ["0002_guards.sql", "0003_mints.sql", "0004_payments.sql", "0005_positions.sql"]) {
+    for (const f of ["0002_guards.sql", "0003_mints.sql", "0004_payments.sql", "0005_positions.sql", "0006_strategy_market.sql"]) {
       await pg.exec(readFileSync(new URL(`../../../migrations/${f}`, import.meta.url), "utf8"));
     }
     sql = { query: async (text: string, params: unknown[] = []) => (await pg.query(text, params)).rows as never[] };

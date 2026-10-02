@@ -55,6 +55,11 @@ export type PredictionStrategy = {
   eventsDays?: 1 | 2;
   /** WEEX USDT-M BTC. Off unless the player turns it on. Not a Polymarket lane. */
   weexOn?: boolean;
+  /** Strategy NFT (on-chain spec): sizing risk, stop/take % of stake, rules DSL. */
+  risk?: RiskMode;
+  stopPct?: number;
+  takePct?: number;
+  rules?: string;
 };
 
 export type DexStrategy = {
@@ -142,6 +147,19 @@ export type AgentNft = {
   metrics: NftMetrics;
   brief?: AgentBrief;
   openBook?: OpenBook | null;
+  /** On-chain strategy identity and server-written results (server-collection Strategy NFTs). */
+  chainSpec?: ChainSpecInfo | null;
+};
+
+export type ChainSpecInfo = {
+  /** The strategy as stored on chain (what the engine and the server allow). */
+  spec: import("./strategy-spec").StrategySpec;
+  version: number;
+  hash: string;
+  hashOk: boolean;
+  changedSec: number;
+  unlockSec: number;
+  perf: { trades: number; winRatePct: number | null; realizedSol: number; apr7: number | null; apr30: number | null; aprSince: number | null; writtenSec: number } | null;
 };
 
 export type AgentRuntime = {

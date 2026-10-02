@@ -34,6 +34,7 @@ import { COLLECTION_NAME, type AgentNft, type NftClassId, type StrategyBundle, t
 import { WORK_GOAL_SEC, listEligible, workedSecOf } from "./classes";
 import { ROYALTY_BPS } from "./fees.config";
 import { attrList } from "./core-attrs";
+import { perfFromAttrs, specFromAttrs } from "./strategy-spec";
 import { tierFromUri } from "./mint-rules";
 import { publicDevnet, rpcUrl } from "./rpc-heal";
 
@@ -335,6 +336,8 @@ export function nftFromAsset(
   coreCollection: string,
   list: Array<{ key: string; value: string }>,
   uri?: string,
+  /** Attributes plugin authority is the collection update authority (server): only then the spec/results are trusted. */
+  attrsByServer = false,
 ): AgentNft | null {
   const map = new Map(list.map((a) => [a.key, a.value]));
   let classId = num(map, "class", 1);
@@ -365,6 +368,7 @@ export function nftFromAsset(
   const winRaw = (map.get("pw") ?? "15").split(/[.\s,]/).map(Number).filter((n) => n === 5 || n === 15 || n === 60 || n === 240);
   const windows = winRaw.length ? [...new Set(winRaw)].sort((a, b) => a - b) : [15];
   const band = (map.get("ab") ?? "").match(/^(\d*\.?\d+)-(\d*\.?\d+)$/);
+  const spec = attrsByServer ? specFromAttrs(map) : null;
   const strategy: StrategyBundle = {
     prediction: {
       venue: "polymarket",
@@ -380,6 +384,9 @@ export function nftFromAsset(
       laneOn,
       eventsDays: map.get("ed") === "1" ? 1 : 2,
       weexOn: map.get("wo") === "1",
+      ...(spec
+        ? { risk: spec.spec.risk, stopPct: spec.spec.stopPct, takePct: spec.spec.takePct, rules: spec.spec.rules, maxStakeSol: spec.spec.stakeSol, askLo: spec.spec.askLo, askHi: spec.spec.askHi, edgeBps: spec.spec.edgeBps }
+        : {}),
     },
     dex: {
       pair: map.get("dp") || "SOL/USDC",
@@ -415,7 +422,14 @@ export function nftFromAsset(
       workedSec,
       aprPct: Number.isFinite(aprNum) ? aprNum : null,
     },
+    chainSpec: spec
+      ? { spec: spec.spec, version: spec.version, hash: spec.hash, hashOk: spec.hashOk, changedSec: spec.changedSec, unlockSec: spec.unlockSec, perf: perfFromAttrs(map) }
+      : null,
   };
+}
+
+function byServer(asset: { attributes?: unknown }): boolean {
+  return (asset.attributes as { authority?: { type?: string } } | undefined)?.authority?.type === "UpdateAuthority";
 }
 
 async function loadAsset(asset: string) {
@@ -430,7 +444,7 @@ export async function fetchAgent(asset: string): Promise<AgentNft | null> {
     const col = collectionAddress(fetched);
     if (!col) return null;
     const list = fetched.attributes?.attributeList ?? [];
-    return nftFromAsset(fetched.name, String(fetched.owner), asset, String(col), list, fetched.uri);
+    return nftFromAsset(fetched.name, String(fetched.owner), asset, String(col), list, fetched.uri, byServer(fetched));
   } catch {
     return null;
   }
@@ -464,7 +478,7 @@ export async function fetchOwnedAgents(owner: string): Promise<AgentNft[]> {
           if (String(asset.owner) !== owner) continue;
           const col = collectionAddress(asset);
           if (!col) continue;
-          const nft = nftFromAsset(asset.name, owner, addr, String(col), asset.attributes?.attributeList ?? [], asset.uri);
+          const nft = nftFromAsset(asset.name, owner, addr, String(col), asset.attributes?.attributeList ?? [], asset.uri, byServer(asset));
           if (nft) found.push(nft);
         } catch {
           /* collection or unrelated core account */
@@ -527,6 +541,9 @@ export async function writeCore(payer: Keypair, nft: AgentNft): Promise<string> 
   if (!nft.coreCollection) throw new Error("У NFT немає адреси колекції Core");
   const umi = umiFor(payer);
   const fetched = await loadAsset(nft.asset);
+  // Strategy NFTs: Attributes belong to the server (strategy + results). Nothing for the owner to write.
+  const attrAuth = (fetched.attributes as { authority?: { type?: string } } | undefined)?.authority?.type;
+  if (attrAuth && attrAuth !== "Owner") return "";
   const col = collectionAddress(fetched) ?? publicKey(nft.coreCollection);
   const asset = publicKey(nft.asset);
   const attrs = updatePlugin(umi, {

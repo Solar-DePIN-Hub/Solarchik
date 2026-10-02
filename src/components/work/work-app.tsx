@@ -18,6 +18,7 @@ import { AgentBay } from "./agent-bay";
 import { AgentConsole } from "./agent-console";
 import { FeeNote } from "./fee-note";
 import { RiskPanel } from "./risk-panel";
+import { JudgeStart, StrategyMarket } from "./strategy-chain";
 import { IconCopy, IconPlay, IconStop, IconWallet } from "./icons";
 import { useWorkLoop } from "./use-work-loop";
 
@@ -1495,8 +1496,6 @@ function OwnedRow({ nft, onList }) {
 	});
 }
 function StorePanel() {
-	const listings = useAgents((s) => s.listings);
-	const buyListing = useAgents((s) => s.buyListing);
 	const buyLiveSku = useAgents((s) => s.buyLiveSku);
 	const ensureWallet = useAgents((s) => s.ensureWallet);
 	const setTab = useAgents((s) => s.setTab);
@@ -1520,8 +1519,9 @@ function StorePanel() {
 				}),
 				/* @__PURE__ */ jsx("p", {
 					className: "mt-1 max-w-xl text-sm text-muted leading-normal",
-					children: "Готовий агент одразу в роботу. Вторинка — токени, які вже виставили."
+					children: "Готовий агент одразу в роботу. Ринок — Strategy NFT, які вже виставили (devnet SOL, ескроу сервера, 5% роялті)."
 				}),
+				/* @__PURE__ */ jsx("div", { className: "mt-3", children: /* @__PURE__ */ jsx(JudgeStart, {}) }),
 				/* @__PURE__ */ jsxs("p", {
 					className: "mt-2 text-sm tabular-nums",
 					"data-testid": "store-devnet",
@@ -1539,7 +1539,7 @@ function StorePanel() {
 			] }),
 			/* @__PURE__ */ jsx("div", {
 				className: "grid grid-cols-2 gap-1 rounded-md border border-border bg-elevated p-1",
-				children: [["live", "Агенти"], ["resale", "Вторинка"]].map(([id, label]) => /* @__PURE__ */ jsx("button", {
+				children: [["live", "Агенти"], ["resale", "Ринок"]].map(([id, label]) => /* @__PURE__ */ jsx("button", {
 					type: "button",
 					"data-testid": `lane-${id}`,
 					onClick: () => setLane(id),
@@ -1595,50 +1595,7 @@ function StorePanel() {
 					]
 				}, sku.id))
 			}) : null,
-			lane === "resale" ? listings.length === 0 ? /* @__PURE__ */ jsx("p", {
-				className: "rounded-lg border border-dashed border-border p-6 text-sm text-muted",
-				children: "Ринок порожній. Виставте свого агента з Праці."
-			}) : /* @__PURE__ */ jsx("ul", {
-				className: "grid gap-3",
-				children: listings.map((l) => /* @__PURE__ */ jsxs("li", {
-					className: "rounded-xl border border-border bg-surface p-4",
-					children: [
-						/* @__PURE__ */ jsxs("div", {
-							className: "flex items-start justify-between gap-3",
-							children: [/* @__PURE__ */ jsxs("div", { children: [/* @__PURE__ */ jsx("h3", {
-								className: "font-medium",
-								children: l.nft.name
-							}), /* @__PURE__ */ jsxs("p", {
-								className: "text-xs text-muted mt-1",
-								children: [
-									CLASS_META[l.nft.classId].title,
-									" · XP ",
-									l.nft.metrics.xp,
-									" · jobs",
-									" ",
-									l.nft.metrics.jobs,
-									" · PnL ",
-									l.nft.metrics.pnlSol.toFixed(3),
-									" SOL"
-								]
-							})] }), /* @__PURE__ */ jsxs("div", {
-								className: "font-mono tabular-nums text-sm",
-								children: [l.priceSol.toFixed(2), " SOL"]
-							})]
-						}),
-						/* @__PURE__ */ jsx(StrategyPeek, {
-							nftClass: l.nft.classId,
-							strategy: l.nft.strategy
-						}),
-						/* @__PURE__ */ jsx(Button, {
-							className: "mt-3 w-full",
-							"data-testid": `buy-${l.id}`,
-							onClick: () => buyListing(l.id),
-							children: "Купити з стратегією"
-						})
-					]
-				}, l.id))
-			}) : null
+			lane === "resale" ? /* @__PURE__ */ jsx(StrategyMarket, {}) : null
 		]
 	});
 }
