@@ -10,7 +10,7 @@ const files = [
   ...readdirSync(workDir)
     .filter((f) => f.endsWith(".tsx"))
     .map((f) => new URL(f, workDir)),
-  ...["store.ts", "chain.ts", "arb-guard.server.ts", "mint.server.ts", "payments.server.ts", "mint-rules.ts", "payment-rules.ts"].map(
+  ...["store.ts", "chain.ts", "arb-guard.server.ts", "mint.server.ts", "payments.server.ts", "mint-rules.ts", "payment-rules.ts", "positions.server.ts", "positions-ledger.server.ts", "position-rules.ts"].map(
     (f) => new URL(`src/lib/agents/${f}`, root),
   ),
 ];

@@ -13,7 +13,9 @@ import {
  * Server checks for money the client says it sent. The server reads the
  * transaction itself and records the signature once in Postgres:
  * - arb credit: mainnet deposit room wallet -> arb treasury, memo = NFT asset;
- * - Free fee: devnet transfer room wallet -> pay wallet, memo solarchik-fee:<row>.
+ * - Free fee: devnet transfer room wallet -> pay wallet, memo solarchik-fee:<row>,
+ *   at least the fee the server itself computed for that closed position
+ *   (agent_positions.owed_lamports); a row the server never saw is refused.
  * No database on a deploy: closed (nothing is credited). Anyone may submit a
  * signature: the credit can only land on the wallet/asset written in the tx.
  */
@@ -33,7 +35,7 @@ async function sqlOrNull(): Promise<GuardSql | null> {
   }
 }
 
-async function devnetTx(sig: string): Promise<ParsedTx> {
+export async function devnetTx(sig: string): Promise<ParsedTx> {
   const url = (process.env.SOLANA_RPC_DEVNET || "").trim() || PUBLIC_DEVNET;
   const res = await fetch(url, {
     method: "POST",
@@ -112,6 +114,17 @@ export async function recordFeeOnServer(input: { wallet: string; rowId: string; 
   if (!isAddress(wallet) || !rowId || !isSignature(input.sig)) return { ok: false, reason: "Погані дані.", retry: false };
   const sql = await sqlOrNull();
   if (!sql) return { ok: false, reason: "Немає бази: комісію не звірено.", retry: true };
+  // The server decides what is owed: a closed position it recorded, 5% of its own PnL.
+  try {
+    const { owedFor } = await import("./positions-ledger.server");
+    const owed = await owedFor(sql, wallet, rowId);
+    if (!owed.ok) return owed;
+    if (lamports < owed.owedLamports) {
+      return { ok: false, reason: `Мало: сервер нарахував ${owed.owedLamports} лампортів за цю позицію.`, retry: false };
+    }
+  } catch {
+    return { ok: false, reason: "База не відповіла.", retry: true };
+  }
   let tx: ParsedTx;
   try {
     tx = await devnetTx(input.sig);

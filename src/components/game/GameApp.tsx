@@ -30,13 +30,14 @@ import {
   pickRobot,
   setLocale,
   stampClock,
-  activateFeeWindow,
+  applyServerWindow,
   tickSavePet,
   todayKey,
   writeSave,
   defaultSave,
   type SaveData,
 } from "@/lib/game/save";
+import { clockMemo } from "@/lib/agents/position-rules";
 import { unlockAudio, startMusic, stopMusic, armUnlock, play } from "@/lib/game/audio";
 import type { RobotId } from "@/lib/game/robots";
 import { isLocale, makeT, type Locale } from "@/lib/game/i18n";
@@ -46,6 +47,11 @@ import { signClockInMwa } from "@/lib/game/mwaWeb";
 import { readMessage } from "@/lib/game/secretary";
 
 type Screen = "yard" | "run" | "shop" | "pet" | "work";
+
+/** Clock-in proof to the server: fee-free windows are granted from server-verified days only. */
+function sendClockToServer(proof: { address: string; signature: string; cluster: "mainnet" | "devnet"; kind: "tx" | "message"; memo: string }) {
+  return import("@/lib/agents/store").then((m) => m.syncClockProof(proof)).catch(() => undefined);
+}
 
 export function GameApp() {
   const [save, setSave] = useState<SaveData | null>(null);
@@ -62,6 +68,7 @@ export function GameApp() {
   const [runKey, setRunKey] = useState(0);
   const [signBusy, setSignBusy] = useState(false);
   const [signError, setSignError] = useState("");
+  const [feeNote, setFeeNote] = useState("");
   const hold = useRef<SaveData | null>(null);
   if (save) hold.current = save;
   const view = save ?? { ...defaultSave(), locale: "en" as const };
@@ -222,6 +229,7 @@ export function GameApp() {
         }
         setSignError("");
         setSave((s) => (s ? stampClock(s, proof) : s));
+        void sendClockToServer(proof);
       });
       return;
     }
@@ -234,8 +242,22 @@ export function GameApp() {
         return;
       }
       setSignError("");
-      setSave((s) => (s ? stampClock(s, proof) : s));
+      const day = todayKey();
+      const withMemo = { ...proof, memo: clockMemo(day, snap.lastDistance || snap.bestDistance || 0, snap.streak || 0, dayMod(day)) };
+      setSave((s) => (s ? stampClock(s, withMemo) : s));
+      void sendClockToServer(withMemo);
     });
+  };
+
+  const activateFee = () => {
+    setFeeNote("");
+    void import("@/lib/agents/store")
+      .then((m) => m.startServerFeeWindow())
+      .then((res) => {
+        if (res.ok) setSave((prev) => (prev ? applyServerWindow(prev, res) : prev));
+        else setFeeNote(res.reason);
+      })
+      .catch(() => setFeeNote(t("yard.feeServerDown")));
   };
 
   return (
@@ -357,7 +379,8 @@ export function GameApp() {
             onFarm={() => setScreen("pet")}
             onShop={() => setScreen("shop")}
             onLocale={onLocale}
-            onActivateFee={() => setSave((prev) => (prev ? activateFeeWindow(prev) : prev))}
+            onActivateFee={activateFee}
+            feeNote={feeNote}
             reportReady={save != null}
             onReportSeen={(day) => setSave((prev) => (prev && prev.reportDay !== day ? { ...prev, reportDay: day } : prev))}
           />

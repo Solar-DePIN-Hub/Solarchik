@@ -8,6 +8,8 @@ import type { WalletProof } from "./wallet-proof";
 import type { MintStatus, PrepareMintResult, PrepareReissueResult } from "./mint.server";
 import type { CreditResult, FeeResult } from "./payments.server";
 import type { ArbFireResult } from "./arb-guard.server";
+import type { ClockResult, WindowResult } from "./positions.server";
+import type { CloseResult, FeeBalance, OpenResult } from "./positions-ledger.server";
 
 export const NATIVE_API_ORIGIN = "https://solarchik-super-app.vercel.app";
 
@@ -76,4 +78,48 @@ export async function callRecordFee(data: { wallet: string; rowId: string; sig: 
   if (NATIVE) return nativePost<FeeResult>("fee-record", data);
   const { recordFeeFn } = await import("./payments");
   return recordFeeFn({ data });
+}
+
+export async function callOpenPosition(data: {
+  proof: WalletProof;
+  fillId: string;
+  asset: string;
+  book: string;
+  side: string;
+  stakeLamports: number;
+}): Promise<OpenResult> {
+  if (NATIVE) return nativePost<OpenResult>("position-open", data);
+  const { openPositionFn } = await import("./payments");
+  return openPositionFn({ data });
+}
+
+export async function callClosePosition(data: { proof: WalletProof; fillId: string }): Promise<CloseResult> {
+  if (NATIVE) return nativePost<CloseResult>("position-close", data);
+  const { closePositionFn } = await import("./payments");
+  return closePositionFn({ data });
+}
+
+export async function callRecordClock(data: {
+  proof: WalletProof;
+  clockAddress: string;
+  clockSig: string;
+  kind: "tx" | "message";
+  cluster: "mainnet" | "devnet";
+  memo: string;
+}): Promise<ClockResult> {
+  if (NATIVE) return nativePost<ClockResult>("clock-record", data);
+  const { recordClockFn } = await import("./payments");
+  return recordClockFn({ data });
+}
+
+export async function callStartFeeWindow(data: { proof: WalletProof }): Promise<WindowResult> {
+  if (NATIVE) return nativePost<WindowResult>("fee-window-start", data);
+  const { startFeeWindowFn } = await import("./payments");
+  return startFeeWindowFn({ data });
+}
+
+export async function callFeeBalance(wallet: string): Promise<({ ok: true } & FeeBalance) | { ok: false; reason: string }> {
+  if (NATIVE) return nativePost("fee-balance", { wallet });
+  const { feeBalanceFn } = await import("./payments");
+  return feeBalanceFn({ data: { wallet } });
 }

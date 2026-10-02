@@ -72,6 +72,8 @@ export type SaveData = {
   clockSig: string;
   clockCluster: "" | "mainnet" | "devnet";
   clockKind: "" | "tx" | "message";
+  /** Exact text the player's wallet signed for the last clock-in (the server re-verifies it). */
+  clockMemo: string;
   skin: PlatSkin;
   unlockedSkins: PlatSkin[];
   robot: RobotId;
@@ -134,6 +136,7 @@ export const defaultSave = (): SaveData => ({
   clockSig: "",
   clockCluster: "",
   clockKind: "",
+  clockMemo: "",
   skin: "flag",
   unlockedSkins: ["flag"],
   robot: "stock",
@@ -261,6 +264,7 @@ function migrate(raw: SaveData): SaveData {
     clockSig: String((raw as SaveData).clockSig || "").replace(/\s/g, "").slice(0, 100),
     clockCluster: (raw as SaveData).clockCluster === "mainnet" || (raw as SaveData).clockCluster === "devnet" ? (raw as SaveData).clockCluster : "",
     clockKind: (raw as SaveData).clockKind === "tx" || (raw as SaveData).clockKind === "message" ? (raw as SaveData).clockKind : "",
+    clockMemo: String((raw as SaveData).clockMemo || "").slice(0, 120),
     secPending: readPending((raw as SaveData).secPending),
     secCredit: Math.max(0, Number((raw as SaveData).secCredit) || 0),
     clockDays: readClockDays((raw as SaveData).clockDays, String((raw as SaveData).signedDay || ""), Number(raw.streak) || 0),
@@ -622,7 +626,7 @@ export function stampSign(save: SaveData): SaveData {
 
 export function stampClock(
   save: SaveData,
-  proof: { address: string; signature: string; cluster: "mainnet" | "devnet"; kind: "tx" | "message" },
+  proof: { address: string; signature: string; cluster: "mainnet" | "devnet"; kind: "tx" | "message"; memo?: string },
 ): SaveData {
   const today = todayKey();
   if (save.signedDay === today) return save;
@@ -647,6 +651,7 @@ export function stampClock(
     clockSig: proof.signature.replace(/\s/g, "").slice(0, 100),
     clockCluster: proof.cluster,
     clockKind: proof.kind,
+    clockMemo: (proof.memo || "").slice(0, 120),
   };
 }
 
@@ -657,6 +662,14 @@ export function feeWindowCovers(save: SaveData, openedAt: number): boolean {
 
 export function activateFeeWindow(save: SaveData, now = Date.now()): SaveData {
   return { ...save, feeWindows: activateWindow(save.feeWindows, now) };
+}
+
+/** Local copy of a window the server started: same start/end as the server record (server time). */
+export function applyServerWindow(save: SaveData, started: { startedMs: number; endsMs: number }): SaveData {
+  const rows = activateWindow(save.feeWindows, started.startedMs);
+  const live = rows.find((w) => w.status === "active" && w.startedAt === started.startedMs);
+  if (!live) return save;
+  return { ...save, feeWindows: rows.map((w) => (w === live ? { ...w, endsAt: started.endsMs } : w)) };
 }
 
 export function feeProgress(save: SaveData, now = Date.now()):

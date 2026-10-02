@@ -28,6 +28,7 @@ export function Yard({
   onShop,
   onLocale,
   onActivateFee,
+  feeNote = "",
   onReportSeen,
   reportReady,
   signBusy = false,
@@ -41,6 +42,7 @@ export function Yard({
   onShop: () => void;
   onLocale: (id: Locale) => void;
   onActivateFee: () => void;
+  feeNote?: string;
   onReportSeen: (day: string) => void;
   reportReady: boolean;
   signBusy?: boolean;
@@ -167,7 +169,7 @@ export function Yard({
             )}
           </section>
 
-          <FeeWindowCard save={save} t={t} onActivate={onActivateFee} />
+          <FeeWindowCard save={save} t={t} onActivate={onActivateFee} note={feeNote} />
 
           <div className="mt-3 grid grid-cols-3 gap-2">
             <Stat icon={<Flame className="size-4" />} label={t("yard.streak")} value={`${save.streak}${streakUnit}`} />

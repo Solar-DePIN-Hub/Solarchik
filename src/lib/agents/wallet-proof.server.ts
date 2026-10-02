@@ -4,6 +4,25 @@ import { PROOF_MAX_SKEW_MS, proofMessage, type ProofAction, type WalletProof } f
 
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 
+/** Ed25519 check of any UTF-8 message signed by a Solana address (base58 key and signature). */
+export function verifyEd25519(address: string, signature: string, message: string): boolean {
+  let pub: Uint8Array;
+  let sig: Uint8Array;
+  try {
+    pub = decodeBase58(address);
+    sig = decodeBase58(signature);
+  } catch {
+    return false;
+  }
+  if (pub.length !== 32 || sig.length !== 64) return false;
+  try {
+    const key = createPublicKey({ key: Buffer.concat([ED25519_SPKI_PREFIX, Buffer.from(pub)]), format: "der", type: "spki" });
+    return verify(null, Buffer.from(message, "utf8"), key, Buffer.from(sig));
+  } catch {
+    return false;
+  }
+}
+
 /** Ed25519 check of a room-key proof. Pure Node crypto, no RPC. */
 export function verifyProof(
   proof: WalletProof,
@@ -21,11 +40,7 @@ export function verifyProof(
     return { ok: false, reason: "Підпис не читається." };
   }
   if (pub.length !== 32 || sig.length !== 64) return { ok: false, reason: "Підпис не читається." };
-  try {
-    const key = createPublicKey({ key: Buffer.concat([ED25519_SPKI_PREFIX, Buffer.from(pub)]), format: "der", type: "spki" });
-    const msg = Buffer.from(proofMessage(action, proof.wallet, proof.ts, extra), "utf8");
-    if (!verify(null, msg, key, Buffer.from(sig))) return { ok: false, reason: "Підпис гаманця не збігся." };
-  } catch {
+  if (!verifyEd25519(proof.wallet, proof.sig, proofMessage(action, proof.wallet, proof.ts, extra))) {
     return { ok: false, reason: "Підпис гаманця не збігся." };
   }
   return { ok: true };

@@ -7,7 +7,7 @@ const MEMO = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 let registered = false;
 
 export type MwaProof =
-  | { ok: true; address: string; signature: string; cluster: "mainnet" | "devnet"; kind: "tx" | "message" }
+  | { ok: true; address: string; signature: string; cluster: "mainnet" | "devnet"; kind: "tx" | "message"; memo: string }
   | { ok: false; error: string };
 
 type MwaAccount = { address: string; publicKey: Uint8Array; chains: readonly string[] };
@@ -96,7 +96,7 @@ export async function signClockInMwa(meters: number, _score: number, streak: num
         const raw = await memoBytes(new PublicKey(account.publicKey), rpc, memo);
         const out = await send.signAndSendTransaction({ account, transaction: raw, chain });
         const sig = encodeBase58(out[0]?.signature ?? new Uint8Array());
-        if (sig.length >= 32) return { ok: true, address: account.address, signature: sig, cluster, kind: "tx" };
+        if (sig.length >= 32) return { ok: true, address: account.address, signature: sig, cluster, kind: "tx", memo };
       } catch (error) {
         if (stopped(error)) return { ok: false, error: error instanceof Error ? error.message : "Wallet did not sign" };
       }
@@ -106,7 +106,7 @@ export async function signClockInMwa(meters: number, _score: number, streak: num
     const signed = await sign.signMessage({ account, message: new TextEncoder().encode(memo) });
     const sig = encodeBase58(signed[0]?.signature ?? new Uint8Array());
     if (sig.length < 32) return { ok: false, error: "Wallet sent no signature" };
-    return { ok: true, address: account.address, signature: sig, cluster, kind: "message" };
+    return { ok: true, address: account.address, signature: sig, cluster, kind: "message", memo };
   } catch (error) {
     if (stopped(error)) return { ok: false, error: error instanceof Error ? error.message : "Wallet did not sign" };
     return { ok: false, error: "wallet" };

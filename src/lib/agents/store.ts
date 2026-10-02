@@ -37,12 +37,18 @@ import {
   callPrepareMint,
   callPrepareReissue,
   callReadArbCredit,
+  callClosePosition,
+  callFeeBalance,
+  callOpenPosition,
+  callRecordClock,
   callRecordFee,
+  callStartFeeWindow,
 } from "./server-calls";
+import { clockExtra, closeExtra, openExtra } from "./position-rules";
 import { proMemo } from "./mint-rules";
 import { SIM_LABEL, cleanArbSymbol } from "./arb-rules";
 import { signProof } from "./wallet-sign";
-import { feeCovered, planFee, type FeeRow } from "./fee-ledger";
+import { feeCovered, planFee, rowFromServer, type FeeRow } from "./fee-ledger";
 import { paySkuFromPlayer } from "./tier-pay";
 import { readCaps, userTradeBlock } from "./user-limits";
 import { loadSave } from "@/lib/game/save";
@@ -443,6 +449,13 @@ const failedLocks = new Set<string>();
 
 function revertLock(fillId: string, asset: string) {
   failedLocks.add(fillId);
+  const lost = useAgents.getState().fills.find((f) => f.id === fillId);
+  if (lost && serverOpens.has(fillId)) {
+    // The server already priced this open: close it at the server price (normally ~0 PnL) so it never dangles.
+    void reconcileFees([
+      { id: fillId, agent: asset, openedAt: lost.at, closedAt: Date.now(), pnl: 0, fee: 0, charged: false, reason: "loss", sig: "" },
+    ]);
+  }
   useAgents.setState((s) => ({
     nfts: s.nfts.map((n) => {
       if (n.asset !== asset || n.openBook?.fillId !== fillId) return n;
@@ -538,6 +551,132 @@ function dayLossSol(): number {
   }, 0);
 }
 
+/** Opens the server saw (fill id -> pending/finished call). Close waits for its open. */
+const serverOpens = new Map<string, Promise<boolean>>();
+
+/**
+ * Registers a live prediction open with the server, which prices it itself
+ * (Polymarket yes price, server clock) and checks the NFT owner and tier.
+ * Paper trades never owe a fee and are not registered.
+ */
+function registerOpenFill(fill: AgentFill, paper: boolean) {
+  if (paper || fill.kind !== "prediction" || serverOpens.has(fill.id)) return;
+  const state = useAgents.getState();
+  const nft = state.nfts.find((n) => n.asset === fill.asset);
+  const book = nft?.openBook?.fillId === fill.id ? nft.openBook.bookKey : "";
+  if (!nft || !book || !book.startsWith("poly:") || nft.track === "paper") return;
+  const side = fill.side;
+  const stakeLamports = Math.round(fill.amount * 1e9);
+  const job = (async () => {
+    const kp = await loadKeypair().catch(() => null);
+    if (!kp) return false;
+    const input = { fillId: fill.id, asset: fill.asset, book, side, stakeLamports };
+    const proof = await signProof(kp, "position", openExtra(input));
+    const res = await callOpenPosition({ proof, ...input });
+    if (res.ok) return true;
+    if (res.unpaidLamports) {
+      const kind = KINDS.find((k) => useAgents.getState().agents[k].sourceAsset === fill.asset);
+      useAgents.setState((s) => ({
+        notice: res.reason,
+        ...(kind ? { agents: { ...s.agents, [kind]: { ...s.agents[kind], status: "blocked" as const, lastLine: res.reason } } } : {}),
+      }));
+    }
+    return false;
+  })().catch(() => false);
+  serverOpens.set(fill.id, job);
+  if (serverOpens.size > 200) serverOpens.delete(serverOpens.keys().next().value as string);
+}
+
+/** Replaces locally planned fee rows with the server's PnL and owed fee, then pays what is owed. */
+async function reconcileFees(rows: FeeRow[]) {
+  let kp: Awaited<ReturnType<typeof loadKeypair>> = null;
+  try {
+    kp = await loadKeypair();
+  } catch {
+    return;
+  }
+  if (!kp) return;
+  const due: FeeRow[] = [];
+  for (const row of rows) {
+    await serverOpens.get(row.id);
+    try {
+      const proof = await signProof(kp, "position", closeExtra(row.id));
+      const res = await callClosePosition({ proof, fillId: row.id });
+      if (res.ok) {
+        const next = rowFromServer(row, res);
+        useAgents.setState((s) => ({
+          feeLedger: s.feeLedger.some((r) => r.id === row.id)
+            ? s.feeLedger.map((r) => (r.id === row.id ? next : r))
+            : [...s.feeLedger, next].slice(-200),
+        }));
+        if (next.reason === "unsent" && !next.sig) due.push(next);
+      } else if (!res.retry) {
+        // Server never saw the open: no server-owed fee, nothing is sent for this row.
+        useAgents.setState((s) => ({
+          feeLedger: s.feeLedger.map((r) => (r.id === row.id ? { ...r, note: res.reason.slice(0, 120) } : r)),
+        }));
+      }
+    } catch {
+      /* server quiet: retried on the next load */
+    }
+  }
+  useAgents.getState().persist();
+  if (due.length) await sendDueFees(due);
+}
+
+/** Clock-in proof -> server (fee-free window entitlement). Needs the room key. */
+export async function syncClockProof(proof: {
+  address: string;
+  signature: string;
+  kind: "tx" | "message" | "";
+  cluster: "mainnet" | "devnet" | "";
+  memo: string;
+}): Promise<{ ok: boolean; reason?: string }> {
+  if (!proof.memo || !proof.signature || !proof.address || !proof.kind) return { ok: false, reason: "no proof" };
+  try {
+    const kp = await loadKeypair();
+    if (!kp) return { ok: false, reason: "Немає ключа кімнати." };
+    const input = { clockAddress: proof.address, clockSig: proof.signature, memo: proof.memo };
+    const room = await signProof(kp, "clock", clockExtra(input));
+    const res = await callRecordClock({
+      proof: room,
+      ...input,
+      kind: proof.kind,
+      cluster: proof.cluster === "mainnet" ? "mainnet" : "devnet",
+    });
+    return res.ok ? { ok: true } : { ok: false, reason: res.reason };
+  } catch {
+    return { ok: false, reason: "Сервер не відповів." };
+  }
+}
+
+/** Starts the next fee-free window on the server (server time). The local save copies the server's times. */
+export async function startServerFeeWindow(): Promise<
+  { ok: true; windowId: string; kind: "h48" | "d7"; startedMs: number; endsMs: number } | { ok: false; reason: string }
+> {
+  try {
+    const kp = await loadKeypair();
+    if (!kp) return { ok: false, reason: "Немає ключа кімнати." };
+    const proof = await signProof(kp, "fee-window", "start");
+    const res = await callStartFeeWindow({ proof });
+    return res.ok ? res : { ok: false, reason: res.reason };
+  } catch {
+    return { ok: false, reason: "Сервер не відповів." };
+  }
+}
+
+/** Owed vs paid on the server for this room. */
+export async function readServerFeeBalance() {
+  const room = useAgents.getState().wallet?.pubkey;
+  if (!room) return null;
+  try {
+    const res = await callFeeBalance(room);
+    return res.ok ? res : null;
+  } catch {
+    return null;
+  }
+}
+
 function noteSettledFees(patches: FillPatch[], track: Track) {
   const settled = patches.filter((p) => p.status === "settled");
   if (!settled.length) return;
@@ -563,10 +702,11 @@ function noteSettledFees(patches: FillPatch[], track: Track) {
     );
   }
   if (!rows.length) return;
+  // Shown at once with the local estimate; the amount that is paid comes from the server's close.
+  const live = rows.filter((r) => r.reason !== "paper");
   useAgents.setState((s) => ({ feeLedger: [...s.feeLedger, ...rows].slice(-200) }));
   useAgents.getState().persist();
-  const due = rows.filter((r) => r.reason === "unsent");
-  if (due.length) void sendDueFees(due);
+  if (live.length) void reconcileFees(live);
 }
 
 async function sendDueFees(due: FeeRow[]) {
@@ -585,6 +725,7 @@ async function sendDueFees(due: FeeRow[]) {
   }
   const wallet = kp.publicKey.toBase58();
   for (const row of due) {
+    if (!row.server) continue;
     try {
       const sig = await chain.payAccount(kp, new PublicKey(PAY_WALLET), row.fee, feeMemo(row.id));
       useAgents.setState((s) => ({
@@ -647,6 +788,23 @@ async function syncServerLedgers(room: string): Promise<void> {
   }
   const unverified = useAgents.getState().feeLedger.filter((r) => r.charged && r.sig && r.verified !== true && !r.note).slice(-20);
   for (const row of unverified) await verifyFeeRow(room, row);
+  const weekAgo = Date.now() - 7 * 86_400_000;
+  const unreconciled = useAgents
+    .getState()
+    .feeLedger.filter((r) => !r.server && r.reason !== "paper" && !r.sig && !r.note && r.closedAt > weekAgo)
+    .slice(-20);
+  if (unreconciled.length) await reconcileFees(unreconciled);
+  const unpaid = useAgents.getState().feeLedger.filter((r) => r.server && r.reason === "unsent" && !r.sig).slice(-20);
+  if (unpaid.length) await sendDueFees(unpaid);
+  try {
+    const { loadSave: readSave } = await import("@/lib/game/save");
+    const save = readSave();
+    if (save.clockMemo && save.clockSig) {
+      await syncClockProof({ address: save.playerWallet, signature: save.clockSig, kind: save.clockKind, cluster: save.clockCluster, memo: save.clockMemo });
+    }
+  } catch {
+    /* clock sync retried on the next load */
+  }
   try {
     const status = await callMintStatus();
     useAgents.setState({ mintCollection: status.collection });
@@ -4153,6 +4311,7 @@ export const useAgents = create<AgentsState>((set, get) => ({
                   log: landed.log ? pushLog(s.log, landed.log) : s.log,
                 };
               });
+              if (landed.fill && !failedLocks.has(landed.fill.id)) registerOpenFill(landed.fill, get().track === "paper");
               if (landed.chain) enqueueChain(landed.chain);
               if (landed.counted) {
                 queueWrite(
@@ -4231,6 +4390,9 @@ export const useAgents = create<AgentsState>((set, get) => ({
         log: logs.reduce((acc, e) => pushLog(acc, e), s.log),
       };
     });
+    for (const fill of born) {
+      if (!failedLocks.has(fill.id)) registerOpenFill(fill, track === "paper");
+    }
     noteSettledFees(patches, track);
     tickCount += 1;
     const chainDue = stamped.checkpoint;

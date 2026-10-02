@@ -16,6 +16,11 @@ const ROUTES = new Set([
   "arb-credit",
   "arb-credit-claim",
   "fee-record",
+  "fee-balance",
+  "fee-window-start",
+  "clock-record",
+  "position-open",
+  "position-close",
   "mint-status",
   "mint-prepare",
   "mint-reissue",
@@ -106,6 +111,38 @@ export default async function nativeApiMiddleware(
           rowId: str(body.rowId).slice(0, 64),
           sig: b58(body.sig, 100),
           lamports: typeof body.lamports === "number" && Number.isFinite(body.lamports) ? Math.round(body.lamports) : 0,
+        }),
+      );
+    }
+    if (route === "position-open" || route === "position-close" || route === "clock-record" || route === "fee-window-start" || route === "fee-balance") {
+      const server = await import("../../src/lib/agents/positions.server.ts");
+      const rules = await import("../../src/lib/agents/position-rules.ts");
+      const proof = readProof(body.proof);
+      if (route === "position-open") {
+        return reply(
+          200,
+          await server.openPositionOnServer({
+            proof,
+            fillId: rules.cleanFillId(body.fillId),
+            asset: b58(body.asset, 44),
+            book: rules.readBook(body.book),
+            side: rules.readSide(body.side),
+            stakeLamports: typeof body.stakeLamports === "number" && Number.isFinite(body.stakeLamports) ? Math.round(body.stakeLamports) : 0,
+          }),
+        );
+      }
+      if (route === "position-close") return reply(200, await server.closePositionOnServer({ proof, fillId: rules.cleanFillId(body.fillId) }));
+      if (route === "fee-window-start") return reply(200, await server.startFeeWindowOnServer({ proof }));
+      if (route === "fee-balance") return reply(200, await server.feeBalanceOnServer(b58(body.wallet, 44)));
+      return reply(
+        200,
+        await server.recordClockOnServer({
+          proof,
+          clockAddress: b58(body.clockAddress, 44),
+          clockSig: b58(body.clockSig, 100),
+          kind: body.kind === "message" ? "message" : "tx",
+          cluster: body.cluster === "mainnet" ? "mainnet" : "devnet",
+          memo: str(body.memo).slice(0, 120),
         }),
       );
     }

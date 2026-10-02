@@ -8,7 +8,7 @@ function leftLabel(ms: number): string {
   return `${m}m`;
 }
 
-export function FeeWindowCard({ save, t, onActivate }: { save: SaveData; t: TFunc; onActivate: () => void }) {
+export function FeeWindowCard({ save, t, onActivate, note = "" }: { save: SaveData; t: TFunc; onActivate: () => void; note?: string }) {
   const progress = feeProgress(save);
   return (
     <section className="mt-3 rounded-lg border border-border bg-surface px-3 py-3" data-testid="fee-window">
@@ -33,6 +33,7 @@ export function FeeWindowCard({ save, t, onActivate }: { save: SaveData; t: TFun
           <p>{t("yard.feeLeft30", { n: progress.days30 })}</p>
         </div>
       ) : null}
+      {note ? <p className="mt-2 text-xs text-muted" data-testid="fee-window-note">{note}</p> : null}
     </section>
   );
 }

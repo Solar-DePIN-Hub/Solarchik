@@ -18,6 +18,8 @@ export type FeeRow = {
   verified?: boolean;
   /** Why the server refused to verify (final). */
   note?: string;
+  /** True once PnL and fee come from the server's own position record (agent_positions). */
+  server?: boolean;
 };
 
 export function feeCut(pnl: number): number {
@@ -84,8 +86,27 @@ export function readFeeRows(raw: unknown): FeeRow[] {
       sig: typeof o.sig === "string" ? o.sig.slice(0, 100) : "",
       ...(o.verified === true ? { verified: true } : {}),
       ...(typeof o.note === "string" && o.note ? { note: o.note.slice(0, 120) } : {}),
+      ...(o.server === true ? { server: true } : {}),
     });
     if (out.length >= 200) break;
   }
   return out;
+}
+
+/**
+ * Fee row from the server's close: server PnL (lamports) and the fee the server
+ * says is owed. The client never decides the amount for a server-recorded trade.
+ */
+export function rowFromServer(
+  row: FeeRow,
+  res: { tier: string; pnlLamports: number; owedLamports: number; covered: boolean; closedMs: number },
+): FeeRow {
+  const pnl = res.pnlLamports / 1e9;
+  const base: FeeRow = { ...row, pnl, closedAt: res.closedMs || row.closedAt, server: true };
+  delete base.note;
+  if (res.owedLamports > 0) return { ...base, fee: res.owedLamports / 1e9, reason: "unsent" };
+  if (!(pnl > 0)) return { ...base, fee: 0, reason: "loss" };
+  if (res.tier !== "free") return { ...base, fee: 0, reason: "pro" };
+  if (res.covered) return { ...base, fee: feeCut(pnl), reason: "window" };
+  return { ...base, fee: 0, reason: "loss" };
 }
