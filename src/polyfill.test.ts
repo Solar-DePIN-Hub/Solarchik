@@ -64,3 +64,36 @@ describe("browser Buffer shim covers every method @solana/buffer-layout calls", 
     for (const name of used) assert.equal(typeof (SolBuffer.prototype as never)[name], "function", name);
   });
 });
+
+describe("browser Buffer shim: Buffer.from(arrayBuffer, offset, length)", () => {
+  // Live bug (Oct 2026): the co-signed mint (1057 bytes) became 1585 bytes after the browser signed it,
+  // "VersionedTransaction too large", because web3.js toBuffer() passes (arr.buffer, byteOffset, byteLength).
+  it("returns only the window, like Node", () => {
+    const backing = new Uint8Array(64).map((_, i) => i);
+    const view = backing.subarray(10, 20);
+    const a = SolBuffer.from(view.buffer, view.byteOffset, view.byteLength);
+    const b = Buffer.from(view.buffer, view.byteOffset, view.byteLength);
+    assert.equal(a.length, 10);
+    assert.deepEqual([...a], [...b]);
+    assert.deepEqual([...SolBuffer.from(view.buffer, 60)], [...Buffer.from(view.buffer, 60)]);
+    assert.equal(SolBuffer.from(view.buffer).length, 64);
+  });
+
+  it("keeps a web3.js toBuffer() round trip the same size", () => {
+    const toBuffer = (arr: Uint8Array) => SolBuffer.from(arr.buffer, arr.byteOffset, arr.byteLength);
+    const big = new Uint8Array(2048);
+    big.set([1, 2, 3, 4], 0);
+    const serialized = big.slice(0, 1057);
+    assert.equal(toBuffer(big.subarray(0, 1057)).length, 1057);
+    assert.equal(toBuffer(serialized).length, 1057);
+  });
+});
+
+describe("browser Buffer shim: from(arrayBuffer) shares memory like Node", () => {
+  it("writes through the view land in the original array (buffer-layout Blob.encode)", () => {
+    const target = new Uint8Array(16);
+    const view = SolBuffer.from(target.buffer, target.byteOffset, target.length);
+    view.write("0a0b0c", 2, 3, "hex");
+    assert.deepEqual([...target.subarray(0, 6)], [0, 0, 10, 11, 12, 0]);
+  });
+});

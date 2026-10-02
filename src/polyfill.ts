@@ -67,8 +67,16 @@ class SolBuffer extends Uint8Array {
     }
     return out;
   }
-  static from(input: unknown, encoding?: string): SolBuffer {
-    const bytes = asBytes(input, encoding);
+  static from(input: unknown, encodingOrOffset?: string | number, length?: number): SolBuffer {
+    // Node: Buffer.from(arrayBuffer[, byteOffset[, length]]) is a VIEW sharing that memory, not a copy.
+    // web3.js toBuffer() and @solana/buffer-layout (Blob.encode writes through it) rely on both the
+    // window and the sharing; a copy bloated or zeroed every serialized transaction in the browser.
+    if (input instanceof ArrayBuffer) {
+      const start = typeof encodingOrOffset === "number" ? encodingOrOffset : 0;
+      const len = length === undefined ? input.byteLength - start : length;
+      return new SolBuffer(input, start, len);
+    }
+    const bytes = asBytes(input, typeof encodingOrOffset === "string" ? encodingOrOffset : undefined);
     const out = new SolBuffer(bytes.length);
     out.set(bytes);
     return out;
