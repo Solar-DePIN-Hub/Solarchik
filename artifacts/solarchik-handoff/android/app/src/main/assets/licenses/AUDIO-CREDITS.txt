@@ -1,0 +1,28 @@
+Solarchik roof run - audio credits and licence
+==============================================
+
+All roof-run music and sound effects are ORIGINAL works, synthesised from code
+(numpy additive/subtractive synthesis, synthetic drums and noise, a synthetic
+reverb impulse) by the scripts in android/tools/run-audio/ (synth.py, music.py,
+sfx.py). No samples, loops, presets or recordings from any third party were
+used, and no existing melody was transcribed.
+
+Licence: CC0 1.0 Universal (public domain dedication)
+https://creativecommons.org/publicdomain/zero/1.0/
+The Solar DePIN Hub authors waive all copyright and related rights in these
+audio files to the extent possible under law.
+
+Files (assets/audio/):
+  music/golden.ogg   "Golden Hour"    84 bpm, D major   45.7 s loop  (calm synth)
+  music/night.ogg    "Night City"     96 bpm, F minor   40.0 s loop  (synthwave)
+  music/storm.ogg    "Storm Line"    112 bpm, C minor   34.3 s loop  (tense)
+  music/boss.ogg     "Maintenance"   132 bpm, E minor   29.1 s loop  (boss theme)
+  sfx/*.ogg          29 effects: jump, double, land, slide, coin, gold, hurt,
+                     dead, shield, stomp, near, combo, tick, start, grind,
+                     bonus, thunder, boss, chapter, clock, milestone, gust,
+                     crack, shatter, zap, charge, beam, overheat, downed
+
+Regenerate: python3 tools/run-audio/music.py OUT && python3 tools/run-audio/sfx.py OUT/sfx
+(needs python3 + numpy, and ffmpeg with libvorbis for the OGG encode).
+
+The previous web theme (assets/audio/theme.ogg) is no longer shipped.

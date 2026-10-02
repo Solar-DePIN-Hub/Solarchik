@@ -638,6 +638,7 @@ object Autopilot {
             if (v is MutableList<*>) continue
             f.set(c, v)
         }
+        c.fx = null // look-ahead copies never emit effects
         s.plats.mapTo(c.plats) { Plat(it.x, it.y, it.w, it.kind, it.crumble, it.live, it.crackT, it.fallen, it.fallY) }
         s.picks.mapTo(c.picks) { Pick(it.x, it.y, it.gold, it.shield, it.portal, it.taken) }
         s.enemies.mapTo(c.enemies) { Enemy(it.kind, it.x, it.y, it.baseY, it.t, it.vx, it.boss, it.dead, it.near, it.amp, it.rate) }

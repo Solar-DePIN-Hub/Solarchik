@@ -167,6 +167,10 @@
     <string name="settings_fees">Fees &amp; tiers</string>
     <string name="settings_fees_body">Pro mint: %1$s SOL to the treasury, 0%% performance fee.\nFree mint: one per wallet, %2$s%% fee on realized profit only.\nRoyalty: %3$s%% on both tiers.\nStreak: every %4$d signed days = %5$dh fee-free; every %6$d = %7$d days fee-free.\nFees are decided by the position\'s open time.</string>
     <string name="settings_treasury">Treasury</string>
+    <string name="settings_run_sound">Roof run sound</string>
+    <string name="settings_run_sound_body">Music and effects for the roof run. The speaker button in a run mutes the music only; effects at 0 are silent.</string>
+    <string name="settings_run_music">Music volume</string>
+    <string name="settings_run_sfx">Effects volume</string>
     <string name="settings_language">Language</string>
     <string name="settings_language_body">Solarchik follows your phone language (English, Українська).</string>
     <string name="settings_language_open">Change app language</string>
@@ -417,6 +421,26 @@
     <string name="ch_banner_storm">STORM LINE</string>
     <string name="ch_banner_night">NIGHT CITY</string>
     <string name="ch_banner_serpent">THE SKYLINE</string>
+    <string name="run_pop_shield">SHIELD</string>
+    <string name="run_pop_grind">GRIND</string>
+    <string name="run_pop_nice">NICE</string>
+    <string name="run_pop_gust">GUST</string>
+    <string name="run_pop_overheat">OVERHEAT</string>
+    <string name="run_pop_drone_down">DRONE DOWN</string>
+    <string name="run_pop_serpent">SERPENT</string>
+    <string name="run_pop_back">BACK TO ROOFS</string>
+    <string name="run_pop_fly_gate">FLY GATE</string>
+    <string name="run_pop_fly_go">FLY!</string>
+    <string name="run_pop_stomp">STOMP</string>
+    <string name="run_pop_slide">SLIDE</string>
+    <string name="run_pop_close">CLOSE</string>
+    <string name="run_pop_under">UNDER</string>
+    <string name="run_pop_clean">CLEAN</string>
+    <string name="run_pop_sun">+SUN</string>
+    <string name="run_pop_heat">HEAT</string>
+    <string name="run_pop_tap">TAP</string>
+    <string name="run_pop_fly">FLY</string>
+    <string name="run_pop_milestone">%1$d m</string>
     <string name="run_boss_banner">MAINTENANCE DRONE</string>
     <string name="ch_serpent">Skyline</string>
     <string name="banter_first_roof">First roof ate the run.</string>

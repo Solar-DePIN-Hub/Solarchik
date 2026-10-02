@@ -48,6 +48,16 @@ class GameSave(context: Context, private val clock: () -> Long = { System.curren
         get() = prefs.getBoolean("runTutorialDone", false)
         set(value) { prefs.edit().putBoolean("runTutorialDone", value).apply() }
 
+    /** Roof-run music volume, 0..100 (RunAudio reads the same key). */
+    var runMusicVol: Int
+        get() = prefs.getInt("runMusicVol", 70).coerceIn(0, 100)
+        set(value) { prefs.edit().putInt("runMusicVol", value.coerceIn(0, 100)).apply() }
+
+    /** Roof-run effects volume, 0..100; 0 silences the effects. */
+    var runSfxVol: Int
+        get() = prefs.getInt("runSfxVol", 90).coerceIn(0, 100)
+        set(value) { prefs.edit().putInt("runSfxVol", value.coerceIn(0, 100)).apply() }
+
     var bestScore: Int
         get() = prefs.getInt("bestScore", 0)
         set(value) { prefs.edit().putInt("bestScore", value).apply() }

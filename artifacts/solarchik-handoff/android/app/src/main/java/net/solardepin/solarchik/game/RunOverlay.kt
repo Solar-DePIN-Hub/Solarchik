@@ -133,6 +133,13 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         v.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(delay).setDuration(320).setInterpolator(OvershootInterpolator(2.2f)).start()
     }
 
+    /** Banners sweep in: from wide and transparent, settling with an overshoot. */
+    private fun bannerIn(v: View) {
+        if (!animations) { v.alpha = 1f; v.scaleX = 1f; v.scaleY = 1f; return }
+        v.alpha = 0f; v.scaleX = 1.35f; v.scaleY = 1.35f
+        v.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(0).setDuration(420).setInterpolator(OvershootInterpolator(1.6f)).start()
+    }
+
     private fun bump(v: View, to: Float = 1.25f) {
         if (!animations) return
         ObjectAnimator.ofPropertyValuesHolder(v, PropertyValuesHolder.ofFloat(View.SCALE_X, to, 1f), PropertyValuesHolder.ofFloat(View.SCALE_Y, to, 1f))
@@ -182,6 +189,16 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
     private val gardenV: TextView
     private val countdownV: TextView
     private val announceV: TextView
+    private val milestoneV: TextView
+    private val sunsChip: LinearLayout
+    private val sunsIcon: ImageView
+    private val locMe = IntArray(2)
+    private val locIcon = IntArray(2)
+    /** Score shown in the chip; rolls up to the real score. */
+    private var shownScore = 0
+    private var scoreAnim: ValueAnimator? = null
+    /** UI: where the suns chip sits (fractions of this view), for the fly-to-HUD coins. */
+    var onSunTarget: ((Double, Double) -> Unit)? = null
     private val slideBtn: LinearLayout
     private val musicBtn: FrameLayout
     private val musicIcon: ImageView
@@ -333,14 +350,18 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
             minWidth = dp(36)
         }
         tl.addView(scoreV, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(36)).apply { marginEnd = dp(8) })
-        sunsV = label("0", 19f, Color.parseColor("#3A2206")).apply {
-            background = np(R.drawable.run_chip_gold)
-            setPadding(dp(8), 0, dp(12), 0)
+        // the same dark glass as every chip; the gold lives in the sun icon and the digits
+        sunsChip = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setCompoundDrawablesRelative(sunIcon(Color.parseColor("#B8560A"), 20), null, null, null)
-            compoundDrawablePadding = dp(4)
+            background = chip()
+            setPadding(dp(9), 0, dp(12), 0)
         }
-        tl.addView(sunsV, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(36)))
+        sunsIcon = icon(R.drawable.ic_sun, PRIMARY, 20)
+        sunsChip.addView(sunsIcon, LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(5) })
+        sunsV = label("0", 19f, PRIMARY).apply { gravity = Gravity.CENTER_VERTICAL }
+        sunsChip.addView(sunsV, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        tl.addView(sunsChip, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(36)))
         hud.addView(tl, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply { leftMargin = dp(12); topMargin = dp(12) })
 
         // top-right: distance · time of day · grind / flight
@@ -349,9 +370,9 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         tr.addView(distV, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         chapterV = label("", 11f, PRIMARY, track = 0.025f).apply { background = chip(small = true); setPadding(dp(8), dp(3), dp(8), dp(3)) }
         tr.addView(chapterV, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
-        grindV = label(ctx.getString(R.string.run_grind), 14f, BG).apply { background = box(OK, 8f); setPadding(dp(10), dp(4), dp(10), dp(4)); visibility = GONE }
+        grindV = label(ctx.getString(R.string.run_grind), 13f, OK, track = 0.025f).apply { background = chip(small = true); setPadding(dp(10), dp(4), dp(10), dp(4)); visibility = GONE }
         tr.addView(grindV, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
-        flightV = label("", 14f, PRIMARY_FG).apply { background = box(PRIMARY, 8f); setPadding(dp(10), dp(4), dp(10), dp(4)); visibility = GONE }
+        flightV = label("", 13f, PRIMARY, track = 0.025f).apply { background = chip(small = true); setPadding(dp(10), dp(4), dp(10), dp(4)); visibility = GONE }
         tr.addView(flightV, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
         hud.addView(tr, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END).apply { rightMargin = dp(12); topMargin = dp(12) })
 
@@ -409,6 +430,16 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
             setPadding(dp(14), dp(6), dp(14), dp(6))
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
         hud.addView(clockBanner, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP))
+
+        // distance milestone: a glass chip that drops in under the top bar, then lifts away
+        milestoneV = label("", 18f, PRIMARY, track = 0.03f).apply {
+            background = chip()
+            gravity = Gravity.CENTER
+            setPadding(dp(18), dp(6), dp(18), dp(6))
+            visibility = GONE
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        hud.addView(milestoneV, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(64) })
 
         // Sol caption + mic + music
         captionRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM; visibility = GONE }
@@ -575,6 +606,28 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         announceV.translationY = h * 0.26f - announceV.top
         clockBanner.translationY = h * 0.2f - clockBanner.top
         slideBtn.translationY = h * 0.48f - slideBtn.height / 2f - slideBtn.top
+        val w = r - l
+        if (w > 0 && h > 0) {
+            val me = locMe; val it = locIcon
+            getLocationInWindow(me); sunsIcon.getLocationInWindow(it)
+            // aim at the sun icon on the chip's left
+            val cx = it[0] - me[0] + sunsIcon.width / 2
+            val cy = it[1] - me[1] + sunsIcon.height / 2
+            onSunTarget?.invoke(cx.toDouble() / w, cy.toDouble() / h)
+        }
+    }
+
+    /** A distance milestone: the chip drops in with a little overshoot, holds, then lifts and fades. */
+    fun milestone(meters: Int) {
+        milestoneV.text = ctx.getString(R.string.run_pop_milestone, meters)
+        milestoneV.animate().cancel()
+        milestoneV.visibility = VISIBLE
+        if (!animations) { milestoneV.alpha = 1f; milestoneV.translationY = 0f; postDelayed({ milestoneV.visibility = GONE }, 1400); return }
+        milestoneV.alpha = 0f; milestoneV.translationY = -dp(24).toFloat(); milestoneV.scaleX = 0.9f; milestoneV.scaleY = 0.9f
+        milestoneV.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(360).setInterpolator(OvershootInterpolator(2f)).withEndAction {
+            milestoneV.animate().alpha(0f).translationY(-dp(14).toFloat()).setStartDelay(1100).setDuration(380).setInterpolator(DecelerateInterpolator())
+                .withEndAction { milestoneV.visibility = GONE }.start()
+        }.start()
     }
 
     /** Safe-area insets (display cutout) for the HUD, like env(safe-area-inset-*). */
@@ -626,7 +679,7 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         questToast.text = text
         questToast.visibility = VISIBLE
         popIn(questToast)
-        bump(sunsV)
+        bump(sunsChip)
         val shown = text
         postDelayed({ if (questToast.text == shown) questToast.visibility = GONE }, 2600)
     }
@@ -715,12 +768,35 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         }
         gardenV.visibility = if (h?.bonus == true) VISIBLE else GONE
         countdownV.visibility = if (h?.phase == Phase.COUNTDOWN && !paused) VISIBLE else GONE
+        val wasAnnounce = announceV.visibility == VISIBLE
         announceV.visibility = if (h != null && h.announceOn && h.phase == Phase.RUNNING && h.announce.isNotEmpty() && !banner) VISIBLE else GONE
+        if (announceV.visibility == VISIBLE && !wasAnnounce) bannerIn(announceV)
         clockBanner.visibility = if (banner && !paused) VISIBLE else GONE
         val signedFresh = clock.signed && now - signedSeenAt < SIGNED_BADGE_MS
         clockBadge.visibility = if (live && !paused && clock.open && (!clock.signed || signedFresh)) VISIBLE else GONE
         deadLayer.visibility = if (dead) VISIBLE else GONE
         if (!live || paused) questToast.visibility = GONE
+    }
+
+    /** Score chip: rolls up to [score] (web: plain tabular digits); jumps straight there on a new run or without animations. */
+    private fun setScore(score: Int, prev: RunHud?) {
+        val fresh = prev == null || score < shownScore || prev.phase == Phase.COUNTDOWN
+        if (!animations || fresh) {
+            scoreAnim?.cancel()
+            shownScore = score
+            scoreV.text = String.format(java.util.Locale.ROOT, "%d", score)
+            return
+        }
+        if (score == shownScore) return
+        scoreAnim?.cancel()
+        val from = shownScore
+        scoreAnim = ValueAnimator.ofInt(from, score).apply {
+            duration = if (score - from > 200) 420 else 240
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { shownScore = it.animatedValue as Int; scoreV.text = String.format(java.util.Locale.ROOT, "%d", shownScore) }
+            start()
+        }
+        if (score - from >= 100) bump(scoreV, 1.12f)
     }
 
     fun bind(h: RunHud) {
@@ -735,11 +811,12 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         shieldView.visibility = if (h.shield > 0) VISIBLE else GONE
         if (prev != null && h.shield > prev.shield) bump(shieldView, 1.6f)
         hearts.contentDescription = ctx.getString(if (h.shield > 0) R.string.run_hearts_shield_a11y else R.string.run_hearts_a11y, h.hearts)
-        scoreV.text = String.format(java.util.Locale.ROOT, "%d", h.score) // web: plain tabular digits
+        setScore(h.score, prev)
         scoreV.contentDescription = ctx.getString(R.string.run_score_a11y, h.score)
         sunsV.text = String.format(java.util.Locale.ROOT, "%d", h.suns)
         sunsV.contentDescription = ctx.getString(R.string.run_suns_earned, h.suns)
-        if (prev != null && h.suns > prev.suns) bump(sunsV, 1.18f)
+        // the chip pops when the flying sun lands in it (~0.5 s after the pickup)
+        if (prev != null && h.suns > prev.suns) { if (animations) postDelayed({ bump(sunsChip, 1.16f) }, 480) else bump(sunsChip, 1.16f) }
         distV.text = ctx.getString(R.string.run_meters, h.meters)
         chapterV.text = ctx.getString(chapterRes(h.chapter))
         grindV.visibility = if (h.grind && !h.bonus) VISIBLE else GONE
