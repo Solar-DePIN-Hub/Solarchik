@@ -68,7 +68,7 @@
 
     <!-- Run -->
     <string name="run_title">Roof run</string>
-    <string name="run_sub">Tap to jump. Dodge mites and drones. %1$d m unlocks today\'s CLOCK IN.</string>
+    <string name="run_sub">Tap to jump, swipe down to slide. Stomp mites, grab suns. %1$d m unlocks today\'s CLOCK IN.</string>
     <string name="run_start">Start run</string>
     <string name="run_again">Run again</string>
     <string name="run_last">Last run</string>
@@ -78,10 +78,6 @@
     <string name="run_ghost_on">Your ghost from %1$s (%2$d m) runs with you.</string>
     <string name="run_ghost_off">Finish 400 m to leave a ghost for tomorrow.</string>
     <string name="run_unlocked">Today is unlocked. Go sign it in the Yard.</string>
-    <string name="run_hud">score %1$d   lives %2$d</string>
-    <string name="run_done">%1$d m</string>
-    <string name="run_retry">once more</string>
-    <string name="run_tap">tap to jump</string>
     <string name="meters">%1$d m</string>
 
     <!-- Agents -->
@@ -310,4 +306,53 @@
     <string name="note_desk_title">Desk</string>
     <string name="note_desk_body">Closed while the app was in the background: %1$d · P&amp;L %2$s SOL (simulated on real prices).</string>
     <string name="note_desk_toggle">Desk closes (background)</string>
+    <string name="run_preview_a11y">Roof run: the robot jumps over a mite on the solar roofs, suns ahead.</string>
+    <string name="run_pause">Pause</string>
+    <string name="run_resume">Resume</string>
+    <string name="run_paused">PAUSED</string>
+    <string name="run_breath">Take a breath</string>
+    <string name="run_yard">Back to yard</string>
+    <string name="run_again_full">Run it again</string>
+    <string name="run_slide">Slide</string>
+    <string name="run_hint">Tap to jump · swipe down to slide</string>
+    <string name="run_garden">Tap to fly · grab the suns</string>
+    <string name="run_flight">SKY FLIGHT %1$ds</string>
+    <string name="run_hit">Hit</string>
+    <string name="run_fell">Fell</string>
+    <string name="run_reached">Reached %1$s</string>
+    <string name="run_daily">DAILY ROOF</string>
+    <string name="run_stats">%1$dm · %2$d pts · %3$d suns</string>
+    <string name="run_stats_heat">%1$dm · %2$d pts · %3$d suns · %4$dx heat</string>
+    <string name="run_stats_garden">%1$s · garden</string>
+    <string name="run_grind">Grind</string>
+    <string name="run_go">GO</string>
+    <string name="run_meters">%1$dm</string>
+    <string name="run_talk">Talk</string>
+    <string name="run_talk_stop">Stop</string>
+    <string name="run_listening">Listening…</string>
+    <string name="run_mute">Mute music</string>
+    <string name="run_unmute">Music on</string>
+    <string name="run_goal_label">%1$dm</string>
+    <string name="run_sign_now">Run counts. Sign the day.</string>
+    <string name="run_signed_title">Day is signed.</string>
+    <string name="run_sign_btn">Sign today</string>
+    <string name="run_signed_btn">Signed</string>
+    <string name="run_hearts_a11y">%1$d of 3 hearts</string>
+    <string name="run_hearts_shield_a11y">%1$d of 3 hearts, shield on</string>
+    <string name="run_score_a11y">Score %1$d</string>
+    <string name="run_a11y_view">Roof run. Double tap to jump.</string>
+    <string name="run_mic_denied">Microphone is off for Solarchik.</string>
+    <string name="ch_sunrise">Sunrise</string>
+    <string name="ch_village">Village</string>
+    <string name="ch_storm">Storm</string>
+    <string name="ch_night">Night</string>
+    <string name="ch_banner_sunrise">SUNRISE ROOFS</string>
+    <string name="ch_banner_village">VILLAGE ROOFS</string>
+    <string name="ch_banner_storm">STORM LINE</string>
+    <string name="ch_banner_night">NIGHT FARM</string>
+    <string name="ch_banner_serpent">THE SERPENT</string>
+    <string name="ch_serpent">Serpent</string>
+    <string name="banter_first_roof">First roof ate the run.</string>
+    <string name="banter_last_heart">One heart. Don\'t miss the next jump.</string>
+    <string name="banter_clock_ready">%1$dm. Sign the day.</string>
 </resources>

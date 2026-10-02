@@ -362,6 +362,9 @@ class YardScreen(host: MainActivity) : Screen(host) {
         }
     }
 
+    /** The run's CLOCK IN card asked to sign right away (web onClock). */
+    fun signFromRun() = clockIn()
+
     private fun clockIn() {
         if (!save.clockedToday() || save.signedToday() || signing) return
         signing = true

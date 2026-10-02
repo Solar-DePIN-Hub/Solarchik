@@ -95,6 +95,7 @@ class GameSave(context: Context, private val clock: () -> Long = { System.curren
 
     fun recordRun(meters: Int, score: Int) {
         val today = today()
+        runs += 1
         if (prefs.getString("runDay", "") != today) {
             lastDistance = 0
             lastScore = 0
@@ -203,10 +204,16 @@ class GameSave(context: Context, private val clock: () -> Long = { System.curren
     fun noteOn(key: String): Boolean = prefs.getBoolean(key, true)
     fun setNote(key: String, on: Boolean) { prefs.edit().putBoolean(key, on).apply() }
 
+    /**
+     * Ghost of the best run of a day: world-unit samples (x, y, grounded) every
+     * RunSim.GHOST_DT seconds of running time ("v": 2). Tapes of the old minigame (screen
+     * pixels, no "v") do not fit the new world and read as no ghost.
+     */
     fun readGhost(): GhostTape? {
         val raw = prefs.getString("ghost", null) ?: return null
         return try {
             val obj = JSONObject(raw)
+            if (obj.optInt("v") != GHOST_V) return null
             val day = obj.optString("day")
             if (day.isBlank()) return null
             val arr = obj.optJSONArray("samples") ?: return null
@@ -218,7 +225,7 @@ class GameSave(context: Context, private val clock: () -> Long = { System.curren
                     row.optDouble("y").toFloat(),
                     row.optBoolean("grounded"),
                 )
-                if (samples.size >= 80) break
+                if (samples.size >= GHOST_CAP) break
             }
             if (samples.size < 2) null else GhostTape(day, obj.optInt("meters"), samples)
         } catch (_: Throwable) {
@@ -232,21 +239,25 @@ class GameSave(context: Context, private val clock: () -> Long = { System.curren
         val prev = readGhost()
         if (prev != null && prev.day == today && meters < prev.meters) return
         val arr = JSONArray()
-        val take = if (samples.size <= 80) samples else {
-            val out = ArrayList<GhostPt>(80)
-            val step = (samples.size - 1).toFloat() / 79f
-            for (i in 0 until 80) out += samples[(i * step).toInt().coerceIn(0, samples.lastIndex)]
-            out
+        for (s in samples.take(GHOST_CAP)) {
+            arr.put(JSONObject().put("x", Math.round(s.x * 10) / 10.0).put("y", Math.round(s.y * 10) / 10.0).put("grounded", s.grounded))
         }
-        for (s in take) {
-            arr.put(JSONObject().put("x", s.x.toDouble()).put("y", s.y.toDouble()).put("grounded", s.grounded))
-        }
-        val obj = JSONObject().put("day", today).put("meters", meters).put("samples", arr)
+        val obj = JSONObject().put("v", GHOST_V).put("day", today).put("meters", meters).put("samples", arr)
         prefs.edit().putString("ghost", obj.toString()).apply()
     }
 
+    /** Finished runs (death or the goal), for the web's every-15th-run fly gate. */
+    var runs: Int
+        get() = prefs.getInt("runs", 0)
+        set(value) { prefs.edit().putInt("runs", value).apply() }
+
+    /** web: offerBonus = (runs + 1) % 15 === 0 */
+    fun offerBonus(): Boolean = (runs + 1) % 15 == 0
+
     companion object {
         const val GOAL_M = SolarchikConfig.RUN_GOAL_M
+        const val GHOST_V = 2
+        const val GHOST_CAP = 480
         private val DAY = Regex("^\\d{4}-\\d{2}-\\d{2}$")
         private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 

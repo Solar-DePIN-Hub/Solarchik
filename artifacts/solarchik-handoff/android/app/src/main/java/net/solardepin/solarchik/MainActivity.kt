@@ -81,8 +81,13 @@ class MainActivity : ComponentActivity() {
     var bottomInset = 0
         private set
 
-    private val runLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+    private val runLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         renderAll()
+        // "Sign today" on the run's CLOCK IN card: open the Yard and start the wallet flow there.
+        if (res.data?.getBooleanExtra(RunActivity.EXTRA_SIGN, false) == true) {
+            select(Tab.YARD)
+            (screen(Tab.YARD) as? net.solardepin.solarchik.ui.YardScreen)?.signFromRun()
+        }
     }
 
     private val notePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {

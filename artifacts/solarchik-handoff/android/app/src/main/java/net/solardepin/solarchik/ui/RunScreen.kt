@@ -5,6 +5,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import net.solardepin.solarchik.MainActivity
@@ -25,20 +26,34 @@ class RunScreen(host: MainActivity) : Screen(host) {
         addView(Ui.display(ctx, ctx.getString(R.string.run_title), 26f))
         addView(Ui.muted(ctx, ctx.getString(R.string.run_sub, GameSave.GOAL_M), 14f))
 
+        // a real frame of the run (rendered by the game's own renderer), not concept art
         val stage = FrameLayout(ctx).apply {
-            background = GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(Ui.blend(Ui.SURFACE2, Ui.AMBER, 0.25f), Ui.SURFACE),
-            ).apply { cornerRadius = dp(26).toFloat(); setStroke(dp(1), Ui.STROKE) }
+            background = GradientDrawable().apply {
+                setColor(Ui.SURFACE); cornerRadius = dp(26).toFloat(); setStroke(dp(1), Ui.STROKE)
+            }
+            clipToOutline = true
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(300))
+            contentDescription = ctx.getString(R.string.run_preview_a11y)
         }
-        // roof line
-        stage.addView(View(ctx).apply { setBackgroundColor(Ui.GOLD) },
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3), Gravity.BOTTOM).apply { bottomMargin = dp(46) })
-        stage.addView(Ui.image(ctx, R.drawable.hero_yard),
-            FrameLayout.LayoutParams(dp(170), dp(240), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(40) })
-        stage.addView(Ui.image(ctx, R.drawable.robot_midnight).apply { alpha = 0.28f },
-            FrameLayout.LayoutParams(dp(90), dp(130), Gravity.BOTTOM or Gravity.START).apply { bottomMargin = dp(46); leftMargin = dp(18) })
+        val radius = dp(26).toFloat()
+        stage.addView(object : ImageView(ctx) {
+            private val clip = android.graphics.Path()
+            override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+                super.onSizeChanged(w, h, ow, oh)
+                clip.reset()
+                clip.addRoundRect(0f, 0f, w.toFloat(), h.toFloat(), radius, radius, android.graphics.Path.Direction.CW)
+            }
+            override fun onDraw(canvas: android.graphics.Canvas) {
+                canvas.save()
+                canvas.clipPath(clip) // rounded card corners, also without hardware outline clipping
+                super.onDraw(canvas)
+                canvas.restore()
+            }
+        }.apply {
+            setImageResource(R.drawable.run_preview)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         modV = Ui.pill(ctx, "", Ui.GOLD, icon = R.drawable.ic_nav_sol, filled = true)
         stage.addView(modV, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply {
             topMargin = dp(14); leftMargin = dp(14)

@@ -2,87 +2,149 @@ package net.solardepin.solarchik.game
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.RectF
+import android.graphics.Typeface
+import android.os.Bundle
+import android.provider.Settings
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
-import kotlin.math.max
-import kotlin.random.Random
+import android.view.accessibility.AccessibilityNodeInfo
+import androidx.core.content.res.ResourcesCompat
+import net.solardepin.solarchik.R
+import net.solardepin.solarchik.game.run.ChapterId
+import net.solardepin.solarchik.game.run.DayMod
+import net.solardepin.solarchik.game.run.DeathKind
+import net.solardepin.solarchik.game.run.Ev
+import net.solardepin.solarchik.game.run.GhostSample
+import net.solardepin.solarchik.game.run.Input
+import net.solardepin.solarchik.game.run.Phase
+import net.solardepin.solarchik.game.run.RunAudio
+import net.solardepin.solarchik.game.run.RunRenderer
+import net.solardepin.solarchik.game.run.RunSim
+import net.solardepin.solarchik.game.run.RunSprites
+import net.solardepin.solarchik.game.run.RunState
+import net.solardepin.solarchik.game.run.RunSynth
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.ceil
+import kotlin.math.min
 
-/* Built in code by RunActivity only, never inflated from XML. */
+/** What a run is started with. Immutable; handed to the game thread through a volatile field. */
+class RunSetup(
+    val seed: Int,
+    val mod: DayMod,
+    val offerBonus: Boolean,
+    val goalMeters: Int,
+    val ghost: List<GhostSample>,
+    val careBoost: Boolean = false,
+)
+
+/** HUD snapshot (web snapshot()), built on the game thread and posted to the UI thread. */
+data class RunHud(
+    val hearts: Int,
+    val shield: Int,
+    val score: Int,
+    val meters: Int,
+    val combo: Int,
+    val phase: Phase,
+    val countdown: Double,
+    val death: DeathKind,
+    val suns: Int,
+    val maxCombo: Int,
+    val bonus: Boolean,
+    val bonusLeft: Double,
+    val grind: Boolean,
+    val didBonus: Boolean,
+    val chapter: ChapterId,
+    val announce: String,
+    val announceOn: Boolean,
+    val clockOpen: Boolean,
+) {
+    companion object {
+        fun of(s: RunState) = RunHud(
+            s.hearts, s.shield, Math.round(s.score).toInt(), s.meters, s.combo, s.phase, s.countdown, s.death,
+            s.suns, s.maxCombo, s.bonus, s.bonusLeft, s.grind, s.didBonus, s.chapter, s.announce,
+            s.announceLife > 0, s.clockOpen,
+        )
+    }
+}
+
+/** End of a run (death or the CLOCK IN goal). [ghost] is a copy, safe on any thread. */
+class RunResult(val hud: RunHud, val ghost: List<GhostPt>)
+
+/**
+ * The roof run surface. The game thread owns the [RunState] and the renderer; the UI thread only
+ * queues input ([input]), flips [paused] and asks for restarts. Results and HUD snapshots travel
+ * back as immutable objects through [post].
+ */
 @SuppressLint("ViewConstructor")
-class RunView(context: Context, private val onDone: (meters: Int, score: Int) -> Unit) :
-    SurfaceView(context), SurfaceHolder.Callback, Runnable {
+class RunView(context: Context, private val listener: Listener? = null) :
+    SurfaceView(context), SurfaceHolder.Callback {
 
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        textSize = 42f
-        isFakeBoldText = true
+    interface Listener {
+        fun onHud(hud: RunHud)
+        fun onEvents(events: List<Ev>, hud: RunHud)
+        fun onResult(result: RunResult)
     }
-    private val hud = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#F5C542")
-        textSize = 36f
-        isFakeBoldText = true
-    }
-
-    private val hudLine = context.getString(net.solardepin.solarchik.R.string.run_hud)
-    private val doneLine = context.getString(net.solardepin.solarchik.R.string.run_done, GameSave.GOAL_M)
-    private val retryLine = context.getString(net.solardepin.solarchik.R.string.run_retry)
-    private val tapLine = context.getString(net.solardepin.solarchik.R.string.run_tap)
 
     private var thread: Thread? = null
-    // Shared with the UI thread: only these cross threads. All game state below is touched by
-    // the game thread alone; taps and surface sizes are handed over through [input] / [surfaceH].
     @Volatile private var running = false
-    @Volatile private var finished = false
-    private val input = RunInput()
     @Volatile private var generation = 0
     @Volatile private var surfaceW = 0
     @Volatile private var surfaceH = 0
+    /** UI -> game: taps and holds. */
+    private val input = RunInput()
+    /** UI -> game: pause (web pausedRef). The world keeps drawing, the sim does not step. */
+    @Volatile var paused = false
+    /** game -> UI: the run ended (overlay up); taps are ignored like on the web. */
+    @Volatile var ended = false
+        private set
+    @Volatile private var setup: RunSetup? = null
+    private val restartReq = AtomicBoolean(true)
+    var audio: RunAudio? = null
 
-    private val runFrames = loadSheet("sprites/hero-run", 8)
-    private val jumpFrames = loadSheet("sprites/hero-jump", 4)
-    private val mite = load("sprites/foe-mite.png")
-    private val drone = load("sprites/foe-drone.png")
-    private val sky = load("yard-bg.jpg")
+    // ---- game thread only ----
+    private var state: RunState? = null
+    private val sprites by lazy { RunSprites(context.assets) }
+    private val renderer by lazy {
+        RunRenderer(sprites, font(R.font.nunito_bold), font(R.font.fredoka_semibold)).also {
+            it.reducedMotion = reducedMotion()
+        }
+    }
+    private var reported = false
+    private var goalReported = false
+    private var hudKey = ""
+    private var hudAcc = 0.0
 
-    private var ground = 0f
-    private var px = 0f
-    private var py = 0f
-    private var vy = 0f
-    private var onFloor = true
-    private var meters = 0f
-    private var score = 0
-    private var frame = 0
-    private var tick = 0
-    private var lives = 3
-    private var hurt = 0
-    private var exitIn = 0
-    private val foes = mutableListOf<Foe>()
-    private val ghosts = mutableListOf<GhostPt>()
-    private var replay: List<GhostPt> = emptyList()
-    private var mod = "calm"
-    private var foeSlot = 0
-    private var spawnIn = 110
+    // ---- UI thread only (touch tracking, web ptrRef) ----
+    private var ptrId = -1
+    private var ptrY = 0f
+    private var ptrSliding = false
+    private val slideDy = 36f * resources.displayMetrics.density
 
     init {
         holder.addCallback(this)
         isFocusable = true
+        contentDescription = context.getString(R.string.run_a11y_view)
+    }
+
+    private fun font(id: Int): Typeface? = runCatching { ResourcesCompat.getFont(context, id) }.getOrNull()
+
+    private fun reducedMotion(): Boolean = runCatching {
+        Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    }.getOrDefault(false)
+
+    /** UI thread: start (or restart) a run with [s]. Applied by the game thread on its next frame. */
+    fun start(s: RunSetup) {
+        setup = s
+        ended = false
+        paused = false
+        restartReq.set(true)
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
-        val save = GameSave(context)
-        mod = save.dayMod()
-        replay = save.readGhost()?.takeIf { it.day != save.today() }?.samples ?: emptyList()
         if (running) return
         running = true
-        finished = false
         // A loop that outlived the 400 ms join of the last surfaceDestroyed sees a newer
         // generation and exits, so two game threads never run at once.
         val my = ++generation
@@ -100,223 +162,193 @@ class RunView(context: Context, private val onDone: (meters: Int, score: Int) ->
         thread = null
     }
 
-    // Jump fires on ACTION_DOWN for latency; performClick is the accessibility
-    // path (TalkBack double-tap / switch access) and jumps too.
+    // ---- input (UI thread): only queue, never touch the state ----
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) jump()
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (ended || paused) return true
+                ptrId = event.getPointerId(0)
+                ptrY = event.y
+                ptrSliding = false
+                jumpDown()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val i = event.findPointerIndex(ptrId)
+                if (i >= 0 && !ptrSliding && event.getY(i) - ptrY > slideDy) {
+                    ptrSliding = true
+                    input.requestSlide()
+                    input.slideHeld = true
+                    input.jumpHeld = false
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                input.jumpHeld = false
+                input.slideHeld = false
+                ptrId = -1
+                ptrSliding = false
+            }
+        }
         return true
     }
 
+    /** Accessibility path (TalkBack double-tap / switch access): a jump. */
     override fun performClick(): Boolean {
         super.performClick()
-        jump()
+        if (!ended && !paused) {
+            input.request()
+            input.jumpHeld = false
+        }
         return true
     }
 
-    /** UI thread: only queue the tap; the game thread applies it on its next step. */
-    private fun jump() {
-        if (!finished) input.request()
+    override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
+        super.onInitializeAccessibilityNodeInfo(info)
+        info.addAction(AccessibilityNodeInfo.AccessibilityAction(R.id.run_action_slide, context.getString(R.string.run_slide)))
     }
 
-    override fun run() = loop(generation)
+    override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
+        if (action == R.id.run_action_slide) {
+            slideTap()
+            return true
+        }
+        return super.performAccessibilityAction(action, arguments)
+    }
+
+    fun jumpDown() {
+        if (ended || paused) return
+        input.request()
+        input.jumpHeld = true
+    }
+
+    fun jumpUp() { input.jumpHeld = false }
+
+    fun slideDown() {
+        if (ended || paused) return
+        input.requestSlide()
+        input.slideHeld = true
+    }
+
+    fun slideUp() { input.slideHeld = false }
+
+    private fun slideTap() {
+        if (ended || paused) return
+        input.requestSlide()
+    }
+
+    fun releaseAll() {
+        input.jumpHeld = false
+        input.slideHeld = false
+    }
+
+    // ---- game thread ----
+
+    private fun newRun(): RunState? {
+        val s = setup ?: return null
+        renderer.ghost = s.ghost
+        reported = false
+        goalReported = false
+        hudKey = ""
+        input.take(); input.takeSlide()
+        return RunSim.create(s.seed, s.mod, s.offerBonus, s.careBoost, s.goalMeters)
+    }
 
     private fun loop(my: Int) {
         var last = System.nanoTime()
+        var acc = 0.0
         while (running && my == generation) {
+            if (restartReq.getAndSet(false) || state == null) {
+                state = newRun()
+                acc = 0.0
+                state?.let { post { listener?.onHud(RunHud.of(it)) } }
+            }
+            val s = state
             val now = System.nanoTime()
-            val dt = ((now - last) / 16_666_666f).coerceIn(0.5f, 2.2f)
+            val dt = min((now - last) / 1e9, 0.05)
             last = now
-            if (!finished) step(dt)
-            val canvas = holder.lockCanvas()
+            if (s != null && !paused) {
+                acc += dt
+                var steps = 0
+                while (acc >= RunSim.TICK && steps < 3) {
+                    val inp = Input(input.take(), input.jumpHeld, input.takeSlide(), input.slideHeld)
+                    val events = RunSim.step(s, RunSim.TICK, inp)
+                    afterStep(s, events)
+                    acc -= RunSim.TICK
+                    steps += 1
+                }
+                if (steps >= 3) acc = 0.0
+                hudAcc += dt
+                if (hudAcc > 0.12) {
+                    hudAcc = 0.0
+                    val cd = if (s.phase == Phase.COUNTDOWN) (if (s.countdown > 0.28) ceil(s.countdown).toInt() else 0) else -1
+                    val key = "${s.phase}|${s.hearts}|${s.shield}|${Math.round(s.score)}|${s.combo}|${(s.distance / 8).toInt()}|${s.bonus}|${s.clockOpen}|$cd|${s.announceLife > 0}|${s.grind}|${s.bonusLeft.toInt()}"
+                    if (key != hudKey) {
+                        hudKey = key
+                        val hud = RunHud.of(s)
+                        post { listener?.onHud(hud) }
+                    }
+                }
+            } else {
+                acc = 0.0
+            }
+            val w = surfaceW
+            val h = surfaceH
+            val canvas: Canvas? = if (w > 0 && h > 0) {
+                runCatching { holder.lockHardwareCanvas() }.getOrNull() ?: runCatching { holder.lockCanvas() }.getOrNull()
+            } else null
             if (canvas == null) {
-                // surface not ready / going away: do not spin a core
                 try { Thread.sleep(16) } catch (_: InterruptedException) { break }
                 continue
             }
-            drawFrame(canvas)
-            holder.unlockCanvasAndPost(canvas)
-            if (finished) {
-                exitIn--
-                if (exitIn <= 0) {
-                    running = false
-                    val m = meters.toInt().coerceAtMost(GameSave.GOAL_M)
-                    val sc = score
-                    post { onDone(m, sc) }
-                }
+            try {
+                if (s != null) renderer.draw(canvas, canvas.width, canvas.height, s, now / 1e9)
+            } finally {
+                holder.unlockCanvasAndPost(canvas)
+            }
+            val spent = (System.nanoTime() - now) / 1_000_000L
+            if (spent < 8) try { Thread.sleep(8 - spent) } catch (_: InterruptedException) { break }
+        }
+    }
+
+    private fun afterStep(s: RunState, events: List<Ev>) {
+        if (events.isNotEmpty()) {
+            val a = audio
+            if (a != null) for (ev in events) a.play(RunSynth.soundOf(ev))
+            val hud = RunHud.of(s)
+            val copy = ArrayList(events)
+            post { listener?.onEvents(copy, hud) }
+        }
+        val goal = s.clockOpen && !goalReported
+        val dead = s.phase == Phase.DEAD && !reported
+        if (goal || dead) {
+            goalReported = goalReported || goal
+            reported = true
+            ended = true
+            input.take(); input.takeSlide()
+            val hud = RunHud.of(s)
+            hudKey = ""
+            val ghost = s.ghost.map { GhostPt(it.x.toFloat(), it.y.toFloat(), it.grounded) }
+            post {
+                listener?.onHud(hud)
+                listener?.onResult(RunResult(hud, ghost))
             }
         }
     }
-
-    private fun step(dt: Float) {
-        val w = surfaceW.takeIf { it > 0 } ?: width.takeIf { it > 0 } ?: return
-        val h = surfaceH.takeIf { it > 0 } ?: height.takeIf { it > 0 } ?: return
-        val g = h * 0.78f
-        if (ground != g) {
-            val wasOnFloor = py == 0f || py >= ground
-            ground = g
-            if (wasOnFloor) py = ground
-        }
-        px = w * 0.18f
-
-        if (input.take() && onFloor) {
-            vy = if (mod == "wind") -20.5f else -22f
-            onFloor = false
-        }
-
-        tick++
-        if (hurt > 0) hurt--
-        meters += 0.85f * dt
-        score = meters.toInt() + foes.count { it.hit } * 20
-
-        vy += 1.15f * dt
-        py += vy * dt
-        if (py >= ground) {
-            py = ground
-            vy = 0f
-            onFloor = true
-        }
-
-        if (--spawnIn <= 0) {
-            foeSlot += 1
-            val skip = mod == "gold" && foeSlot % 3 == 0
-            if (!skip) {
-                val air = when {
-                    mod == "wire" && foeSlot % 4 == 0 -> true
-                    mod == "drones" -> Random.nextFloat() < 0.55f
-                    else -> Random.nextFloat() < 0.35f
-                }
-                foes += Foe(
-                    x = w + 40f,
-                    y = if (air) ground - 160f else ground,
-                    air = air,
-                )
-            }
-            spawnIn = if (mod == "drones") 100 + Random.nextInt(50) else 130 + Random.nextInt(80)
-        }
-        val speed = (6.2f + meters / 700f) * if (mod == "wind") 1.08f else 1f
-        val it = foes.iterator()
-        while (it.hasNext()) {
-            val f = it.next()
-            f.x -= speed * dt
-            if (f.x < -120f) it.remove()
-            else if (!f.hit && hurt <= 0 && hits(f)) {
-                f.hit = true
-                lives -= 1
-                hurt = 48
-                if (lives <= 0) {
-                    endRun()
-                    return
-                }
-            }
-        }
-        if (meters >= GameSave.GOAL_M) endRun()
-        if (tick % 8 == 0 && ghosts.size < 80) {
-            ghosts += GhostPt(meters, py, onFloor)
-        }
-        if (tick % 5 == 0) frame++
-    }
-
-    private fun hits(foe: Foe): Boolean {
-        val hero = RectF(px - 36f, py - 92f, px + 36f, py + 8f)
-        val box = if (foe.air) RectF(foe.x - 28f, foe.y - 36f, foe.x + 28f, foe.y + 20f)
-        else RectF(foe.x - 30f, foe.y - 40f, foe.x + 30f, foe.y + 8f)
-        return RectF.intersects(hero, box)
-    }
-
-    private fun endRun() {
-        if (finished) return
-        finished = true
-        meters = meters.coerceAtMost(GameSave.GOAL_M.toFloat())
-        exitIn = 54
-        val doneMeters = meters.toInt()
-        if (doneMeters >= 400) GameSave(context).writeGhost(doneMeters, ghosts)
-    }
-
-    private fun drawFrame(c: Canvas) {
-        val w = c.width.toFloat()
-        val h = c.height.toFloat()
-        c.drawColor(Color.parseColor("#07131C"))
-        sky?.let {
-            val src = android.graphics.Rect(0, 0, it.width, it.height)
-            c.drawBitmap(it, src, android.graphics.RectF(0f, 0f, w, h), paint)
-        }
-        paint.color = Color.parseColor("#12324A")
-        c.drawRect(0f, ground + 8f, w, h, paint)
-        paint.color = Color.parseColor("#F5C542")
-        c.drawRect(0f, ground + 6f, w, ground + 12f, paint)
-
-        for (foe in foes) {
-            val bmp = if (foe.air) drone else mite
-            drawSprite(c, bmp, foe.x, foe.y, if (foe.air) 88f else 80f)
-        }
-
-        val hero = if (onFloor) runFrames.getOrNull(frame % runFrames.size.coerceAtLeast(1)) else jumpFrames.getOrNull((frame / 2) % jumpFrames.size.coerceAtLeast(1))
-        paintGhost(c)
-        if (hurt == 0 || tick % 4 < 2) drawSprite(c, hero, px, py, 120f)
-        if (lives == 1 && !finished) {
-            val veil = Paint(paint)
-            veil.color = Color.parseColor("#07131C")
-            veil.alpha = 46
-            c.drawRect(0f, 0f, w, h, veil)
-        }
-
-        c.drawText("${meters.toInt()} / ${GameSave.GOAL_M} m", 32f, 64f, hud)
-        c.drawText(hudLine.format(score, lives), 32f, 110f, text)
-        if (finished) c.drawText(if (meters >= GameSave.GOAL_M) doneLine else retryLine, 32f, 164f, hud)
-        else c.drawText(tapLine, 32f, h - 36f, text)
-    }
-
-    private fun paintGhost(c: Canvas) {
-        if (replay.size < 2) return
-        var prev: GhostPt? = null
-        for (g in replay) {
-            if (g.x > meters) break
-            prev = g
-        }
-        val g = prev ?: return
-        if (g.x < meters - 80f || g.x > meters + 900f) return
-        val bmp = if (g.grounded) runFrames.getOrNull(frame % runFrames.size.coerceAtLeast(1)) else jumpFrames.getOrNull((frame / 2) % jumpFrames.size.coerceAtLeast(1))
-        val gx = width * 0.18f + (g.x - meters) * 0.35f
-        val old = paint.alpha
-        paint.alpha = 70
-        drawSprite(c, bmp, gx, g.y, 120f)
-        paint.alpha = old
-    }
-
-    private fun drawSprite(c: Canvas, bmp: Bitmap?, cx: Float, baseline: Float, size: Float) {
-        if (bmp == null) {
-            paint.color = Color.parseColor("#7AD1FF")
-            c.drawCircle(cx, baseline - size / 2f, size / 3f, paint)
-            return
-        }
-        val ratio = bmp.width.toFloat() / max(1, bmp.height)
-        val dw = size * ratio
-        val dest = RectF(cx - dw / 2f, baseline - size, cx + dw / 2f, baseline)
-        c.drawBitmap(bmp, null, dest, paint)
-    }
-
-    private fun load(path: String): Bitmap? = try {
-        context.assets.open(path).use { BitmapFactory.decodeStream(it) }
-    } catch (_: Throwable) {
-        null
-    }
-
-    private fun loadSheet(prefix: String, count: Int): List<Bitmap> {
-        val out = ArrayList<Bitmap>(count)
-        for (i in 1..count) load("$prefix-$i.png")?.let { out += it }
-        return out
-    }
-
-    private class Foe(var x: Float, var y: Float, val air: Boolean, var hit: Boolean = false)
 }
 
 /**
- * Hand-over of taps from the UI thread to the game thread. A tap is remembered until the next
- * step consumes it (at most one jump per step), so no game state is written from the UI thread.
+ * Hand-over of input from the UI thread to the game thread. A press is remembered until the next
+ * step consumes it (at most one per step); holds are plain volatile flags. No game state is
+ * written from the UI thread.
  */
 class RunInput {
-    private val pending = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val pending = AtomicBoolean(false)
+    private val slide = AtomicBoolean(false)
+    @Volatile var jumpHeld = false
+    @Volatile var slideHeld = false
     fun request() { pending.set(true) }
     fun take(): Boolean = pending.getAndSet(false)
+    fun requestSlide() { slide.set(true) }
+    fun takeSlide(): Boolean = slide.getAndSet(false)
 }
