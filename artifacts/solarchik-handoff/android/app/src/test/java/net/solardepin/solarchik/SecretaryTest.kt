@@ -18,7 +18,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+import android.content.Intent
+import android.view.View
+import android.view.ViewGroup
+import android.widget.EditText
+import android.widget.TextView
 import org.robolectric.annotation.Config
 import java.io.File
 
@@ -147,4 +154,71 @@ class SecretaryTest {
         assertEquals("sku-dex-arb", Catalog.fromName("Titan × Backpack")!!.first.id)
         assertEquals("Backpack SOL Desk", Catalog.baseOf("sku-dex-arb")!!.name)
     }
+
+    // ---- 0.20.6: carrier call forwarding to the Sol secretary ----
+
+    @Test fun forwardNumberIsEmptyByDefaultAndValidated() {
+        assertEquals("", Secretary.forwardNumber(ctx))
+        assertEquals("+380441234567", Secretary.cleanNumber(" +380 (44) 123-45-67 "))
+        assertEquals("+12025550123", Secretary.cleanNumber("0012025550123"))
+        listOf("", "0441234567", "+0441234567", "+38044", "+1234567890123456", "+38044*123#", "+380+441234567", "tel:+380441234567", "+38o441234567")
+            .forEach { assertNull(it, Secretary.cleanNumber(it)) }
+        assertNull(Secretary.setForwardNumber(ctx, "12345"))
+        assertEquals("", Secretary.forwardNumber(ctx))
+        assertEquals("+380441234567", Secretary.setForwardNumber(ctx, "+380 44 123 45 67"))
+        assertEquals("+380441234567", Secretary.forwardNumber(ctx))
+        assertEquals("", Secretary.setForwardNumber(ctx, "  "))
+        assertEquals("", Secretary.forwardNumber(ctx))
+        Secretary.setForwardNumber(ctx, "+380441234567")
+        AppData.wipe(ctx)
+        assertEquals("", Secretary.forwardNumber(ctx))
+    }
+
+    @Test fun gsmForwardingCodes() {
+        val n = "+380441234567"
+        assertEquals("**61*+380441234567#", Secretary.forwardOnCode(Secretary.Forward.NO_ANSWER, n))
+        assertEquals("**67*+380441234567#", Secretary.forwardOnCode(Secretary.Forward.BUSY, n))
+        assertEquals("**62*+380441234567#", Secretary.forwardOnCode(Secretary.Forward.UNREACHABLE, n))
+        assertNull(Secretary.forwardOnCode(Secretary.Forward.BUSY, ""))
+        assertEquals(listOf("##61#", "##67#", "##62#"), Secretary.Forward.values().map { Secretary.forwardOffCode(it) })
+        assertEquals("##004#", Secretary.FORWARD_ALL_OFF)
+        val uri = Secretary.dialUri("**61*+380441234567#")
+        assertEquals("tel", uri.scheme)
+        assertTrue("# must be escaped", uri.toString().endsWith("%23"))
+        assertEquals("**61*+380441234567#", uri.schemeSpecificPart)
+    }
+
+    @Test fun noCallPhonePermission() {
+        val perms = ctx.packageManager.getPackageInfo(ctx.packageName, PackageManager.GET_PERMISSIONS).requestedPermissions?.toSet().orEmpty()
+        assertFalse("android.permission.CALL_PHONE" in perms)
+    }
+
+    @Test fun settingsForwardButtonsOpenTheDialerOnly() {
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().visible().get()
+        a.select(MainActivity.Tab.SETTINGS)
+        val root = a.window.decorView
+        val noAnswer = ctx.getString(R.string.fwd_no_answer, "**61")
+        assertTrue(texts(root).contains(ctx.getString(R.string.fwd_number_empty)))
+        // Without a number the button does nothing but explain.
+        find(root, noAnswer)!!.performClick()
+        assertNull(shadowOf(a).nextStartedActivity)
+
+        val input = all(root).filterIsInstance<EditText>().single { it.hint == ctx.getString(R.string.fwd_number_hint) }
+        input.setText("+380 44 123 45 67")
+        find(root, ctx.getString(R.string.fwd_save))!!.performClick()
+        assertEquals("+380441234567", Secretary.forwardNumber(ctx))
+        assertTrue(texts(root).contains(ctx.getString(R.string.fwd_number_set, "+380441234567")))
+
+        find(root, noAnswer)!!.performClick()
+        val dial = shadowOf(a).nextStartedActivity
+        assertEquals(Intent.ACTION_DIAL, dial.action)
+        assertEquals("**61*+380441234567#", dial.data!!.schemeSpecificPart)
+
+        find(root, ctx.getString(R.string.fwd_off_all, "##004#"))!!.performClick()
+        assertEquals("##004#", shadowOf(a).nextStartedActivity.data!!.schemeSpecificPart)
+    }
+
+    private fun all(v: View): List<View> = listOf(v) + if (v is ViewGroup) (0 until v.childCount).flatMap { all(v.getChildAt(it)) } else emptyList()
+    private fun texts(v: View): List<String> = all(v).filterIsInstance<TextView>().map { it.text.toString() }
+    private fun find(v: View, text: String): View? = all(v).firstOrNull { it is TextView && it !is EditText && it.text.toString() == text }
 }

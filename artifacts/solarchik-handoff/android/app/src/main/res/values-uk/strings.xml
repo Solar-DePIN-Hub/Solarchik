@@ -345,4 +345,24 @@
     <string name="sec_not_found">Оплату ще не знайдено. Зачекайте хвилину й перевірте знову.</string>
     <string name="sec_invalid">Оплату не прийнято (%1$s).</string>
     <string name="sec_offline">Не вдалося зв\'язатися із секретарем. Спробуйте пізніше.</string>
+    <!-- Переадресація на Sol-секретаря (Налаштування → Секретар дзвінків) -->
+    <string name="fwd_title">Переадресовувати пропущені на Sol-секретаря</string>
+    <string name="fwd_body">Переадресацію робить ваш оператор, а не застосунок: кожна кнопка відкриває набір номера зі стандартним GSM-кодом, а дзвонити натискаєте ви. Люди з ваших контактів дзвонять як завжди (фільтр дзвінків їх не чіпає), а дзвінки, на які ви не відповіли, йдуть на номер секретаря. Оператор може брати плату за переадресовані дзвінки.</string>
+    <string name="fwd_number_label">Номер секретаря</string>
+    <string name="fwd_number_hint">+380…</string>
+    <string name="fwd_save">Зберегти</string>
+    <string name="fwd_number_empty">Номер секретаря ще не задано. Введіть його в міжнародному форматі (+ і код країни).</string>
+    <string name="fwd_number_set">Переадресація на: %1$s</string>
+    <string name="fwd_number_bad">Потрібен міжнародний формат: + і код країни, 8–15 цифр.</string>
+    <string name="fwd_number_saved">Номер секретаря збережено.</string>
+    <string name="fwd_number_cleared">Номер секретаря очищено.</string>
+    <string name="fwd_need_number">Спершу введіть номер секретаря.</string>
+    <string name="fwd_on_label">Увімкнути (по одному коду)</string>
+    <string name="fwd_no_answer">Немає відповіді (%1$s)</string>
+    <string name="fwd_busy">Зайнято (%1$s)</string>
+    <string name="fwd_unreachable">Поза зоною / вимкнено (%1$s)</string>
+    <string name="fwd_off_label">Вимкнути</string>
+    <string name="fwd_off_all">Вимкнути всю умовну переадресацію (%1$s)</string>
+    <string name="fwd_note">Це GSM-коди. Мережі CDMA і деякі оператори мають інші коди або вмикають переадресацію у своєму застосунку; якщо код не спрацював, запитайте оператора.</string>
+    <string name="fwd_no_dialer">На пристрої немає набору номера. Код скопійовано.</string>
 </resources>

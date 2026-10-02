@@ -314,3 +314,16 @@ Seeker CLOCK IN default (mainnet) left as is, as asked.
 - `solarchik-0.20.5-release-boxkey.apk`: 3221791 B, sha256 `fc53a564ec76aeed5f2582e99f39a88415571ba555823d5b832900031adab824`, v2+v3 signed with `CN=Solarchik BOX TEST KEY (not production)` (cert SHA-256 `91102f8f…59a01e`). Not the production key.
 
 **Not verified here**: the role dialog and the real call path need a phone (no emulator by rule). No real USDC payment was made: the worker's positive path is covered by its unit tests and by parsing a real mainnet USDC+memo transaction.
+
+## 0.20.6 (versionCode 66): carrier call forwarding to the Sol secretary (2026-10-02)
+
+**Changes**
+- Settings → Call secretary → "Forward unanswered calls to Sol secretary". Each button opens the system dialer (`ACTION_DIAL`, no CALL_PHONE) pre-filled with a GSM conditional-forwarding code, and the user presses call. On: `**61*<num>#` (no answer), `**67*<num>#` (busy), `**62*<num>#` (unreachable). Off: `##61#`, `##67#`, `##62#`, and `##004#` (all conditional forwarding). `#` is escaped in the `tel:` URI.
+- EN/UK text explains that the carrier does the forwarding, contacts still ring normally (call screening never touches them), carrier fees may apply, and CDMA networks and some carriers use different codes.
+- Secretary number: **empty by default, set in Settings**. There is no verified secretary phone number. The screen worker has no carrier, SIP or Twilio/Zadarma number configured (only OPENAI_API_KEY plus KV). The only number in the repos is the web save default `380914810885` (`src/lib/game/save.ts`, from 0.19.51), and nothing ties it to the secretary, so it is not used. Validation accepts international format only: `+` or `00`, then 8–15 digits with no leading 0. Spaces, dashes, dots and brackets are stripped. `*`, `#`, letters and a second `+` are rejected, so typed input cannot alter the MMI code. Stored in `solarchik.secretary` and wiped by Delete my data.
+
+**Tests**: `testDebugUnitTest` ran 142 tests: 137 passed, 0 failed, 5 skipped (opt-in ITs). There are 4 new SecretaryTest cases: number validation and the empty default, the codes and `tel:` escaping, no CALL_PHONE, and a Robolectric Settings click-through that asserts the `ACTION_DIAL` intents. `lintDebug` reported no issues.
+
+**APKs** (box only)
+- `solarchik-0.20.6-debug.apk`: 6761492 B, sha256 `6a6b2c0e336309c1eae07f335dde0ebc109b64bbf2d55da223cd17bf3d1f5924`.
+- `solarchik-0.20.6-release-boxkey.apk`: 3228145 B, sha256 `391f8c59f811d0c91f6909af29b0ac1b8cea674c9a8539d7db79b0d6ad2ddf6d`, `CN=Solarchik BOX TEST KEY (not production)`, cert SHA-256 `91102f8f…59a01e`.

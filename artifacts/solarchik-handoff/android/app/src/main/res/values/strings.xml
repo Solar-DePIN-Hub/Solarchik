@@ -357,4 +357,24 @@
     <string name="sec_not_found">Payment not found yet. Give it a minute and check again.</string>
     <string name="sec_invalid">Payment not accepted (%1$s).</string>
     <string name="sec_offline">Could not reach the secretary. Try again later.</string>
+    <!-- Carrier call forwarding to the Sol secretary (Settings → Call secretary) -->
+    <string name="fwd_title">Forward unanswered calls to Sol secretary</string>
+    <string name="fwd_body">Your carrier does the forwarding, not the app: each button opens the dialer with a standard GSM code and you press call. People in your contacts still ring normally (call screening never touches them), and calls you do not pick up go to the secretary number. Your carrier may charge for forwarded calls.</string>
+    <string name="fwd_number_label">Secretary phone number</string>
+    <string name="fwd_number_hint">+380…</string>
+    <string name="fwd_save">Save</string>
+    <string name="fwd_number_empty">No secretary number set yet. Enter it in international format (+ and country code).</string>
+    <string name="fwd_number_set">Forwarding target: %1$s</string>
+    <string name="fwd_number_bad">Use international format: + and country code, 8–15 digits.</string>
+    <string name="fwd_number_saved">Secretary number saved.</string>
+    <string name="fwd_number_cleared">Secretary number cleared.</string>
+    <string name="fwd_need_number">Enter the secretary number first.</string>
+    <string name="fwd_on_label">Turn on (one code at a time)</string>
+    <string name="fwd_no_answer">No answer (%1$s)</string>
+    <string name="fwd_busy">Busy (%1$s)</string>
+    <string name="fwd_unreachable">Unreachable / off (%1$s)</string>
+    <string name="fwd_off_label">Turn off</string>
+    <string name="fwd_off_all">Turn off all conditional forwarding (%1$s)</string>
+    <string name="fwd_note">These are GSM codes. CDMA networks and some carriers use different codes or need forwarding set in their app; if a code fails, ask your carrier.</string>
+    <string name="fwd_no_dialer">No dialer on this device. The code was copied.</string>
 </resources>

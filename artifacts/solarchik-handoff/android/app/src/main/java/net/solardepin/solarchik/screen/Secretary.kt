@@ -65,6 +65,51 @@ object Secretary {
             "&label=" + Uri.encode("Solarchik") + "&message=" + Uri.encode("Call secretary credit") +
             "&memo=" + Uri.encode(memo(userId))
 
+    // ---- Carrier call forwarding (GSM MMI codes, dialed by the user from the system dialer) ----
+
+    /** GSM conditional call forwarding. The carrier forwards; the app only pre-fills the dialer (ACTION_DIAL). */
+    enum class Forward(val code: String) { NO_ANSWER("61"), BUSY("67"), UNREACHABLE("62") }
+
+    /** Cancels all conditional forwarding (no answer + busy + unreachable) in one code. */
+    const val FORWARD_ALL_OFF = "##004#"
+
+    /**
+     * No verified secretary phone number exists yet (the screen worker has no carrier/SIP number configured),
+     * so the target is empty until the player or owner types one in.
+     */
+    fun forwardNumber(ctx: Context): String = prefs(ctx).getString("fwdNumber", null).orEmpty()
+
+    /** Saves a valid number (returns it) or leaves the old one and returns null. Blank clears it. */
+    fun setForwardNumber(ctx: Context, raw: String): String? {
+        if (raw.isBlank()) {
+            prefs(ctx).edit().remove("fwdNumber").apply()
+            return ""
+        }
+        val clean = cleanNumber(raw) ?: return null
+        prefs(ctx).edit().putString("fwdNumber", clean).apply()
+        return clean
+    }
+
+    /**
+     * International format only, so forwarding works from any country: "+" (or "00") then 8..15 digits (E.164).
+     * Spaces, dashes, dots and brackets are dropped. Anything else (letters, *, #, a second +) is rejected,
+     * so a typed number can never change the MMI code itself.
+     */
+    fun cleanNumber(raw: String): String? {
+        var t = raw.trim().filterNot { it == ' ' || it == '-' || it == '.' || it == '(' || it == ')' || it == '\u00A0' }
+        if (t.startsWith("00")) t = "+" + t.drop(2)
+        if (!t.startsWith("+")) return null
+        val digits = t.drop(1)
+        if (digits.length !in 8..15 || !digits.all { it in '0'..'9' } || digits.startsWith("0")) return null
+        return "+$digits"
+    }
+
+    fun forwardOnCode(kind: Forward, number: String): String? = cleanNumber(number)?.let { "**${kind.code}*$it#" }
+    fun forwardOffCode(kind: Forward): String = "##${kind.code}#"
+
+    /** tel: URI for ACTION_DIAL; "#" must be escaped or the dialer drops everything after it. */
+    fun dialUri(code: String): Uri = Uri.parse("tel:" + Uri.encode(code))
+
     /** True when the player picked Solarchik as the call screening app (API 29+ only). */
     fun holdsRole(ctx: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false

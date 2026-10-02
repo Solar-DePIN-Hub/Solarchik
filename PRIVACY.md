@@ -3,7 +3,7 @@
 Last updated: 2 October 2026 · App: Solarchik (Android, package `net.solardepin.solarchik`) · Contact: open an issue at https://github.com/Solar-DePIN-Hub/Solarchik/issues
 
 ## What stays on your phone
-Streak and CLOCK IN history, fee-free windows, your agents list, the fee ledger, the agent desk (paper/devnet positions), Sol chat history (last 40 turns), notification settings, a random player id, the Mobile Wallet Adapter session token, and (if you turn on the call secretary) its settings, the last 40 screened calls (number, time, silenced/declined, AI note) and a pending payment reference. Nothing of this is uploaded to a Solarchik server. Android cloud backup and device transfer are disabled for the app.
+Streak and CLOCK IN history, fee-free windows, your agents list, the fee ledger, the agent desk (paper/devnet positions), Sol chat history (last 40 turns), notification settings, a random player id, the Mobile Wallet Adapter session token, and (if you turn on the call secretary) its settings, the last 40 screened calls (number, time, silenced/declined, AI note), a pending payment reference and the secretary forwarding number you enter. Call forwarding is set by your carrier through codes you dial yourself; the app never places calls (no CALL_PHONE permission). Nothing of this is uploaded to a Solarchik server. Android cloud backup and device transfer are disabled for the app.
 
 ## What leaves your phone, and why
 | Data | Sent to | Why |
