@@ -107,32 +107,22 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
 
     private fun box(color: Int, radius: Float) = GradientDrawable().apply { setColor(color); cornerRadius = radius * dm.density }
 
-    /** HUD chip: dark glass with a light rim. */
-    private fun chip(radius: Float = 12f, color: Int = alpha(BG, 0.62f)) = GradientDrawable().apply {
-        setColor(color); cornerRadius = radius * dm.density; setStroke(dp(1.5f), alpha(Color.WHITE, 0.16f))
+    /** A painted nine-patch whose own padding is ignored (views keep their dp padding). */
+    private fun np(id: Int): android.graphics.drawable.Drawable =
+        LayerDrawable(arrayOf(ResourcesCompat.getDrawable(resources, id, null)!!)).apply { setPadding(0, 0, 0, 0) }
+
+    /** HUD chip: painted dark glass with a light rim ([small] for the tiny chapter tag). */
+    private fun chip(small: Boolean = false) = np(if (small) R.drawable.run_chip_s else R.drawable.run_chip)
+
+    /** Painted game button: a glossy face over a darker edge that sinks when pressed. */
+    private fun painted(normal: Int, pressed: Int) = StateListDrawable().apply {
+        addState(intArrayOf(android.R.attr.state_pressed), np(pressed))
+        addState(intArrayOf(), np(normal))
     }
 
-    /** Chunky game button: a face over a darker edge that sinks when pressed. */
-    private fun chunky(top: Int, bottom: Int, edge: Int, radius: Float): StateListDrawable {
-        val r = radius * dm.density
-        fun layer(pressed: Boolean): LayerDrawable {
-            val edgeD = GradientDrawable().apply { setColor(edge); cornerRadius = r }
-            val face = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(top, bottom)).apply {
-                cornerRadius = r; setStroke(dp(1.5f), alpha(Color.WHITE, 0.32f))
-            }
-            return LayerDrawable(arrayOf(edgeD, face)).apply {
-                setLayerInset(1, 0, if (pressed) dp(4) else 0, 0, if (pressed) 0 else dp(4))
-            }
-        }
-        return StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_pressed), layer(true))
-            addState(intArrayOf(), layer(false))
-        }
-    }
-
-    private fun goldButton() = chunky(Color.parseColor("#FFE88A"), PRIMARY, Color.parseColor("#A8650E"), 14f)
-    private fun darkButton() = chunky(Color.parseColor("#27475E"), ELEVATED, Color.parseColor("#08141D"), 12f)
-    private fun greenButton() = chunky(Color.parseColor("#9BE07A"), OK, Color.parseColor("#3A7A22"), 14f)
+    private fun goldButton() = painted(R.drawable.run_btn_gold, R.drawable.run_btn_gold_p)
+    private fun darkButton() = painted(R.drawable.run_btn_dark, R.drawable.run_btn_dark_p)
+    private fun greenButton() = painted(R.drawable.run_btn_green, R.drawable.run_btn_green_p)
 
     /** Card motion and reward count-ups (off for reduced motion and in screenshot tests). */
     var animations = runCatching { ValueAnimator.areAnimatorsEnabled() }.getOrDefault(true)
@@ -344,9 +334,7 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         }
         tl.addView(scoreV, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(36)).apply { marginEnd = dp(8) })
         sunsV = label("0", 19f, Color.parseColor("#3A2206")).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.parseColor("#FFE88A"), PRIMARY)).apply {
-                cornerRadius = dp(18).toFloat(); setStroke(dp(2), Color.parseColor("#A8650E"))
-            }
+            background = np(R.drawable.run_chip_gold)
             setPadding(dp(8), 0, dp(12), 0)
             gravity = Gravity.CENTER_VERTICAL
             setCompoundDrawablesRelative(sunIcon(Color.parseColor("#B8560A"), 20), null, null, null)
@@ -357,9 +345,9 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
 
         // top-right: distance · time of day · grind / flight
         val tr = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.END }
-        distV = label("0m", 19f).apply { background = chip(color = alpha(BG, 0.8f)); setPadding(dp(12), dp(6), dp(12), dp(6)) }
+        distV = label("0m", 19f).apply { background = chip(); setPadding(dp(12), dp(6), dp(12), dp(6)) }
         tr.addView(distV, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        chapterV = label("", 11f, PRIMARY, track = 0.025f).apply { background = chip(8f, alpha(BG, 0.8f)); setPadding(dp(8), dp(3), dp(8), dp(3)) }
+        chapterV = label("", 11f, PRIMARY, track = 0.025f).apply { background = chip(small = true); setPadding(dp(8), dp(3), dp(8), dp(3)) }
         tr.addView(chapterV, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
         grindV = label(ctx.getString(R.string.run_grind), 14f, BG).apply { background = box(OK, 8f); setPadding(dp(10), dp(4), dp(10), dp(4)); visibility = GONE }
         tr.addView(grindV, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
@@ -381,7 +369,7 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         }
         hud.addView(clockBadge, LayoutParams(LayoutParams.WRAP_CONTENT, dp(46), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(12) })
         questToast = label("", 14f, FG).apply {
-            background = chip(14f, alpha(BG, 0.86f))
+            background = chip()
             setPadding(dp(14), dp(8), dp(14), dp(8))
             gravity = Gravity.CENTER
             visibility = GONE
@@ -417,7 +405,7 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         })
         clockBanner.addView(label(ctx.getString(R.string.run_clock_keep), 16f, FG, body).apply {
             gravity = Gravity.CENTER
-            background = chip(16f, alpha(BG, 0.7f))
+            background = chip()
             setPadding(dp(14), dp(6), dp(14), dp(6))
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
         hud.addView(clockBanner, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP))
@@ -427,7 +415,7 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         buddy = ImageView(ctx).apply { scaleType = ImageView.ScaleType.FIT_END; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
         captionRow.addView(buddy, LinearLayout.LayoutParams(dp(32), dp(36)).apply { marginEnd = dp(6) })
         captionV = label("", 12f, FG, body).apply {
-            background = chip(16f, alpha(BG, 0.8f)); setPadding(dp(10), dp(6), dp(10), dp(6)); maxWidth = dp(240 - 38)
+            background = chip(); setPadding(dp(10), dp(6), dp(10), dp(6)); maxWidth = dp(240 - 38)
             setLineSpacing(0f, 1.2f); ellipsize = TextUtils.TruncateAt.END; maxLines = 4
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
@@ -445,7 +433,7 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         slideBtn = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            background = chunky(alpha(Color.parseColor("#27475E"), 0.9f), alpha(ELEVATED, 0.9f), alpha(Color.parseColor("#08141D"), 0.9f), 18f)
+            background = darkButton()
             minimumWidth = dp(64)
             setPadding(dp(14), 0, dp(14), dp(4))
             contentDescription = ctx.getString(R.string.run_slide)

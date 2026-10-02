@@ -363,3 +363,20 @@ Merge of branch `native-run` (0.21.0–0.21.1) into native-full 0.20.6. Both fea
 - `solarchik-0.21.2-release-boxkey.apk`: 5148758 B, sha256 `38126ab188355c2136a3eaeb33a04bce97ebefc6a8f3cf02f6db17bb6d5cbc2f`. R8, `CN=Solarchik BOX TEST KEY (not production)`, cert SHA-256 `91102f8f…59a01e`. Not the production key.
 
 **Not verified here**: device play-feel and the real MWA sign from the in-run badge (no emulator by rule; checked with Robolectric renders and flow tests).
+
+## 0.21.3 (versionCode 68): painted run art (2026-10-02)
+
+- The run world is now painted raster art instead of Canvas primitives. All of it is original, authored as layered SVG (sources in `android/tools/run-art`), rasterized and stored as WebP in `assets/art` (356 KB).
+  - Four horizontally tileable parallax layers: far mountains, a village hill with solar-roof cottages (plus a window-light layer that comes on at dusk), bushes and fences, and a grass/flower foreground.
+  - Rooftop kit: left cap, solar module and right cap. The glass layer is gradient-mapped to the equipped skin, so all 20 skins share the same painted style.
+  - Sun-coin frames, clouds and the sun, packed in `props.webp` + `props.json`.
+- `RunArt` pre-scales everything once per screen scale, so a frame only blits bitmaps 1:1. Dusk, night and storm tints are cached ColorMatrix filters, so no frame allocates. The procedural drawing stays as a fallback if the assets fail to load.
+- HUD buttons and chips are painted nine-patches (`run_btn_*`, `run_chip*`). The shop skin tiles show the painted rooftop.
+- Hero, mites and drones keep the existing painted web sprites. Game logic is unchanged: the web parity tests are untouched and pass.
+
+**Tests**: `testDebugUnitTest` ran 204 tests: 199 passed, 0 failed, 5 skipped. `lintDebug` reported no issues.
+
+**APKs** (box only)
+- `solarchik-0.21.3-debug.apk`: 9199739 B, sha256 `01ac7c4e45e2031d953b01b824e796da3d3a9628f2a8bdb99edacd05576ac009`.
+- `solarchik-0.21.3-release-boxkey.apk`: 5557068 B (+408 KB over 0.21.2), sha256 `9b29fa65ba4ad892231c65da6e1b7f6af9fc6acafd3e2e37750de84f8fbe9117`. R8, `CN=Solarchik BOX TEST KEY (not production)`.
+

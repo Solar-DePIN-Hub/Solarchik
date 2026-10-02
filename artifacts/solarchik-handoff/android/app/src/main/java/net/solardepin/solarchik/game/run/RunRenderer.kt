@@ -59,6 +59,8 @@ class RunRenderer(
         textAlign = Paint.Align.CENTER; style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND
     }
     private val rect = RectF()
+    /** Mood filter for rooftops this frame (set in drawWorld). */
+    private var moodRoof: android.graphics.ColorFilter? = null
     private val outlineCache = java.util.IdentityHashMap<Bitmap, Bitmap>()
     private val outlinePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
@@ -430,6 +432,37 @@ class RunRenderer(
         c.drawRect((x - 10).toFloat(), (y - hgt).toFloat(), (x + 10).toFloat(), (y - hgt + 3).toFloat(), solid(0xFF3A2A22.toInt()))
     }
 
+    private val artPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val artRect = RectF()
+
+    /** Blit a pre-scaled art bitmap into world units. */
+    private fun art(c: Canvas, img: RunArt.Img, x: Double, y: Double, w: Double = img.w.toDouble(), h: Double = img.h.toDouble(), a: Double = 1.0, filter: android.graphics.ColorFilter? = null) {
+        artRect.set(x.toFloat(), y.toFloat(), (x + w).toFloat(), (y + h).toFloat())
+        artPaint.alpha = a255(a)
+        artPaint.colorFilter = filter
+        c.drawBitmap(img.bmp, null, artRect, artPaint)
+    }
+
+    private val cloudNight = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix(floatArrayOf(
+        0.42f, 0f, 0f, 0f, 18f, 0f, 0.46f, 0f, 0f, 22f, 0f, 0f, 0.6f, 0f, 46f, 0f, 0f, 0f, 1f, 0f,
+    )))
+
+    private fun cloud(c: Canvas, i: Int, x: Double, y: Double, scale: Double, a: Double, night: Double) {
+        val img = spr.art.clouds[i] ?: return
+        art(c, img, x, y, img.w * scale, img.h * scale, a = max(0.0, a), filter = if (night > 0.4) cloudNight else null)
+    }
+
+    /** A horizontally tiling parallax layer with its top at [top]. */
+    private fun tileLayer(c: Canvas, img: RunArt.Img?, w: Double, top: Double, scroll: Double, filter: android.graphics.ColorFilter?, a: Double = 1.0) {
+        if (img == null) return
+        val lw = img.w.toDouble()
+        var x = -(((scroll % lw) + lw) % lw)
+        while (x < w) {
+            art(c, img, x, top, lw + 0.5, img.h.toDouble(), a, filter)
+            x += lw
+        }
+    }
+
     private fun drawWire(c: Canvas, x: Double, y: Double, w: Double, t: Double, live: Boolean) {
         stroke.color = color(if (live) 0xFF9AD8FF.toInt() else 0xFF5A6A78.toInt())
         stroke.strokeWidth = if (live) 4f else 3f
@@ -447,13 +480,34 @@ class RunRenderer(
                 circle(c, x + w * u, y + sin(u * PI) * 16, 2.2, solid(0xFFFFE34A.toInt(), 0.8))
             }
         }
-        c.drawRect((x - 3).toFloat(), (y - 18).toFloat(), (x + 2).toFloat(), (y + 4).toFloat(), solid(0xFF3A2A22.toInt()))
-        c.drawRect((x + w - 2).toFloat(), (y - 18).toFloat(), (x + w + 3).toFloat(), (y + 4).toFloat(), solid(0xFF3A2A22.toInt()))
+        for (px in doubleArrayOf(x, x + w)) {
+            roundRect(c, px - 4.5, y - 22, 9.0, 34.0, 3.0, solid(0xFF2A1E16.toInt()))
+            roundRect(c, px - 3, y - 20.5, 6.0, 31.0, 2.0, solid(0xFFA8743F.toInt()))
+            c.drawRect((px - 1.8).toFloat(), (y - 20).toFloat(), (px - 0.6).toFloat(), (y + 9).toFloat(), solid(0xFFE0B07A.toInt(), 0.7))
+            roundRect(c, px - 3.5, y - 4, 7.0, 6.0, 2.0, solid(0xFFDCE6EE.toInt()))
+        }
     }
 
     private fun drawPlat(c: Canvas, x: Double, y: Double, w: Double, thick: Double, t: Double, glow: Double, skin: RunSkin, kind: PlatKind, live: Boolean, dim: Double = 0.0) {
         if (kind == PlatKind.WIRE) {
             drawWire(c, x, y, w, t, live)
+            return
+        }
+        val kit = spr.art
+        val mod = kit.roofMid
+        val lc = kit.roofLeft
+        val rc = kit.roofRight
+        if (mod != null && lc != null && rc != null) {
+            // painted rooftop kit: caps inside the walkable span, modules stretched to fit evenly
+            val top = y - RunArt.ROOF_TOP
+            val f = moodRoof
+            val span = max(8.0, w - 36)
+            val n = max(1, Math.round(span / 64.0).toInt())
+            val mw = span / n
+            for (i in 0 until n) art(c, mod, x + 18 + i * mw, top, mw + 0.6, mod.h.toDouble(), filter = f)
+            art(c, lc, x - 6, top, filter = f)
+            art(c, rc, x + w - 18, top, filter = f)
+            if (glow > 0) roundRect(c, x - 2, y - 8, w + 4, 14.0, 6.0, solid(skin.hi, 0.1 * glow))
             return
         }
         val flag = skin == RunSkin.FLAG
@@ -598,6 +652,18 @@ class RunRenderer(
         }
         val r = if (gold) 17.5 else 15.0
         c.restore()
+        val frames = spr.art.coins
+        if (frames[0] != null) {
+            val yy = y + bob
+            softGlow(c, x, yy, r * 2.3, if (gold) 0xFFFFD24A.toInt() else 0xFFFFB347.toInt(), if (gold) 0.6 else 0.4)
+            val fi = if (reducedMotion) 0 else COIN_SHIMMER[((floor(t * 8 + x * 0.05).toInt() % 8) + 8) % 8] // turn and back, never edge-on
+            val img = frames[fi] ?: frames[0]!!
+            val size = 48.0 * r / 15.0 // coin face radius 16 of a 48 box
+            art(c, img, x - size / 2, yy - size / 2, size, size)
+            val gl = (t * 0.7 + hash(x * 0.01)) % 1.0
+            if (gl < 0.12 && !reducedMotion) sparkle(c, x + r * 0.5, yy - r * 0.6, 7 * sin(gl / 0.12 * PI), gl * 6, 0xFFFFFFFF.toInt(), 0.9)
+            return
+        }
         val yy = y + bob
         softGlow(c, x, yy, r * 2.4, if (gold) 0xFFFFD24A.toInt() else 0xFFFFB347.toInt(), 0.5)
         c.save()
@@ -837,6 +903,7 @@ class RunRenderer(
      */
     fun draw(c: Canvas, wPx: Int, hPx: Int, s: RunState, clock: Double, skin: RunSkin = this.skin) {
         val k = hPx / logicalH
+        spr.art.prepare(k.toFloat(), skin)
         c.save()
         c.scale(k.toFloat(), k.toFloat())
         drawWorld(c, wPx / k, logicalH, s, clock, skin)
@@ -914,81 +981,46 @@ class RunRenderer(
             }
             val day = max(0.0, 1 - night * 1.1)
             paintRays(c, sunX, sunY, h * 0.75, clock, day * (1 - dusk * 0.5))
-            alpha = day.toFloat()
-            if (alpha > 0) paintSun(c, sunX, sunY, min(h * 0.075, 58.0), clock)
-            alpha = 1f
-            puffCloud(c, ((-camX * 0.08) % (w + 260)) + 40, h * 0.14, 1.85, 0.9 - night * 0.35)
-            puffCloud(c, ((-camX * 0.12 + 420) % (w + 300)) + 20, h * 0.28, 1.35, 0.75 - night * 0.25)
-            puffCloud(c, ((-camX * 0.07 + 880) % (w + 240)) + 10, h * 0.1, 1.6, 0.85 - night * 0.3)
-
-            // far range in aerial perspective, then the web's three hills
-            paintRange(c, w, h, camX * 0.05, rgb(mix3(d(150, 190, 214), mix3(d(120, 92, 130), d(30, 40, 78), night), dusk)), 0.75)
-            val hill1 = mix3(d(155, 184, 178), d(40, 55, 90), max(dusk, night))
-            c.drawPath(hillPath(w, h, h * 0.64, h * 0.03, camX * 0.1, 0.005, 0.4), fill.also { it.shader = null; it.color = rgb(hill1) })
-            // distant forest silhouette sitting on the first hill (a touch darker than the hill)
-            val treeFar = rgb(mix3(d(132, 166, 156), d(34, 48, 82), max(dusk, night)))
-            path.reset()
-            val spanF = w + 120
-            for (i in 0 until 22) {
-                val tx = ((i * 74 + hash(i + 50.0) * 30 - camX * 0.1) % spanF + spanF) % spanF - 60
-                val ty = h * 0.64 + sin((tx + camX * 0.1) * 0.005 + 0.4) * h * 0.03 + 10
-                val r = 10 + hash(i + 70.0) * 12
-                if (hash(i + 90.0) < 0.35) continue
-                ovalPath(tx, ty - r * 0.55, r * 1.1, r)
-            }
-            c.drawPath(path, fill.also { it.shader = null; it.color = treeFar })
-            c.drawPath(hillPath(w, h, h * 0.64 + 9, h * 0.03, camX * 0.1, 0.005, 0.4), fill.also { it.color = rgb(hill1) })
-            c.drawPath(hillPath(w, h, h * 0.72, h * 0.038, camX * 0.28, 0.008, 1.1), fill.also { it.color = rgb(mix3(d(118, 196, 78), d(32, 58, 70), max(dusk * 0.7, night))) })
-            // storybook trees on the middle hill
-            val leaf = rgb(mix3(d(78, 160, 64), d(26, 48, 58), max(dusk * 0.7, night)))
-            val leafDark = rgb(mix3(d(46, 112, 50), d(16, 32, 44), max(dusk * 0.7, night)))
-            val leafLight = rgb(mix3(d(170, 222, 110), d(50, 70, 80), max(dusk * 0.8, night)))
-            val spanM = w + 300
-            for (i in 0 until 7) {
-                val tx = ((i * 260 + hash(i + 3.0) * 90 - camX * 0.28) % spanM + spanM) % spanM - 120
-                val ty = h * 0.72 + sin((tx + camX * 0.28) * 0.008 + 1.1) * h * 0.038 + 4
-                tree(c, tx, ty, 0.95 + hash(i + 9.0) * 0.5, leaf, leafDark, leafLight, 1.0)
-                if (i % 2 == 0) tree(c, tx + 26, ty + 3, 0.7, leaf, leafDark, leafLight, 1.0)
-            }
-            c.drawPath(hillPath(w, h, h * 0.86, h * 0.028, camX * 0.48, 0.011, 2.2), fill.also { it.color = rgb(mix3(d(72, 168, 64), d(24, 48, 52), max(dusk * 0.6, night))) })
-
-            val housePar = camX * 0.32
-            val polePar = camX * 0.4
-            val px = DoubleArray(4)
-            for (i in 0 until 4) {
-                px[i] = ((i * 360 - polePar) % (w + 280) + w + 280) % (w + 280) - 20
-                pole(c, px[i], h - 8, 26.0)
-            }
-            stroke.color = rgba(42, 30, 22, 0.28)
-            stroke.strokeWidth = 1f
-            for (i in 0 until 3) {
-                val ax = px[i]
-                val bx = px[i + 1]
-                if (bx - ax > 320) continue
-                path.reset()
-                path.moveTo(ax.toFloat(), (h - 8 - 26).toFloat())
-                path.quadTo(((ax + bx) / 2).toFloat(), (h - 8 - 38).toFloat(), bx.toFloat(), (h - 8 - 26).toFloat())
-                c.drawPath(path, stroke)
-            }
-            val houses = arrayOf(spr.cottage, spr.greenhouse)
-            for (i in houses.indices) {
-                val span = w + 520
-                val hx = ((i * 640 - housePar) % span + span) % span - 40
-                val feet = h - 4
-                oval(c, hx, feet - 1, 16.0, 3.5, solid(Color.rgb(18, 28, 14), 0.2))
-                if (!blit(c, houses[i], hx, feet, 42.0)) cottageFallback(c, hx, feet, 0.24, i == 0)
-                if (dusk > 0.4) softGlow(c, hx - 4, feet - 16, 22.0, 0xFFFFD27A.toInt(), min(0.55, (dusk - 0.4) + night * 0.3))
-            }
-            for (i in 0 until 4) {
-                val span = w + 200
-                val gx = ((i * 280 - housePar * 1.15 + 120) % span + span) % span - 20
-                drawGroundPanel(c, gx, h - 2, 0.72)
+            val kit = spr.art
+            if (kit.ready) {
+                val sunImg = kit.sun
+                if (sunImg != null && day > 0.02) {
+                    val sr = min(h * 0.075, 58.0) / 54.0 * 110.0 // art disc radius 54 of a 220 box
+                    art(c, sunImg, sunX - sr, sunY - sr, sr * 2, sr * 2, a = day)
+                }
+                cloud(c, 0, ((-camX * 0.08) % (w + 300)) - 60, h * 0.08, 1.15, 0.95 - night * 0.45, night)
+                cloud(c, 1, ((-camX * 0.12 + 420) % (w + 300)) - 40, h * 0.22, 0.9, 0.85 - night * 0.4, night)
+                cloud(c, 2, ((-camX * 0.07 + 880) % (w + 280)) - 40, h * 0.05, 0.85, 0.9 - night * 0.4, night)
+                val farF = kit.moodFilter(dusk, night, storming, 1.0)
+                val midF = kit.moodFilter(dusk, night, storming, 0.6)
+                val nearF = kit.moodFilter(dusk, night, storming, 0.25)
+                moodRoof = kit.moodFilter(dusk * 0.5, night * 0.55, storming, 0.0)
+                tileLayer(c, kit.far, w, h * 0.3, camX * 0.05, farF)
+                tileLayer(c, kit.mid, w, h * 0.42, camX * 0.16, midF)
+                // village windows light up from dusk
+                val lit = min(1.0, max(0.0, dusk - 0.35) * 1.2 + night * 0.6)
+                if (lit > 0.02) tileLayer(c, kit.midLights, w, h * 0.42, camX * 0.16, null, lit)
+                tileLayer(c, kit.near, w, h - kit.near!!.h + 6, camX * 0.32, nearF)
+            } else {
+                alpha = day.toFloat()
+                if (alpha > 0) paintSun(c, sunX, sunY, min(h * 0.075, 58.0), clock)
+                alpha = 1f
+                puffCloud(c, ((-camX * 0.08) % (w + 260)) + 40, h * 0.14, 1.85, 0.9 - night * 0.35)
+                puffCloud(c, ((-camX * 0.12 + 420) % (w + 300)) + 20, h * 0.28, 1.35, 0.75 - night * 0.25)
+                paintRange(c, w, h, camX * 0.05, rgb(mix3(d(150, 190, 214), mix3(d(120, 92, 130), d(30, 40, 78), night), dusk)), 0.75)
+                c.drawPath(hillPath(w, h, h * 0.72, h * 0.038, camX * 0.28, 0.008, 1.1), fill.also { it.shader = null; it.color = rgb(mix3(d(118, 196, 78), d(32, 58, 70), max(dusk * 0.7, night))) })
+                c.drawPath(hillPath(w, h, h * 0.86, h * 0.028, camX * 0.48, 0.011, 2.2), fill.also { it.color = rgb(mix3(d(72, 168, 64), d(24, 48, 52), max(dusk * 0.6, night))) })
             }
         } else {
-            puffCloud(c, ((-camX * 0.16) % (w + 260)) + 40, h * 0.18, 1.35, 0.7)
-            puffCloud(c, ((-camX * 0.22 + 420) % (w + 300)) + 20, h * 0.32, 1.05, 0.55)
-            puffCloud(c, ((-camX * 0.12 + 880) % (w + 240)) + 10, h * 0.12, 1.2, 0.62)
-            puffCloud(c, ((-camX * 0.19 + 180) % (w + 280)) + 30, h * 0.46, 0.9, 0.4)
+            if (spr.art.ready) {
+                cloud(c, 0, ((-camX * 0.16) % (w + 300)) - 40, h * 0.12, 1.1, 0.75, 0.0)
+                cloud(c, 1, ((-camX * 0.22 + 420) % (w + 300)) - 40, h * 0.28, 0.9, 0.6, 0.0)
+                cloud(c, 2, ((-camX * 0.12 + 880) % (w + 280)) - 40, h * 0.08, 1.0, 0.65, 0.0)
+                cloud(c, 1, ((-camX * 0.19 + 180) % (w + 300)) - 40, h * 0.44, 0.75, 0.45, 0.0)
+            } else {
+                puffCloud(c, ((-camX * 0.16) % (w + 260)) + 40, h * 0.18, 1.35, 0.7)
+                puffCloud(c, ((-camX * 0.22 + 420) % (w + 300)) + 20, h * 0.32, 1.05, 0.55)
+            }
         }
 
         paintMotes(c, w, h, clock)
@@ -1192,7 +1224,11 @@ class RunRenderer(
             }
         }
 
-        if (!s.bonus) paintForeground(c, w, h, camX, max(dusk * 0.5, night))
+        if (!s.bonus) {
+            val fgImg = spr.art.fg
+            if (spr.art.ready && fgImg != null) tileLayer(c, fgImg, w, h - fgImg.h + 18, camX * 1.35, spr.art.moodFilter(dusk * 0.7, night * 0.85, storming, 0.0))
+            else paintForeground(c, w, h, camX, max(dusk * 0.5, night))
+        }
 
         if (s.fever > 0) {
             c.drawRect((-ox).toFloat(), (-oy).toFloat(), (w - ox).toFloat(), (h - oy).toFloat(), solid(Color.rgb(255, 210, 40), 0.07 * s.fever))
@@ -1287,6 +1323,7 @@ class RunRenderer(
     companion object {
         /** World units per screen height (the desktop browser frame in the reference shot). */
         const val LOGICAL_H = 680.0
+        private val COIN_SHIMMER = intArrayOf(0, 1, 2, 1, 0, 7, 6, 7)
     }
 }
 

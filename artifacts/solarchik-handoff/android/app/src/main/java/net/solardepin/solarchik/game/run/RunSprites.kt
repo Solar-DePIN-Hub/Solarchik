@@ -17,6 +17,9 @@ class RunSprites(private val assets: AssetManager) {
     val greenhouse: Bitmap? = load("sprites/farm/greenhouse.png", maxH = 200)
     val buddy: Bitmap? = load("sprites/pet/buddy-talk-3.png", maxH = 160)
 
+    /** Painted world art (layers, rooftops, coins, clouds, sun). */
+    val art = RunArt(assets)
+
     private val robots = HashMap<String, List<Bitmap>>()
 
     /** web SPR.robotRun(id): the bought robot's 4-frame run strip (empty if missing). */
