@@ -171,8 +171,8 @@ export function SecretaryDesk({
   };
 
   const finishPay = async (sig: string, usdAmt: PayUsd, from: string, ref: string) => {
+    await topupCredit(playerId, sig);
     onPaid(sig, from, ref, usdAmt);
-    await topupCredit(playerId, usdAmt);
     setNote(t("pet.sec.pay.ok", { n: money(usdAmt) }));
     play("bonus");
   };

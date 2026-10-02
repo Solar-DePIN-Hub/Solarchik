@@ -124,7 +124,12 @@ test("chat: Featherless fails -> Gemini with 800 tokens; both fail -> fallback l
   const r = await call("/v1/chat", { body: { message: "How much is Pro?", language: "en" } });
   assert.deepEqual(r.json, { ok: true, reply: "Pro costs 0.1 SOL once and pays no profit fee.", provider: "gemini", fallback: false });
   assert.equal(calls[1].body.generationConfig.maxOutputTokens, 800);
-  assert.ok(calls[1].url.includes("/gemini-3.6-flash:generateContent?key=test-g"));
+  assert.ok(calls[1].url.includes("/gemini-flash-lite-latest:generateContent?key=test-g"));
+
+  // lite model fails too -> the main Gemini model
+  const c2 = upstream([{ status: 500, body: {} }, { status: 404, body: {} }, gemini("Pro costs 0.1 SOL once.")]);
+  assert.equal((await call("/v1/chat", { body: { message: "How much is Pro?", language: "en" } })).json.reply, "Pro costs 0.1 SOL once.");
+  assert.ok(c2[2].url.includes("/gemini-3.6-flash:generateContent"));
 
   upstream(["throw", "throw"]);
   const uk = await call("/v1/chat", { body: { message: "Привіт", language: "uk" } });
@@ -138,8 +143,21 @@ test("chat: degenerate Featherless output falls through to Gemini", async () => 
   const r = await call("/v1/chat", { body: { message: "Скільки коштує Pro?", language: "uk" } });
   assert.equal(r.json.provider, "gemini");
   assert.equal(r.json.reply, "Pro коштує 0.1 SOL один раз.");
-  upstream([featherless("ааааааааааа"), gemini("!!!!!!!!")]);
+  upstream([featherless("ааааааааааа"), gemini("!!!!!!!!"), gemini("?!?!?!?!")]);
   assert.equal((await call("/v1/chat", { body: { message: "Привіт", language: "uk" } })).json.provider, "fallback");
+});
+
+test("chat: a Ukrainian reply with stray Latin words goes to the next provider", async () => {
+  // live 2026-10-02 Featherless reply, cut
+  upstream([featherless("Привіт! ПроАгент коштує 0,1 SOL та після покупки не вимагає виплати профітної відст kupi."), gemini("Pro агент коштує 0.1 SOL один раз і не платить комісію з прибутку.")]);
+  const r = await call("/v1/chat", { body: { message: "Привіт! Скільки коштує Pro агент?", language: "uk" } });
+  assert.equal(r.json.provider, "gemini");
+  // game words in Latin are fine
+  upstream([featherless("Pro коштує 0.1 SOL. Тренування йде на devnet, гаманець Phantom.")]);
+  assert.equal((await call("/v1/chat", { body: { message: "Скільки коштує Pro?", language: "uk" } })).json.provider, "featherless");
+  // English replies are never checked for Latin words
+  upstream([featherless("Pro costs 0.1 SOL once.")]);
+  assert.equal((await call("/v1/chat", { body: { message: "How much is Pro?", language: "en" } })).json.provider, "featherless");
 });
 
 test("chat: invalid message is 400 invalid_message", async () => {
@@ -157,18 +175,20 @@ test("transcribe: same shapes as the deployed worker", async () => {
   const calls = upstream([gemini("hello sol")]);
   const ok = await call("/v1/transcribe", { body: { audio: "data:audio/webm;base64," + "A".repeat(100), mime: "audio/webm;codecs=opus" } });
   assert.deepEqual(ok.json, { ok: true, text: "hello sol" });
-  assert.ok(calls[0].url.includes("/gemini-3.5-transcribe:generateContent"));
+  assert.ok(calls[0].url.includes("/gemini-flash-lite-latest:generateContent"));
   assert.equal(calls[0].body.contents[0].parts[1].inlineData.mimeType, "audio/webm");
 
-  // dedicated model fails (404 / empty) -> the chat model transcribes
-  const fb = upstream([{ status: 404, body: { error: { code: 404 } } }, gemini("fallback words")]);
+  // flash-lite fails (404), the chat model returns 200 with no text (seen live from
+  // gemini-3.5-transcribe) -> the old dedicated model is the last try
+  const fb = upstream([{ status: 404, body: { error: { code: 404 } } }, gemini(""), gemini("fallback words")]);
   const ok2 = await call("/v1/transcribe", { body: { audio: "A".repeat(100), mime: "audio/wav" } });
   assert.deepEqual(ok2.json, { ok: true, text: "fallback words" });
-  assert.equal(fb.length, 2);
-  assert.ok(fb[0].url.includes("/gemini-3.5-transcribe:generateContent"));
+  assert.equal(fb.length, 3);
+  assert.ok(fb[0].url.includes("/gemini-flash-lite-latest:generateContent"));
   assert.ok(fb[1].url.includes("/gemini-3.6-flash:generateContent"));
+  assert.ok(fb[2].url.includes("/gemini-3.5-transcribe:generateContent"));
 
-  upstream(["throw", "throw"]);
+  upstream(["throw", "throw", "throw"]);
   const down = await call("/v1/transcribe", { body: { audio: "A".repeat(100) } });
   assert.equal(down.status, 503);
   assert.deepEqual(down.json, { ok: false, error: "transcription_unavailable" });

@@ -10,6 +10,8 @@ export type CoachRequest = {
   guidance: string;
   brief: AgentBrief;
   strategy: StrategyBundle;
+  /** App language; the player's own message decides first (see coachLang). */
+  locale?: string;
 };
 
 export type CoachBet = PredLane | null;
@@ -42,15 +44,42 @@ function asBet(value: unknown): CoachBet {
   return value === "crypto" || value === "events" || value === "weather" ? value : null;
 }
 
+/** Reply in the language the player wrote in; app locale only when the text gives no hint. */
+export function coachLang(text: string, locale?: string): "uk" | "en" {
+  if (/[\u0400-\u04FF]/.test(text)) return "uk";
+  if (/[A-Za-z]{2,}/.test(text)) return "en";
+  return String(locale || "").toLowerCase().startsWith("en") ? "en" : "uk";
+}
+
+const COACH_TEXT = {
+  uk: {
+    empty: "Напиши агенту, що змінити.",
+    noReply: "Агент не відповів. Спробуй ще раз.",
+    badJson: "Агент не зібрав відповідь. Скажи коротше.",
+    ok: "Прийняв.",
+    laneOff: "Смуга вимкнена. Ставки немає.",
+    rule: "reply — 1-2 речення українською: що зрозумів і що змінив. behavior теж українською. Не вигадуй біржу, ринок і ціну.",
+  },
+  en: {
+    empty: "Tell the agent what to change.",
+    noReply: "The agent did not answer. Try again.",
+    badJson: "The agent could not build an answer. Say it shorter.",
+    ok: "Got it.",
+    laneOff: "That lane is off. No bet.",
+    rule: "reply — 1-2 sentences in English: what you understood and what you changed. behavior in English too. Do not invent an exchange, market or price.",
+  },
+} as const;
+
 export async function coachStrategy(input: CoachRequest): Promise<CoachResult> {
   const guidance = input.guidance.replace(/\s+/g, " ").trim().slice(0, 400);
-  if (!guidance) return { ok: false, error: "Напиши агенту, що змінити." };
+  const tx = COACH_TEXT[coachLang(guidance, input.locale)];
+  if (!guidance) return { ok: false, error: tx.empty };
 
   const lanes = lanesForStrategy(input.strategy.prediction, input.classId);
   const predOnly = input.classId !== 2;
   const system = [
     "Ти чат торгового агента Соларчика. Відповідай лише JSON без markdown.",
-    "reply — 1-2 речення українською: що зрозумів і що змінив. Не вигадуй біржу, ринок і ціну.",
+    tx.rule,
     "risk: calm|balanced|risky або null якщо людина не просила ризик.",
     "behavior: одне речення до 180 символів як торгувати, або null.",
     "crypto, events, weather, weex: true|false|null. null = не чіпати. Міняй лише те, що людина назвала.",
@@ -103,12 +132,12 @@ export async function coachStrategy(input: CoachRequest): Promise<CoachResult> {
     raw = alt?.text ?? "";
   }
   const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) return { ok: false, error: "Агент не відповів. Спробуй ще раз." };
+  if (!match) return { ok: false, error: tx.noReply };
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(match[0]) as Record<string, unknown>;
   } catch {
-    return { ok: false, error: "Агент не зібрав відповідь. Скажи коротше." };
+    return { ok: false, error: tx.badJson };
   }
 
   const risk = asRisk(parsed.risk, input.brief.risk);
@@ -141,9 +170,9 @@ export async function coachStrategy(input: CoachRequest): Promise<CoachResult> {
     dex: input.strategy.dex,
   });
   let bet = predOnly ? asBet(parsed.bet) : null;
-  let reply = asText(parsed.reply, "Прийняв.", 220);
+  let reply = asText(parsed.reply, tx.ok, 220);
   if (bet && !laneEnabledOn(strategy.prediction, bet, input.classId)) {
-    reply = `${reply} Смуга вимкнена. Ставки немає.`.slice(0, 220);
+    reply = `${reply} ${tx.laneOff}`.slice(0, 220);
     bet = null;
   }
   const brief: AgentBrief = {

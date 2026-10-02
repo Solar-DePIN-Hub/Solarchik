@@ -4450,7 +4450,14 @@ export const useAgents = create<AgentsState>((set, get) => ({
     set({ aiBusy: true });
     try {
       const res = await coachAgent({
-        data: { name: nft.name, classId: nft.classId, guidance: text, brief, strategy: nft.strategy },
+        data: {
+          name: nft.name,
+          classId: nft.classId,
+          guidance: text,
+          brief,
+          strategy: nft.strategy,
+          locale: typeof document !== "undefined" ? document.documentElement.lang : undefined,
+        },
       });
       if (!res.ok) {
         set({ aiBusy: false, notice: res.error });

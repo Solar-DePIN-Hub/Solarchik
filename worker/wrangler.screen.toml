@@ -1,0 +1,12 @@
+# Call secretary Worker (solarchik-screen.davidbell1603.workers.dev). Source recovered from the Grok export
+# (artifacts/solar-depin-worldsfair/app/screen/cf/worker.js), which matches deployed version 744a4bf8
+# (compat date 2026-09-19, KV BALANCES, secret OPENAI_API_KEY). Optional var/secret SOLANA_RPC (mainnet RPC URL).
+# Secrets stay in Cloudflare; never put them here. Rollback: wrangler rollback 744a4bf8-8a96-4332-8c1a-70aa47b9dfa1 --name solarchik-screen
+name = "solarchik-screen"
+main = "solarchik-screen.js"
+compatibility_date = "2026-09-19"
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "BALANCES"
+id = "39853e1695f04f52999da250e215e4e8"

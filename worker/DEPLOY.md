@@ -41,3 +41,15 @@ Pre-round-4 version: `65501e10-4945-4c7b-8cae-562076b64a14`.
 - Timeouts: Featherless 7 s, then Gemini 6 s, so the total fits the Android client's 15 s read timeout.
 
 Do not put keys in the APK.
+
+## 2026-10-02 deploys
+
+**Sol friend** (`wrangler.friend.toml`). Live version `1032ba42-cecc-4a77-9b03-6ba348d5aedb`; roll back with `77b7a415-1382-4780-838f-44bc8cf650d5`.
+- `/v1/transcribe`: `wrangler tail` showed `gemini-3.5-transcribe` returning 200 with empty text, which is why every voice note failed. The new order is `gemini-flash-lite-latest` (~0.7–0.9 s), then the chat model, then the old model, inside an 8.5 s budget so the Vercel `/api/transcribe` proxy (10 s) never times out.
+- `/v1/chat`: a Ukrainian/Russian reply containing stray lower-case Latin words (live: "відст kupi") counts as broken and goes to Gemini. Gemini tries `gemini-flash-lite-latest` (4 s) and then the main model, within a 14 s total budget.
+
+**Call secretary** (`wrangler.screen.toml`, source `solarchik-screen.js`, recovered from the Grok export; it matches deployed 744a4bf8). Live version `58787520-b5de-43ff-ae1c-352d900b8a25`; roll back with `744a4bf8-8a96-4332-8c1a-70aa47b9dfa1`.
+- `/topup` no longer adds a free $5. It takes `{userId, sig}` or `{userId, ref}`, fetches the mainnet transaction (RPCs `SOLANA_RPC`, then api.mainnet-beta, then publicnode, because mainnet-beta refuses Workers egress) and credits the USDC that reached PAY_WALLET ($1–$100). The memo must equal `userId.slice(0, 32)`. Each signature is credited once (KV `paid:<sig>`), and the tx must be ≤30 days old. Errors: 402 PAYMENT_REQUIRED / PAYMENT_NOT_FOUND / PAYMENT_INVALID{detail}, 409 ALREADY_USED, 503 RPC_UNAVAILABLE.
+- Tests: `node --test scripts/screen-worker.test.mjs`.
+
+**Desk** (`wrangler.desk.toml`): added the `/api/titan` quote route to the source. It is NOT deployed, because deployed bc237b32 may differ from this file (see the note in the file).

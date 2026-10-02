@@ -30,9 +30,13 @@ const ORIGINS = new Set([
 const MAX_TOKENS = 600;
 const RETRY_TOKENS = 800;
 const REPLY_CHARS = 900;
-const FEATHERLESS_TIMEOUT_MS = 7000;
+const FEATHERLESS_TIMEOUT_MS = 6000;
 const GEMINI_TIMEOUT_MS = 6000;
-const TRANSCRIBE_TIMEOUT_MS = 6000;
+const GEMINI_FAST_TIMEOUT_MS = 4000;
+const CHAT_BUDGET_MS = 14000;
+const GEMINI_FAST_MODEL = "gemini-flash-lite-latest";
+const TRANSCRIBE_TIMEOUT_MS = 4500;
+const TRANSCRIBE_BUDGET_MS = 8500;
 
 const LANG_NAMES = { en: "English", uk: "Ukrainian", es: "Spanish", pt: "Portuguese", de: "German", ja: "Japanese", ru: "Russian" };
 
@@ -92,12 +96,24 @@ function finishReply(raw, cutByModel) {
 }
 
 /** Degenerate model output ("Пр!!!!!!…", one char repeated, almost no letters): treat as no reply. */
-function looksBroken(text) {
-  const t = String(text || "").replace(/\s+/g, "");
+/** Latin words a Cyrillic reply may contain (game and chain names). Anything else is mixed-script noise. */
+const LATIN_OK = new Set(["sol", "pro", "solarchik", "solana", "clock", "in", "nft", "nfts", "devnet", "mainnet", "usdc", "btc", "seeker", "phantom", "solflare", "polymarket", "jupiter", "backpack", "ok"]);
+
+function looksBroken(text, lang) {
+  const raw = String(text || "");
+  const t = raw.replace(/\s+/g, "");
   if (t.length < 2) return true;
+  if (/\uFFFD/.test(raw)) return true;
   if (/(.)\1{5,}/u.test(t)) return true;
   const letters = (t.match(/\p{L}/gu) || []).length;
-  return letters / t.length < 0.5;
+  if (letters / t.length < 0.5) return true;
+  // Live 2 Oct: Qwen answered Ukrainian with stray Latin fragments ("відст kupi"). Lower-case Latin
+  // words outside LATIN_OK in a uk/ru reply mean the model slipped; let the next provider answer.
+  if (lang === "uk" || lang === "ru") {
+    const latin = raw.match(/\b[a-z][a-zA-Z]{2,}\b/g) || [];
+    if (latin.some((w) => !LATIN_OK.has(w.toLowerCase()))) return true;
+  }
+  return false;
 }
 
 /** Best guess of the language of the player's own message. Falls back to the app language. */
@@ -136,9 +152,9 @@ function systemPrompt(input) {
 }
 
 /** One line per provider call: status, time, finish reason, size. No message text, no keys. */
-function logShape(provider, status, t0, finish, reply, tokens) {
+function logShape(provider, status, t0, finish, reply, tokens, lang) {
   console.log(
-    JSON.stringify({ event: "llm", provider, status, ms: Date.now() - t0, finish: finish ?? null, chars: reply.length, broken: reply ? looksBroken(reply) : null, tokens: tokens ?? null }),
+    JSON.stringify({ event: "llm", provider, status, ms: Date.now() - t0, finish: finish ?? null, chars: reply.length, broken: reply ? looksBroken(reply, lang) : null, tokens: tokens ?? null }),
   );
 }
 
@@ -177,6 +193,8 @@ async function chat(request, env, headers) {
   });
   turns.push({ role: "user", content: message });
   const system = systemPrompt(body);
+  const lang = detectLanguage(message, clip(body?.language, 8).toLowerCase().slice(0, 2) || "en");
+  const started = Date.now();
 
   let t0 = Date.now();
   try {
@@ -194,31 +212,36 @@ async function chat(request, env, headers) {
     const data = await res.json().catch(() => ({}));
     const choice = data?.choices?.[0];
     const reply = finishReply(choice?.message?.content, choice?.finish_reason === "length");
-    logShape("featherless", res.status, t0, choice?.finish_reason, reply, data?.usage?.completion_tokens);
-    if (res.ok && reply && !looksBroken(reply)) return json({ ok: true, reply, provider: "featherless", fallback: false }, 200, headers);
+    logShape("featherless", res.status, t0, choice?.finish_reason, reply, data?.usage?.completion_tokens, lang);
+    if (res.ok && reply && !looksBroken(reply, lang)) return json({ ok: true, reply, provider: "featherless", fallback: false }, 200, headers);
   } catch (err) {
-    logShape("featherless", 0, t0, err?.name || "error", "", null);
+    logShape("featherless", 0, t0, err?.name || "error", "", null, lang);
   }
 
-  t0 = Date.now();
-  try {
-    const model = env.GEMINI_MODEL || "gemini-3.6-flash";
-    const res = await fetch(`${GEMINI_URL}/${model}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: turns.map((t) => ({ role: t.role === "assistant" ? "model" : "user", parts: [{ text: t.content }] })),
-        generationConfig: { maxOutputTokens: RETRY_TOKENS },
-      }),
-      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
-    });
-    const data = await res.json().catch(() => ({}));
-    const reply = finishReply(geminiText(data), data?.candidates?.[0]?.finishReason === "MAX_TOKENS");
-    logShape("gemini", res.status, t0, data?.candidates?.[0]?.finishReason, reply, data?.usageMetadata?.candidatesTokenCount);
-    if (res.ok && reply && !looksBroken(reply)) return json({ ok: true, reply, provider: "gemini", fallback: false }, 200, headers);
-  } catch (err) {
-    logShape("gemini", 0, t0, err?.name || "error", "", null);
+  // Gemini: the fast lite model first (~1 s live), then the main model with whatever time is left.
+  const geminiModels = [...new Set([GEMINI_FAST_MODEL, env.GEMINI_MODEL || "gemini-3.6-flash"])];
+  for (const [i, model] of geminiModels.entries()) {
+    const left = CHAT_BUDGET_MS - (Date.now() - started);
+    if (left < 1000) break;
+    t0 = Date.now();
+    try {
+      const res = await fetch(`${GEMINI_URL}/${model}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: turns.map((t) => ({ role: t.role === "assistant" ? "model" : "user", parts: [{ text: t.content }] })),
+          generationConfig: { maxOutputTokens: RETRY_TOKENS },
+        }),
+        signal: AbortSignal.timeout(Math.min(i === 0 ? GEMINI_FAST_TIMEOUT_MS : GEMINI_TIMEOUT_MS, left)),
+      });
+      const data = await res.json().catch(() => ({}));
+      const reply = finishReply(geminiText(data), data?.candidates?.[0]?.finishReason === "MAX_TOKENS");
+      logShape("gemini:" + model, res.status, t0, data?.candidates?.[0]?.finishReason, reply, data?.usageMetadata?.candidatesTokenCount, lang);
+      if (res.ok && reply && !looksBroken(reply, lang)) return json({ ok: true, reply, provider: "gemini", fallback: false }, 200, headers);
+    } catch (err) {
+      logShape("gemini:" + model, 0, t0, err?.name || "error", "", null, lang);
+    }
   }
 
   return json({ ok: true, reply: fallbackReply(body?.language), provider: "fallback", fallback: true }, 200, headers);
@@ -226,11 +249,13 @@ async function chat(request, env, headers) {
 
 /**
  * Transcription models, tried in order. Live check 2026-10-01/02: the deployed worker answered every
- * valid WAV with 503 transcription_unavailable while chat on Gemini worked, so the dedicated
- * transcribe model is followed by the chat model (any Gemini flash model accepts inline audio).
+ * valid WAV with 503 because gemini-3.5-transcribe returns 200 with no text (wrangler tail, 2 Oct).
+ * gemini-flash-lite-latest answered in ~0.9-1.1 s while gemini-3.6-flash took 1.6-3.9 s or timed out,
+ * so flash-lite goes first, then the chat model; the old model stays last. Every try gets a share of
+ * TRANSCRIBE_BUDGET_MS so the whole call ends before the Vercel proxy's 10 s timeout.
  */
 function transcribeModels(env) {
-  const list = [env.GEMINI_TRANSCRIBE_MODEL, "gemini-3.5-transcribe", env.GEMINI_MODEL || "gemini-3.6-flash"];
+  const list = [env.GEMINI_TRANSCRIBE_MODEL, "gemini-flash-lite-latest", env.GEMINI_MODEL || "gemini-3.6-flash", "gemini-3.5-transcribe"];
   return [...new Set(list.filter((m) => typeof m === "string" && m.trim()).map((m) => m.trim()))];
 }
 
@@ -244,8 +269,11 @@ async function transcribe(request, env, headers) {
   if (!/^audio\/(webm|mp4|m4a|ogg|opus|wav|mpeg|mp3|aac)$/.test(mime) || audio.length < 64 || audio.length > 2e6) {
     return json({ ok: false, error: "invalid_audio" }, 400, headers);
   }
+  const started = Date.now();
   for (const model of transcribeModels(env)) {
     const t0 = Date.now();
+    const left = TRANSCRIBE_BUDGET_MS - (t0 - started);
+    if (left < 800) break;
     try {
       const res = await fetch(`${GEMINI_URL}/${model}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`, {
         method: "POST",
@@ -255,7 +283,7 @@ async function transcribe(request, env, headers) {
             { parts: [{ text: "Transcribe the speech exactly and return only spoken words." }, { inlineData: { mimeType: mime, data: audio } }] },
           ],
         }),
-        signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
+        signal: AbortSignal.timeout(Math.min(TRANSCRIBE_TIMEOUT_MS, left)),
       });
       const text = geminiText(await res.json().catch(() => ({})));
       console.log(JSON.stringify({ event: "transcribe", model, status: res.status, ms: Date.now() - t0, chars: text ? text.length : 0 }));

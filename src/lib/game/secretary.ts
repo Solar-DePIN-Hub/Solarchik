@@ -118,24 +118,21 @@ export async function getBalance(userId: string): Promise<SecretaryBalance> {
   };
 }
 
-export async function topupCredit(userId: string, usd = 5): Promise<SecretaryBalance> {
-  const times = Math.max(1, Math.ceil(usd / 5));
-  let last: SecretaryBalance = { userId, usd: 0, sessionUsd: SESSION_USD };
-  for (let i = 0; i < times; i++) {
-    const res = await fetch(`${BASE}/topup`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, usd: 5, sig: "onchain" }),
-    });
-    const j = await parseJson(res);
-    if (!res.ok) throw new Error("topup");
-    last = {
-      userId,
-      usd: Number(j.usd) || 0,
-      sessionUsd: SESSION_USD,
-    };
-  }
-  return last;
+/**
+ * Credits a confirmed USDC payment. The worker re-checks the transfer on-chain (USDC to PAY_WALLET,
+ * memo = userId.slice(0, 32), each signature once) and credits the real amount, so `usd` is only a hint.
+ */
+export async function topupCredit(userId: string, sig: string): Promise<SecretaryBalance> {
+  const res = await fetch(`${BASE}/topup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId, sig }),
+  });
+  const j = await parseJson(res);
+  // 409 = this signature was already credited (e.g. a retry after a lost response): read the balance.
+  if (res.status === 409) return getBalance(userId);
+  if (!res.ok) throw new Error(`topup ${str(j.error) || res.status}${j.detail ? ` ${str(j.detail)}` : ""}`);
+  return { userId, usd: Number(j.usd) || 0, sessionUsd: SESSION_USD };
 }
 
 export type ScreenOk = {
