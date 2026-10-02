@@ -34,16 +34,16 @@ object RunBanter {
         BanterKind.BOSS to listOf("Великий попереду. Стрибни і натисни зверху."),
     )
     private val CH_EN = mapOf(
-        ChapterId.VILLAGE to "Village roofs now. Watch the chimneys.",
-        ChapterId.STORM to "Storm line. Slide under the drones.",
-        ChapterId.NIGHT to "Night farm. Follow the lights.",
-        ChapterId.SERPENT to "The long roof. Stay with it.",
+        ChapterId.VILLAGE to "Solar district. Glass canopies crack, keep moving.",
+        ChapterId.STORM to "Storm line. Watch the cables and the wind.",
+        ChapterId.NIGHT to "Night city. Follow the window lights.",
+        ChapterId.SERPENT to "High roofs now. Every gap counts.",
     )
     private val CH_UK = mapOf(
-        ChapterId.VILLAGE to "Зараз сільські дахи. Стеж за коминами.",
-        ChapterId.STORM to "Штормова лінія. Слайд під дронів.",
-        ChapterId.NIGHT to "Нічна ферма. Тримайся світла.",
-        ChapterId.SERPENT to "Довгий дах. Не збавляй ходу.",
+        ChapterId.VILLAGE to "Сонячний квартал. Скляні навіси тріскають, не зупиняйся.",
+        ChapterId.STORM to "Лінія шторму. Стеж за кабелями і вітром.",
+        ChapterId.NIGHT to "Нічне місто. Тримайся вогнів у вікнах.",
+        ChapterId.SERPENT to "Високі дахи. Кожен проліт важливий.",
     )
 
     private var lastLine = ""

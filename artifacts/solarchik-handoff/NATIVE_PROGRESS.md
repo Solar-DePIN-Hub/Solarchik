@@ -380,3 +380,67 @@ Merge of branch `native-run` (0.21.0–0.21.1) into native-full 0.20.6. Both fea
 - `solarchik-0.21.3-debug.apk`: 9199739 B, sha256 `01ac7c4e45e2031d953b01b824e796da3d3a9628f2a8bdb99edacd05576ac009`.
 - `solarchik-0.21.3-release-boxkey.apk`: 5557068 B (+408 KB over 0.21.2), sha256 `9b29fa65ba4ad892231c65da6e1b7f6af9fc6acafd3e2e37750de84f8fbe9117`. R8, `CN=Solarchik BOX TEST KEY (not production)`.
 
+
+## 0.21.4 (versionCode 69): solarpunk city + city rules (2026-10-02)
+
+The owner's feedback on 0.21.3 was that it felt childish, too easy and the art was so-so. This round has three parts: hero frames, an art direction change (solarpunk city, Alto's Odyssey mood) and harder "city rules". All of it is native-only. The web builder gets the same rules as a spec/diff (`web-city-rules.diff`, kept on the box next to the APKs).
+
+**Hero frames** (`RunSprites.kt`, `tools/run-art/hero.py`)
+- The project's own painted web frames (`hero-run-1..8`, `hero-jump-1..4`) are upscaled 3x: premultiplied Lanczos, a smoothed alpha edge and an unsharp mask. They ship as WebP in `assets/art/hero/`, plus a slide pose (jump-1 leaned back 55°).
+- Each screen pre-scales them once to the exact hero pixel height and bakes in the ink outline and a rim-light mask.
+- The 8-frame run cycle is timed to speed. Rise, apex and fall are separate jump frames, the take-off/landing pose holds for 0.09 s, and hit feedback is a white flash then a red tint.
+- Shop robots use their `<id>-run-1..4` strips (WebP now, 1.07 MB → 326 KB) and a leaned slide pose.
+- Sim hitboxes are unchanged.
+- Foe sprites: `foe-mite` / `foe-drone` were kept. `mite` is near-identical, and the `drone` variant's magenta rotor glow clashes with the new palette.
+
+**Art direction** (`RunArt.kt`, `RunRenderer.kt`, `tools/run-art/city*.py`, `pack_city.py`)
+- Sky: a gradient running golden hour → dusk → night → dawn over a 2400 m cycle, with stars, moon, sun glow and stratus bands.
+- Three tinted city skyline layers: ALPHA_8 masks with lit-window and neon masks, plus solar rooftops, cranes, wind turbines and water tanks. Between the layers there are fog ramps, volumetric light shafts behind the far layer, and street car lights far below in the gaps.
+- Roofs are now city buildings:
+  - three facade materials (concrete with planters, glass curtain wall, terracotta with vines) with lit windows at night;
+  - a parapet;
+  - solar panels in the skin's glass colour;
+  - AC units, antennas, vents and water tanks, placed by hash.
+- Grind wires are cables between poles. Crumble roofs are glass solar canopies on a steel truss.
+- The hero has a rim light. There is subtle film grain and a vignette, and the palette is muted. The cottages, bushes, flowers and fences are gone.
+- Chapter names: Golden hour, Solar district, Storm line, Night city, Skyline (EN/UK). The chapter ids and meters are unchanged.
+- The art is original and authored in code (SVG rendered in Chrome, and PIL), because no image-generation tool was available. The generators are in `tools/run-art`.
+
+**City rules** (`RunSim.kt`; `RunState.classic = false` by default. `classic = true` keeps the exact web rules for the parity test)
+
+| Rule | Value |
+|---|---|
+| Speed | 215 + 0.021 × distance, cap 410 (+16 headroom); classic 188 + 0.018 × distance, cap 355 |
+| Difficulty ramp | d = clamp((x − 1200) / 7800) |
+| Gaps | 104 + 70d + rand(0, 30 + 20d) world units (max ≈ 224) |
+| Roof width | 230 − 80d ± 20, min 140 |
+| Height changes | ±1 band, p 0.4, after x 2400 |
+| Pieces (after x 1700) | mite 19% (1.25× speed), pair 13%, drone 13% (low hover 40 = slide, or high 84 = stay down), drone wave 14% (after 3200: low row of 3, low then high, or a bobbing out-of-phase pair), cracking canopy 16% (after 2600, 140–190 wide), cable 11% (after 2200, live with p 0.6), calm otherwise |
+| Cracking canopy | starts cracking on first contact and gives way after 0.38 s; it is restored when you respawn from a fall; never a checkpoint |
+| Live cable | cycle 2.2 s per cable (phase from x): safe 0–1.2 s, sparks 1.2–1.6 s (warning), live 1.6–2.2 s. Standing on it while live costs a heart |
+| Wind gust | after x 4000, every 7–12 s: a 1.0 s warning (streaks, GUST pop, sound), then 1.4 s of headwind: run speed × 0.75, gravity × 1.25 (shorter jumps). Not during the mini-boss |
+| Mini-boss | every 1000 m (x 10000, 20000, …) on a 4200-long arena roof. The maintenance drone (SVC-7) flies in, tracks 330 ahead and fires 5 telegraphed beams. Each beam has a 0.7 s telegraph (lane lights up, jump/slide cue), then a 0.26 s beam, then 0.5 s rest; after the second beam there is a 35% chance of a quick 0.18 s double. Low lane (−26..−6 over the roof) = jump; high lane (−70..−34) = slide. A beam hit costs a heart. Then it overheats and sinks to stomp height for 1.9 s: a stomp gives +250 and 5 gold suns, "DRONE DOWN". Then it leaves |
+| Free help | shields only on calm roofs past 600 m at 3% (6% on GOLD days), no shield on the sky-flight exit (classic: 5% past 420 m, plus the exit shield). The Serpent chain is classic-only |
+
+**Tests changed on purpose**
+- The golden web-parity test, `speedRamps` and `generatedRoofsAreAlwaysJumpable` now run with `classic = true`. Parity with the web `sim.ts` still holds for classic.
+- New tests:
+  - `citySpeedRampsHarderAndCapsHigher`
+  - `cityRoofsWidenGapsButStayJumpable`: gap ≤ 230, late average gap > 160, an arena every 1000 m, crumble roofs and live cables exist, shields only past 600 m
+  - `crackedRoofGivesWayAfterLanding`
+  - `liveCableHurtsOnlyWhileSparking`
+  - `gustWarnsThenSlowsTheRun`
+  - `maintenanceDroneTelegraphsBeamsAndCanBeDowned`
+- The look-ahead bot learned wait-then-jump/slide and a two-step fallback. It still reaches 1200 m+ on every day mod (it reaches 2300 m).
+- `RunShotsTest` now has dusk district, boss telegraph/beam/overheat, night city, storm, cracking canopy, live cable and gust scenes in place of village/serpent.
+
+**Difficulty probe** (bot-based, so only an estimate)
+- With frame-perfect reads, the bot reaches 1200 m on 16/16 seeds.
+- With ±5 or ±8 frames of reaction jitter, 13/16 seeds reach 1200 m. Classic rules were 16/16 even at ±8.
+- A human also misreads, so expect noticeably more failures than the bot. The target was about 2–3 tries for a decent player, and this needs checking on a phone. Speed, gaps and boss timings are all constants at the top of `RunSim`.
+
+**Checks**: 217 unit tests (5 skipped, 0 failed), lint 1 warning (IconMissingDensityFolder, as before).
+
+**APKs** (box only)
+- `solarchik-0.21.4-debug.apk`: 8405662 B, sha256 `290a454776c312d83103bd40360cf8a54ebc731afba85b6fda49041d9008df75`.
+- `solarchik-0.21.4-release-boxkey.apk`: 4714702 B (−842 KB vs 0.21.3: the hero/robot PNGs became WebP and the old village layers are gone), sha256 `069fa66d0c98d46d5844b2ba855223922e5241720f8b6ed812520a56e2a6896d`. R8, `CN=Solarchik BOX TEST KEY (not production)`.

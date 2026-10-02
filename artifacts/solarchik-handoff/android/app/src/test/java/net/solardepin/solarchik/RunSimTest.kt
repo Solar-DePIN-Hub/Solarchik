@@ -48,7 +48,8 @@ class RunSimTest {
             val mod = DayMod.of(c["mod"]!!.jsonPrimitive.content)
             val bonus = c["bonus"]!!.jsonPrimitive.boolean
             val tag = "seed=$seed mod=$mod bonus=$bonus"
-            val s = RunSim.create(seed, mod, offerBonus = bonus)
+            // the web sim still runs the classic rules: the native city rules are opt-out for parity
+            val s = RunSim.create(seed, mod, offerBonus = bonus, classic = true)
             val plats = c["plats"]!!.jsonArray
             assertEquals("$tag plats", plats.size, s.plats.size)
             plats.forEachIndexed { i, pj ->
@@ -192,7 +193,7 @@ class RunSimTest {
     }
 
     @Test fun speedRampsWithDistanceAndCaps() {
-        val s = RunSim.create(1)
+        val s = RunSim.create(1, classic = true)
         assertEquals(RunSim.SPEED0, RunSim.speedAt(s), 0.0)
         s.distance = 5000.0
         assertEquals(RunSim.SPEED0 + 90, RunSim.speedAt(s), 1e-9)
@@ -200,6 +201,18 @@ class RunSimTest {
         assertEquals(RunSim.SPEED_CAP + 16, RunSim.speedAt(s), 1e-9) // cap incl. heat/grind headroom
         s.fever = 1.0; s.grind = true; s.distance = 0.0
         assertEquals(RunSim.SPEED0 + 28, RunSim.speedAt(s), 1e-9)
+    }
+
+    @Test fun citySpeedRampsHarderAndCapsHigher() {
+        val s = RunSim.create(1)
+        assertEquals(RunSim.CITY_SPEED0, RunSim.speedAt(s), 0.0)
+        s.distance = 5000.0
+        assertEquals(RunSim.CITY_SPEED0 + 105, RunSim.speedAt(s), 1e-9)
+        s.distance = 1e6
+        assertEquals(RunSim.CITY_CAP + 16, RunSim.speedAt(s), 1e-9)
+        // the cap is reached before the first boss (~930 m)
+        s.distance = 9400.0
+        assertTrue(RunSim.speedAt(s) >= RunSim.CITY_CAP)
     }
 
     @Test fun fallingCostsAHeartAndRespawnsAtTheCheckpoint() {
@@ -303,7 +316,7 @@ class RunSimTest {
         assertEquals(1.0, RunSim.moodAt(19_000.0), 1e-9)
         assertEquals(2.0, RunSim.moodAt(23_000.0), 0.0)
         assertEquals(0.0, RunSim.moodAt(28_000.0), 1e-9)
-        assertEquals("Village", RunSim.chapterAt(5_000.0).label)
+        assertEquals("Solar district", RunSim.chapterAt(5_000.0).label)
         assertEquals("Storm", RunSim.chapterAt(16_000.0).label)
     }
 
@@ -311,7 +324,7 @@ class RunSimTest {
 
     @Test fun generatedRoofsAreAlwaysJumpable() {
         for (mod in DayMod.entries) for (seed in listOf(1, 99, RunSim.daySeed("2026-10-02"), RunSim.daySeed("2027-03-09"))) {
-            val s = RunSim.create(seed, mod)
+            val s = RunSim.create(seed, mod, classic = true)
             while (s.spawnX < 40_000) RunSim.spawnChunk(s, s.spawnX, 8)
             val roofs = s.plats.sortedBy { it.x }
             for (i in 1 until roofs.size) {
@@ -324,6 +337,117 @@ class RunSimTest {
             assertTrue(s.enemies.filter { it.kind == EnemyKind.DRONE }.all { mod == DayMod.DRONES || it.x > 5200 })
             assertTrue(s.picks.filter { it.shield }.all { it.x > 4200 })
         }
+    }
+
+    @Test fun cityRoofsWidenGapsButStayJumpable() {
+        for (mod in DayMod.entries) for (seed in listOf(1, 99, RunSim.daySeed("2026-10-02"), RunSim.daySeed("2027-03-09"))) {
+            val s = RunSim.create(seed, mod)
+            while (s.spawnX < 40_000) RunSim.spawnChunk(s, s.spawnX, 8)
+            val roofs = s.plats.sortedBy { it.x }
+            var late = 0.0; var lateN = 0
+            for (i in 1 until roofs.size) {
+                val gap = roofs[i].x - (roofs[i - 1].x + roofs[i - 1].w)
+                assertTrue("gap $gap at ${roofs[i].x} ($mod)", gap <= 230)
+                // one band (48) up at most between neighbours
+                assertTrue(roofs[i - 1].y - roofs[i].y <= 48.0)
+                assertTrue(roofs[i].y in RunSim.BANDS.toList())
+                if (roofs[i].kind == PlatKind.ROOF) assertTrue(roofs[i].w >= 140)
+                if (roofs[i].x > 12_000 && roofs[i].kind == PlatKind.ROOF && roofs[i - 1].kind == PlatKind.ROOF) { late += gap; lateN++ }
+            }
+            assertTrue("late gaps average ${late / lateN}", late / lateN > 160)
+            // a boss arena every 1000 m, cracked roofs and sparking cables exist, shields are rare and late
+            val arenas = roofs.filter { it.w == RunSim.ARENA_W }
+            assertTrue(arenas.size >= 3)
+            assertTrue(arenas.first().x in 9_800.0..10_600.0)
+            assertTrue(roofs.any { it.crumble })
+            assertTrue(roofs.any { it.live })
+            assertTrue(s.picks.filter { it.shield }.all { it.x > 6000 })
+        }
+    }
+
+    @Test fun crackedRoofGivesWayAfterLanding() {
+        val s = emptyRoof()
+        s.plats.clear()
+        s.plats.add(Plat(s.x - 40, s.y, 400.0, PlatKind.ROOF, crumble = true))
+        val roof = s.plats[0]
+        var cracked = false
+        repeat(3) { if (Ev.CRACK in RunSim.step(s, RunSim.TICK, Input())) cracked = true }
+        assertTrue(cracked)
+        var n = 0
+        while (!roof.fallen && n++ < 60) RunSim.step(s, RunSim.TICK, Input())
+        assertTrue(roof.fallen)
+        assertTrue("gave way after ${n} steps", n in 14..36)
+        repeat(3) { RunSim.step(s, RunSim.TICK, Input()) }
+        assertFalse(s.grounded)
+    }
+
+    @Test fun liveCableHurtsOnlyWhileSparking() {
+        val s = emptyRoof()
+        s.plats.clear()
+        s.plats.add(Plat(s.x - 40, s.y, 2000.0, PlatKind.WIRE, live = true))
+        s.grounded = true; s.grind = true
+        val wire = s.plats[0]
+        // find a safe moment and a live moment in the fixed cycle
+        s.runTime = 0.0
+        while (RunSim.wireLive(s, wire) != 0) s.runTime += 0.05
+        RunSim.step(s, RunSim.TICK, Input())
+        assertEquals(3, s.hearts)
+        while (RunSim.wireLive(s, wire) != 2) s.runTime += 0.05
+        val ev = RunSim.step(s, RunSim.TICK, Input())
+        assertTrue(Ev.ZAP in ev)
+        assertEquals(2, s.hearts)
+    }
+
+    @Test fun gustWarnsThenSlowsTheRun() {
+        val s = emptyRoof()
+        s.plats.clear(); s.plats.add(Plat(0.0, s.y, 1e6, PlatKind.ROOF))
+        s.x = 5000.0; s.distance = s.x; s.gustNext = 0.01
+        var warned = false
+        repeat(3) { if (Ev.GUST in RunSim.step(s, RunSim.TICK, Input())) warned = true }
+        assertTrue(warned)
+        assertTrue(s.gustWarn > 0)
+        while (s.gustLeft <= 0) RunSim.step(s, RunSim.TICK, Input())
+        val x0 = s.x
+        RunSim.step(s, RunSim.TICK, Input())
+        assertEquals(RunSim.speedAt(s) * RunSim.TICK * RunSim.GUST_SLOW, s.x - x0, 0.5)
+    }
+
+    @Test fun maintenanceDroneTelegraphsBeamsAndCanBeDowned() {
+        val s = emptyRoof()
+        s.plats.clear(); s.plats.add(Plat(0.0, RunSim.BANDS[1], 1e6, PlatKind.ROOF))
+        s.y = RunSim.BANDS[1]; s.grounded = true
+        s.arenaX0 = s.x - 100; s.arenaX1 = s.x + 6000
+        var ev = RunSim.step(s, RunSim.TICK, Input())
+        assertTrue(Ev.BOSS in ev)
+        // the first shot is announced (CHARGE) before it fires (BEAM)
+        var charged = -1; var fired = -1; var n = 0
+        while (fired < 0 && n++ < 200) {
+            ev = RunSim.step(s, RunSim.TICK, Input())
+            if (Ev.CHARGE in ev && charged < 0) charged = n
+            if (Ev.BEAM in ev) fired = n
+        }
+        assertTrue(charged in 1 until fired)
+        assertTrue((fired - charged) >= (RunSim.BOSS_TELE * 60).toInt() - 1)
+        // standing still eats the beam (high or low lane)
+        repeat(20) { RunSim.step(s, RunSim.TICK, Input()) }
+        assertTrue(s.bossHit)
+        // high beams pass over a slide, low beams under a jump
+        s.y = RunSim.BANDS[1]; s.grounded = true; s.vy = 0.0
+        val box = RunSim.playerBox(s)
+        s.bossLane = 1; s.bossBeam = 0.1; s.slide = 0.4
+        val high = RunSim.beamBox(s)!!
+        assertTrue(RunSim.playerBox(s).t >= high.b)
+        s.slide = 0.0; s.bossLane = 0
+        val low = RunSim.beamBox(s)!!
+        assertTrue(box.b > low.t) // grounded: hit
+        assertTrue(RunSim.BANDS[1] - 60 - 2 < low.t) // feet 60 up: clear
+        // overheated: stomp it from above
+        s.bossStage = 3; s.bossT = 0.0; s.bossBeam = 0.0; s.invuln = 9.0
+        s.bossX = s.x; s.bossY = RunSim.BANDS[1] - 50
+        s.y = RunSim.bossBox(s).t + 2; s.vy = 300.0; s.grounded = false
+        ev = RunSim.step(s, RunSim.TICK, Input())
+        assertTrue(Ev.DOWNED in ev)
+        assertEquals(1, s.bossDowned)
     }
 
     @Test fun sameSeedSameRoofs() {
@@ -385,14 +509,46 @@ object Autopilot {
         }
         if (plan.isNotEmpty()) return plan.removeFirst()
         if (safe(s, emptyList())) return Input()
-        val best = candidates().firstOrNull { safe(s, it) }
-            ?: candidates().maxByOrNull { survived(s, it) }!!
+        if (jitter > 0) {
+            // a human-ish player: picks the move with the widest safe timing window and
+            // presses it at the window centre, off by up to +-jitter frames
+            val moves = ArrayList<List<Input>>()
+            moves.add(listOf(Input(slidePressed = true, slideHeld = true)) + List(20) { Input(slideHeld = true) })
+            for (hold in listOf(30, 14)) {
+                moves.add(jump(hold))
+                for (gap in listOf(10, 16, 22, 28)) moves.add(jump(hold).take(gap) + List((gap - hold).coerceAtLeast(0)) { Input() } + jump(30))
+            }
+            var bestMove: List<Input>? = null; var bestLo = 0; var bestHi = -1
+            for (m in moves) {
+                var lo = -1; var hi = -1; var runLo = -1
+                for (k in 0..44) {
+                    val ok = safe(s, List(k) { Input() } + m)
+                    if (ok) { if (runLo < 0) runLo = k; if (k - runLo > hi - lo) { lo = runLo; hi = k } } else runLo = -1
+                }
+                if (lo >= 0 && hi - lo > bestHi - bestLo) { bestMove = m; bestLo = lo; bestHi = hi }
+            }
+            if (bestMove == null) {
+                val cands0 = candidates()
+                plan.addAll(cands0.maxByOrNull { survived(s, it) }!!)
+            } else {
+                val k = ((bestLo + bestHi) / 2 + rng.nextInt(2 * jitter + 1) - jitter).coerceAtLeast(0)
+                plan.addAll(List(k) { Input() } + bestMove)
+            }
+            return plan.removeFirst()
+        }
+        val cands = candidates()
+        val best = cands.firstOrNull { safe(s, it) }
+            ?: twoStep(s, cands)
+            ?: cands.maxByOrNull { survived(s, it) }!!
         plan.addAll(best)
         return plan.removeFirst()
     }
 
     /** Also collect shields (screenshot scenes); off for the reachability test. */
     var greedy = false
+    /** Difficulty probe: react late by up to this many frames (0 = perfect bot). */
+    var jitter = 0
+    var rng = java.util.Random(1)
 
     private fun grabsShield(s: RunState, seq: List<Input>): Boolean {
         val c = copy(s)
@@ -414,9 +570,21 @@ object Autopilot {
                 out.add(jump(hold).take(gap) + List((gap - hold).coerceAtLeast(0)) { Input() } + jump(30))
             }
         }
-        out.add(List(4) { Input() } + jump(30))
-        out.add(List(8) { Input() } + jump(30))
+        for (wait in listOf(4, 8, 14, 20, 26, 32, 40)) {
+            out.add(List(wait) { Input() } + jump(30))
+            out.add(List(wait) { Input() } + listOf(Input(slidePressed = true, slideHeld = true)) + List(20) { Input(slideHeld = true) })
+        }
         return out
+    }
+
+    /** City rules: when no single move is safe, look for a move followed by a second one. */
+    private fun twoStep(s: RunState, cands: List<List<Input>>): List<Input>? {
+        val ranked = cands.map { it to survived(s, it) }.sortedByDescending { it.second }.take(8)
+        for ((a, _) in ranked) for (b in cands) {
+            val seq = a + b
+            if (safe(s, seq)) return seq
+        }
+        return null
     }
 
     private fun safe(s: RunState, seq: List<Input>) = survived(s, seq) >= HORIZON + seq.size
@@ -442,9 +610,9 @@ object Autopilot {
             if (v is MutableList<*>) continue
             f.set(c, v)
         }
-        s.plats.mapTo(c.plats) { Plat(it.x, it.y, it.w, it.kind) }
+        s.plats.mapTo(c.plats) { Plat(it.x, it.y, it.w, it.kind, it.crumble, it.live, it.crackT, it.fallen, it.fallY) }
         s.picks.mapTo(c.picks) { Pick(it.x, it.y, it.gold, it.shield, it.portal, it.taken) }
-        s.enemies.mapTo(c.enemies) { Enemy(it.kind, it.x, it.y, it.baseY, it.t, it.vx, it.boss, it.dead, it.near) }
+        s.enemies.mapTo(c.enemies) { Enemy(it.kind, it.x, it.y, it.baseY, it.t, it.vx, it.boss, it.dead, it.near, it.amp, it.rate) }
         return c
     }
 }

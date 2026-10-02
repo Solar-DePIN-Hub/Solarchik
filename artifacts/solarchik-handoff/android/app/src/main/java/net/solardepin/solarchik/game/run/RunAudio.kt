@@ -53,6 +53,12 @@ object RunSynth {
         "thunder" to listOf(b(70.0, 0.28, Wave.SAW, 0.2, -20.0), b(42.0, 0.34, Wave.TRIANGLE, 0.15, -10.0)),
         "boss" to listOf(b(110.0, 0.22, Wave.SAW, 0.18, -30.0), b(330.0, 0.18, Wave.SQUARE, 0.1, 40.0), b(880.0, 0.12, Wave.TRIANGLE, 0.09)),
         "chapter" to listOf(b(392.0, 0.08, Wave.TRIANGLE, 0.12), b(523.0, 0.1, Wave.TRIANGLE, 0.13, 0.0, 0.07), b(784.0, 0.16, Wave.SINE, 0.14, 0.0, 0.14)),
+        "gust" to listOf(b(160.0, 0.5, Wave.SAW, 0.06, 90.0), b(240.0, 0.4, Wave.TRIANGLE, 0.05, -60.0, 0.1)),
+        "crack" to listOf(b(300.0, 0.05, Wave.SQUARE, 0.12, -180.0), b(120.0, 0.12, Wave.SAW, 0.1, -50.0, 0.04)),
+        "zap" to listOf(b(1400.0, 0.06, Wave.SQUARE, 0.12, -900.0), b(700.0, 0.12, Wave.SAW, 0.12, -400.0, 0.03)),
+        "charge" to listOf(b(220.0, 0.6, Wave.SAW, 0.07, 520.0)),
+        "beam" to listOf(b(880.0, 0.22, Wave.SQUARE, 0.12, -300.0), b(110.0, 0.2, Wave.SAW, 0.12, -30.0)),
+        "downed" to listOf(b(196.0, 0.12, Wave.SQUARE, 0.18, -60.0), b(523.0, 0.1, Wave.TRIANGLE, 0.13, 0.0, 0.1), b(784.0, 0.12, Wave.SINE, 0.14, 0.0, 0.18), b(1046.0, 0.22, Wave.SINE, 0.12, 0.0, 0.26)),
         "clock" to listOf(b(523.0, 0.08, Wave.TRIANGLE, 0.15), b(784.0, 0.12, Wave.SINE, 0.16, 60.0, 0.08), b(1046.0, 0.2, Wave.SINE, 0.14, 0.0, 0.16)),
     )
 

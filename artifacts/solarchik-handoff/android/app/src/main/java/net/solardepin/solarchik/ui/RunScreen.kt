@@ -457,18 +457,19 @@ class RunScreen(host: MainActivity) : Screen(host) {
     }
 }
 
-/** Mini roof in a skin's palette (web SKIN_PAL), for the shop tiles. */
+/** Mini city rooftop with the skin's solar modules (the run's own art), for the shop tiles. */
 @android.annotation.SuppressLint("ViewConstructor")
 class SkinSwatch(ctx: Context, private val skin: RunSkin) : View(ctx) {
     private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val r = RectF()
     private var skyShader: Shader? = null
     private var module: net.solardepin.solarchik.game.run.RunArt.Img? = null
+    private val clip = android.graphics.Path()
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         val hf = h.toFloat()
-        skyShader = LinearGradient(0f, 0f, 0f, hf, 0xFF8FD3FF.toInt(), 0xFFD8F2C8.toInt(), Shader.TileMode.CLAMP)
-        // the same painted rooftop kit the run draws, glass mapped to this skin
+        skyShader = LinearGradient(0f, 0f, 0f, hf, intArrayOf(0xFF3A4870.toInt(), 0xFFC48A78.toInt(), 0xFFF6C88C.toInt()), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
+        // the same solar module the run draws on the city roofs, glass mapped to this skin
         module = kit(context).roofKit(KIT_SCALE, skin)
     }
 
@@ -477,22 +478,36 @@ class SkinSwatch(ctx: Context, private val skin: RunSkin) : View(ctx) {
         val h = height.toFloat()
         p.shader = skyShader
         r.set(0f, 0f, w, h)
-        canvas.drawRoundRect(r, h * 0.22f, h * 0.22f, p)
+        canvas.save()
+        clip.reset()
+        clip.addRoundRect(r, h * 0.22f, h * 0.22f, android.graphics.Path.Direction.CW)
+        canvas.clipPath(clip)
+        canvas.drawRect(r, p)
         p.shader = null
-        p.color = 0xFFFFD24A.toInt()
-        canvas.drawCircle(w * 0.76f, h * 0.24f, h * 0.1f, p)
+        p.color = 0xFFFFECBE.toInt()
+        canvas.drawCircle(w * 0.76f, h * 0.3f, h * 0.09f, p)
         val k = kit(context)
         val m = module
-        val lc = k.roofLeft
-        val rc = k.roofRight
-        if (m == null || lc == null || rc == null) return
-        // left cap · one module · right cap, fitted to the tile width (art is 24 + 64 + 24 units wide, 80 tall)
-        val u = w * 0.9f / (24f + 64f + 24f)
-        val x0 = w * 0.05f
-        val y0 = h * 0.4f
-        r.set(x0, y0, x0 + 24 * u, y0 + 80 * u); canvas.drawBitmap(lc.bmp, null, r, p)
-        r.set(x0 + 24 * u, y0, x0 + 88 * u, y0 + 80 * u); canvas.drawBitmap(m.bmp, null, r, p)
-        r.set(x0 + 88 * u, y0, x0 + 112 * u, y0 + 80 * u); canvas.drawBitmap(rc.bmp, null, r, p)
+        val par = k.parapet
+        val fac = k.facade[0]
+        if (m != null && par != null) {
+            // a rooftop: facade, parapet, two modules (art units: module 56 x 34, parapet 18 tall)
+            val u = w * 0.9f / (2 * 56f)
+            val x0 = w * 0.05f
+            val roof = h * 0.62f
+            if (fac != null) {
+                p.alpha = 255
+                r.set(0f, roof + 14 * u, w, h)
+                canvas.save(); canvas.clipRect(r)
+                var fx = 0f
+                while (fx < w) { r.set(fx, roof + 14 * u, fx + 128 * u, roof + 142 * u); canvas.drawBitmap(fac.bmp, null, r, p); fx += 128 * u }
+                canvas.restore()
+            }
+            for (i in 0 until 2) { r.set(x0 + i * 56 * u, roof + 2 * u - 34 * u, x0 + (i + 1) * 56 * u, roof + 2 * u); canvas.drawBitmap(m.bmp, null, r, p) }
+            var px = 0f
+            while (px < w) { r.set(px, roof, px + 64 * u, roof + 18 * u); canvas.drawBitmap(par.bmp, null, r, p); px += 64 * u }
+        }
+        canvas.restore()
     }
 
     private companion object {

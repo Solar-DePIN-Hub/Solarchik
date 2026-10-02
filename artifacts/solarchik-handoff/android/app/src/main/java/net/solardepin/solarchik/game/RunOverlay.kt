@@ -735,7 +735,7 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         flightV.visibility = if (h.bonus) VISIBLE else GONE
         if (h.bonus) flightV.text = ctx.getString(R.string.run_flight, ceil(h.bonusLeft).toInt())
         countdownV.text = if (h.countdown > 0.28) ceil(h.countdown).toInt().toString() else ctx.getString(R.string.run_go)
-        announceV.text = if (h.announce.isEmpty()) "" else ctx.getString(bannerRes(h.chapter))
+        announceV.text = if (h.announce.isEmpty()) "" else if (h.announce == RunSim.BOSS_BANNER) ctx.getString(R.string.run_boss_banner) else ctx.getString(bannerRes(h.chapter))
         if (h.phase == Phase.DEAD) {
             deadTitle.text = ctx.getString(if (h.death == DeathKind.HIT) R.string.run_hit else R.string.run_fell)
             deadReached.text = ctx.getString(R.string.run_reached, ctx.getString(chapterRes(h.chapter)))

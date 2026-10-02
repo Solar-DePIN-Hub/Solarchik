@@ -135,7 +135,7 @@ class RunShotsTest {
         assertTrue(stepUntil(s) { st ->
             st.meters > 160 && st.grounded &&
                 st.enemies.any { !it.dead && it.kind == EnemyKind.MITE && inView(st, it.x, 120.0, 520.0) } &&
-                st.picks.count { !it.taken && inView(st, it.x, 0.0, 600.0) } >= 3
+                st.picks.count { !it.taken && inView(st, it.x, 0.0, 600.0) } >= 2
         })
         shot("04-midrun-suns-mite", s)
     }
@@ -237,18 +237,36 @@ class RunShotsTest {
         shot("13-heat", s)
     }
 
-    @Test fun dayPhasesStormNightSerpent() {
+    @Test fun dayPhasesAndMaintenanceDrone() {
         val s = RunSim.create(seed, goalMeters = 99_999)
-        assertTrue(stepUntil(s, max = 60 * 900) { it.distance > 9_000 && it.grounded })
-        shot("14-village", s)
+        assertTrue(stepUntil(s, max = 60 * 900) { it.distance > 5_600 && it.grounded })
+        shot("14-dusk-district", s)
+        assertTrue(stepUntil(s, max = 60 * 900) { it.bossStage == 2 && it.bossTele in 0.15..0.4 && it.grounded })
+        shot("15-boss-telegraph", s, moment = true)
+        assertTrue(stepUntil(s, max = 60 * 900) { it.bossStage == 2 && it.bossBeam in 0.08..0.2 && it.bossShots >= 1 })
+        shot("16-boss-beam", s, moment = true)
+        assertTrue(stepUntil(s, max = 60 * 900) { it.bossStage == 3 && it.bossT > 0.35 })
+        shot("17-boss-overheat", s, moment = true)
+        assertTrue(stepUntil(s, max = 60 * 900) { it.distance > 13_000 && it.grounded })
+        shot("18-night-city", s)
         assertTrue(stepUntil(s, max = 60 * 900) { it.distance > 16_300 && it.grounded && it.lightning > 0.3 })
-        shot("15-storm-lightning", s)
-        assertTrue(stepUntil(s, max = 60 * 900) { it.distance > 19_300 && it.grounded })
-        shot("16-dusk-storm", s)
-        assertTrue(stepUntil(s, max = 60 * 900) { it.distance > 23_000 && it.grounded })
-        shot("17-night", s)
-        assertTrue(stepUntil(s, max = 60 * 900) { st -> st.bossDone && st.enemies.count { it.boss && !it.dead && inView(st, it.x, 100.0, 800.0) } >= 3 })
-        shot("18-serpent", s)
+        shot("18b-storm-lightning", s)
+    }
+
+    @Test fun cityHazards() {
+        val s = RunSim.create(seed, goalMeters = 99_999)
+        assertTrue(stepUntil(s, max = 60 * 900) { st ->
+            st.grounded && st.plats.any { it.crumble && it.crackT in 0.1..0.3 && st.x - it.x in 10.0..it.w }
+        })
+        shot("18c-cracking-canopy", s, moment = true)
+        val w = RunSim.create(seed, goalMeters = 99_999)
+        assertTrue(stepUntil(w, max = 60 * 900) { st ->
+            st.plats.any { it.live && RunSim.wireLive(st, it) == 2 && inView(st, it.x, 120.0, 420.0) }
+        })
+        shot("18d-live-cable", w, moment = true)
+        val g = RunSim.create(seed, goalMeters = 99_999)
+        assertTrue(stepUntil(g, max = 60 * 900) { it.gustLeft in 0.6..1.0 && it.grounded })
+        shot("18e-gust", g, moment = true)
     }
 
     @Test fun hurtAndLastHeart() {

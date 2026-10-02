@@ -391,6 +391,13 @@ class RunRenderer(
 
     private fun softGlow(c: Canvas, x: Double, y: Double, r: Double, col: Int, a: Double) {
         if (a <= 0.01 || r <= 0) return
+        val gm = spr.art.glowMask
+        if (gm != null) {
+            glowBmp.color = color(col, min(1.0, a * 1.15))
+            artRect.set((x - r).toFloat(), (y - r).toFloat(), (x + r).toFloat(), (y + r).toFloat())
+            c.drawBitmap(gm, null, artRect, glowBmp)
+            return
+        }
         glow.shader = RadialGradient(x.toFloat(), y.toFloat(), r.toFloat(), intArrayOf(color(col, a), color(col, a * 0.35), color(col, 0.0)), floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP)
         circle(c, x, y, r, glow)
         glow.shader = null
@@ -447,9 +454,11 @@ class RunRenderer(
         0.42f, 0f, 0f, 0f, 18f, 0f, 0.46f, 0f, 0f, 22f, 0f, 0f, 0.6f, 0f, 46f, 0f, 0f, 0f, 1f, 0f,
     )))
 
-    private fun cloud(c: Canvas, i: Int, x: Double, y: Double, scale: Double, a: Double, night: Double) {
-        val img = spr.art.clouds[i] ?: return
-        art(c, img, x, y, img.w * scale, img.h * scale, a = max(0.0, a), filter = if (night > 0.4) cloudNight else null)
+    private fun cloud(c: Canvas, i: Int, x: Double, y: Double, scale: Double, a: Double, col: Int) {
+        val img = spr.art.stratus[i % 2] ?: return
+        maskPaint.color = color(col, max(0.0, a))
+        artRect.set(x.toFloat(), y.toFloat(), (x + img.w * scale).toFloat(), (y + img.h * scale).toFloat())
+        c.drawBitmap(img.bmp, null, artRect, maskPaint)
     }
 
     /** A horizontally tiling parallax layer with its top at [top]. */
@@ -491,23 +500,6 @@ class RunRenderer(
     private fun drawPlat(c: Canvas, x: Double, y: Double, w: Double, thick: Double, t: Double, glow: Double, skin: RunSkin, kind: PlatKind, live: Boolean, dim: Double = 0.0) {
         if (kind == PlatKind.WIRE) {
             drawWire(c, x, y, w, t, live)
-            return
-        }
-        val kit = spr.art
-        val mod = kit.roofMid
-        val lc = kit.roofLeft
-        val rc = kit.roofRight
-        if (mod != null && lc != null && rc != null) {
-            // painted rooftop kit: caps inside the walkable span, modules stretched to fit evenly
-            val top = y - RunArt.ROOF_TOP
-            val f = moodRoof
-            val span = max(8.0, w - 36)
-            val n = max(1, Math.round(span / 64.0).toInt())
-            val mw = span / n
-            for (i in 0 until n) art(c, mod, x + 18 + i * mw, top, mw + 0.6, mod.h.toDouble(), filter = f)
-            art(c, lc, x - 6, top, filter = f)
-            art(c, rc, x + w - 18, top, filter = f)
-            if (glow > 0) roundRect(c, x - 2, y - 8, w + 4, 14.0, 6.0, solid(skin.hi, 0.1 * glow))
             return
         }
         val flag = skin == RunSkin.FLAG
@@ -850,12 +842,18 @@ class RunRenderer(
         }
     }
 
-    private fun paintVignette(c: Canvas, w: Double, h: Double) {
-        val r = h * 0.85
-        fill.color = Color.BLACK // shader alpha is multiplied by the paint alpha
-        fill.shader = RadialGradient((w * 0.5).toFloat(), (h * 0.48).toFloat(), r.toFloat(),
-            intArrayOf(Color.argb(0, 20, 12, 8), Color.argb(0, 20, 12, 8), Color.argb(71, 20, 12, 8)),
-            floatArrayOf(0f, (0.2 / 0.85).toFloat(), 1f), Shader.TileMode.CLAMP)
+    private var vignetteShader: Shader? = null
+    private var vignetteKey = 0.0
+    private fun paintVignette(c: Canvas, w: Double, h: Double, strength: Double = 1.0) {
+        if (vignetteShader == null || vignetteKey != w * 10000 + h) {
+            vignetteKey = w * 10000 + h
+            val r = h * 0.85
+            vignetteShader = RadialGradient((w * 0.5).toFloat(), (h * 0.48).toFloat(), r.toFloat(),
+                intArrayOf(Color.argb(0, 12, 10, 16), Color.argb(0, 12, 10, 16), Color.argb(110, 12, 10, 16)),
+                floatArrayOf(0f, (0.3 / 0.85).toFloat(), 1f), Shader.TileMode.CLAMP)
+        }
+        fill.color = Color.argb((255 * strength.coerceIn(0.0, 1.0)).toInt(), 0, 0, 0)
+        fill.shader = vignetteShader
         c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), fill)
         fill.shader = null
     }
@@ -877,24 +875,527 @@ class RunRenderer(
         fill.shader = null
     }
 
-    private fun drawHero(c: Canvas, feetX: Double, feetY: Double, size: Double, phase: Double, grounded: Boolean, squash: Double, stretch: Double, vy: Double, rot: Double, a: Double, shadow: Boolean, hurt: Double = 0.0, clock: Double = 0.0) {
+    private val hurtRed = PorterDuffColorFilter(0xFFFF4830.toInt(), PorterDuff.Mode.SRC_IN)
+    private val hurtWhite = PorterDuffColorFilter(0xFFFFFFFF.toInt(), PorterDuff.Mode.SRC_IN)
+
+    private fun drawHero(
+        c: Canvas, feetX: Double, feetY: Double, size: Double, phase: Double, grounded: Boolean, squash: Double, stretch: Double, vy: Double,
+        rot: Double, a: Double, shadow: Boolean, hurt: Double = 0.0, clock: Double = 0.0, sliding: Boolean = false, landing: Boolean = false,
+        rimCol: Int = 0, rimA: Double = 0.0,
+    ) {
         // web drawHero: a bought robot runs on its own 4-frame strip (frame 4 in the air)
         val strip = if (robot != "stock") spr.robotRun(robot) else emptyList()
-        val frame = if (strip.size >= 2) {
-            if (!grounded) strip[min(3, strip.size - 1)] else strip[((floor(phase).toInt() % strip.size) + strip.size) % strip.size]
-        } else {
-            spr.heroFrame(grounded, vy, phase, squash)
+        val robo = strip.size >= 2
+        val f = when {
+            sliding -> if (robo) spr.robotSlide(robot) else spr.slide
+            robo -> if (!grounded) strip[min(3, strip.size - 1)] else strip[((floor(phase).toInt() % strip.size) + strip.size) % strip.size]
+            else -> spr.heroFrame(grounded, vy, phase, squash, landing)
         }
         val wobble = if (hurt > 0 && !reducedMotion) sin(hurt * 40) * 0.18 * hurt else 0.0
-        if (!blit(c, frame, feetX, feetY, size, squash, stretch, a = a, rot = rot + wobble, shadow = shadow, tint = 0xFF4830, tintA = hurt * 0.6, outline = 0.026)) {
+        if (f == null || kNow <= 0) {
             circle(c, feetX, feetY - size / 2, size / 3, solid(0xFF7AD1FF.toInt(), a))
+            return
         }
+        // prepared at the exact on-screen height: logical size = pixels / scale (x size ratio for previews)
+        val sc = size / heroHNow
+        val hgt = f.bmp.height / kNow * sc
+        val pad = f.pad / kNow * sc
+        val sy = 1 - squash * 0.34 + stretch * 0.28
+        val sx = 1 + squash * 0.22 - stretch * 0.12
+        val dw = hgt * f.bmp.width / f.bmp.height
+        c.save()
+        c.translate(feetX.toFloat(), (feetY + pad).toFloat())
+        c.scale(sx.toFloat(), sy.toFloat())
+        val r = rot + wobble
+        if (r != 0.0) {
+            c.translate(0f, (-hgt * 0.46).toFloat())
+            c.rotate(Math.toDegrees(r).toFloat())
+            c.translate(0f, (hgt * 0.46).toFloat())
+        }
+        rect.set((-dw / 2).toFloat(), (-hgt).toFloat(), (dw / 2).toFloat(), 0f)
+        if (shadow) {
+            c.save()
+            c.translate(3f, 4f)
+            shadowPaint.alpha = a255(a * 0.55)
+            c.drawBitmap(f.bmp, null, rect, shadowPaint)
+            c.restore()
+        }
+        if (rimA > 0) {
+            // rim light from the sun / city glow: the silhouette offset up and towards the light
+            c.save()
+            c.translate((1.8 * sc).toFloat(), (-1.4 * sc).toFloat())
+            maskPaint.color = color(rimCol, rimA * a)
+            c.drawBitmap(f.rim, null, rect, maskPaint)
+            c.restore()
+        }
+        bmpPaint.alpha = a255(a)
+        c.drawBitmap(f.bmp, null, rect, bmpPaint)
+        if (hurt > 0) {
+            tintPaint.colorFilter = if (hurt > 0.82) hurtWhite else hurtRed
+            tintPaint.alpha = a255((if (hurt > 0.82) 0.85 else hurt * 0.6) * a)
+            c.drawBitmap(f.bmp, null, rect, tintPaint)
+        }
+        c.restore()
         // the head panel catches the sun now and then
         val gl = (clock * 0.55) % 1.0
-        if (gl < 0.14 && !reducedMotion && a > 0.5) {
+        if (gl < 0.14 && !reducedMotion && a > 0.5 && !sliding) {
             val hs = 1 - squash * 0.34 + stretch * 0.28
             sparkle(c, feetX + size * 0.08, feetY - size * hs * 0.94, size * 0.09 * sin(gl / 0.14 * PI), gl * 8, 0xFFFFFFFF.toInt(), 0.95)
         }
+    }
+
+    // ---- solarpunk city (0.21.4) ----
+
+    private var kNow = 0.0
+    private var heroHNow = 136.0
+    private val mat = android.graphics.Matrix()
+    /** ALPHA_8 masks draw in the paint colour. */
+    private val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val glowBmp = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN) }
+    private val facadePaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val litPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val grainPaint = Paint()
+    private val skyCache = HashMap<Int, Shader>()
+    private var skyCacheH = -1.0
+
+    /** Time-of-day keyframes: golden hour, dusk, night (see [P_TOP] … [P_NEON]). */
+    private val keys = arrayOf(
+        intArrayOf(0xFF3A4870.toInt(), 0xFFC48A78.toInt(), 0xFFF6C88C.toInt(), 0xFFC4968C.toInt(), 0xFF846068.toInt(), 0xFF463848.toInt(), 0xFFF0BC8C.toInt(), 0xFFFFECBE.toInt(), 0xFFFFC890.toInt(), 0xFFFFC0A0.toInt(), 0, 0),
+        intArrayOf(0xFF1C1E46.toInt(), 0xFF6E4068.toInt(), 0xFFE88468.toInt(), 0xFF745070.toInt(), 0xFF483456.toInt(), 0xFF241E36.toInt(), 0xFFC4707C.toInt(), 0xFFFFAA78.toInt(), 0xFFFF968C.toInt(), 0xFFDC8C94.toInt(), 150, 120),
+        intArrayOf(0xFF060A1C.toInt(), 0xFF101838.toInt(), 0xFF2C3060.toInt(), 0xFF1E2446.toInt(), 0xFF141A34.toInt(), 0xFF0A0E20.toInt(), 0xFF2C3868.toInt(), 0xFFDCE6FF.toInt(), 0xFF78D2FF.toInt(), 0xFF3C466E.toInt(), 255, 255),
+    )
+    private val pal = IntArray(12)
+
+    private fun lerpArgb(a: Int, b: Int, t: Double): Int {
+        val u = t.coerceIn(0.0, 1.0)
+        fun ch(sh: Int) = (((a shr sh) and 0xFF) * (1 - u) + ((b shr sh) and 0xFF) * u).toInt()
+        return (0xFF shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+    }
+
+    private fun palette(mood: Double, storm: Boolean) {
+        val m = mood.coerceIn(0.0, 2.0)
+        val i = min(1, floor(m).toInt())
+        val t = m - i
+        for (k in 0 until 10) {
+            var v = lerpArgb(keys[i][k], keys[i + 1][k], t)
+            if (storm) v = lerpArgb(v, 0xFF3C4452.toInt(), 0.42)
+            pal[k] = v
+        }
+        pal[P_LIT] = (keys[i][P_LIT] + (keys[i + 1][P_LIT] - keys[i][P_LIT]) * t).toInt()
+        pal[P_NEON] = (keys[i][P_NEON] + (keys[i + 1][P_NEON] - keys[i][P_NEON]) * t).toInt()
+        if (storm) pal[P_LIT] = max(pal[P_LIT], 120)
+    }
+
+    /** An ALPHA_8 skyline tile repeated across the screen, tinted [col]. */
+    private fun maskTile(c: Canvas, img: RunArt.Img?, w: Double, top: Double, scroll: Double, col: Int, a: Double) {
+        if (img == null || a <= 0.01) return
+        val lw = img.w.toDouble()
+        var x = -(((scroll % lw) + lw) % lw)
+        maskPaint.color = color(col, a)
+        while (x < w) {
+            artRect.set(x.toFloat(), top.toFloat(), (x + lw + 0.5).toFloat(), (top + img.h).toFloat())
+            c.drawBitmap(img.bmp, null, artRect, maskPaint)
+            x += lw
+        }
+    }
+
+    /** Vertical fade [a0] → [a1] of [col] over a rectangle (the shared ramp mask, no shader). */
+    private fun rampRect(c: Canvas, x0: Double, y0: Double, x1: Double, y1: Double, col: Int, a0: Double, a1: Double) {
+        val ramp = spr.art.rampMask ?: return
+        if (a1 > a0) {
+            maskPaint.color = color(col, a1)
+            if (a0 > 0) c.drawRect(x0.toFloat(), y0.toFloat(), x1.toFloat(), y1.toFloat(), solid(col, a0))
+            artRect.set(x0.toFloat(), y0.toFloat(), x1.toFloat(), y1.toFloat())
+            maskPaint.alpha = a255(a1 - a0)
+            c.drawBitmap(ramp, null, artRect, maskPaint)
+        } else {
+            c.save()
+            c.scale(1f, -1f, 0f, ((y0 + y1) / 2).toFloat())
+            rampRect(c, x0, y0, x1, y1, col, a1, a0)
+            c.restore()
+        }
+    }
+
+    private fun paintCitySky(c: Canvas, w: Double, h: Double, mood: Double, camX: Double, clock: Double) {
+        if (skyCacheH != h) { skyCache.clear(); skyCacheH = h }
+        val key = (mood * 16).toInt() * 2 + (if (pal[P_TOP] != keys[0][P_TOP] && false) 1 else 0) + ((pal[P_HOR] and 0xFF) shl 8)
+        val sh = skyCache.getOrPut(key) {
+            LinearGradient(0f, 0f, 0f, h.toFloat(), intArrayOf(pal[P_TOP], pal[P_MID], pal[P_HOR], pal[P_HOR]), floatArrayOf(0f, 0.4f, 0.66f, 1f), Shader.TileMode.CLAMP)
+        }
+        fill.color = Color.BLACK
+        fill.shader = sh
+        c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), fill)
+        fill.shader = null
+        val dusk = min(1.0, mood)
+        val night = max(0.0, mood - 1)
+        // stars and the moon come out after dusk
+        paintStars(c, w, h, clock, night * 0.95)
+        if (night > 0.15) {
+            val mx = w * 0.2; val my = h * 0.14
+            softGlow(c, mx, my, h * 0.2, 0xFFB8C8FF.toInt(), 0.35 * night)
+            circle(c, mx, my, h * 0.028, solid(0xFFE6ECFF.toInt(), min(1.0, night * 1.2)))
+            circle(c, mx + h * 0.008, my - h * 0.006, h * 0.024, solid(pal[P_TOP], min(0.9, night)))
+        }
+        // a low sun sinking into the skyline, its glow washing the haze
+        val sunA = (1 - night * 1.25).coerceIn(0.0, 1.0)
+        if (sunA > 0.01) {
+            val sx = w * 0.72
+            val syy = h * (0.36 + 0.16 * dusk)
+            softGlow(c, sx, syy, h * 0.62, pal[P_SUN], 0.42 * sunA)
+            softGlow(c, sx, syy, h * 0.2, pal[P_SUN], 0.55 * sunA)
+            circle(c, sx, syy, h * 0.05, solid(pal[P_SUN], sunA))
+        }
+        // stratus wisps catching the light
+        val ca = 0.55 - night * 0.25
+        cloud(c, 0, ((-camX * 0.03 - clock * 3) % (w + 700) + w + 700) % (w + 700) - 600, h * 0.12, 1.3, ca, pal[P_CLOUD])
+        cloud(c, 1, ((-camX * 0.05 - clock * 2 + 640) % (w + 700) + w + 700) % (w + 700) - 600, h * 0.24, 1.0, ca * 0.8, pal[P_CLOUD])
+    }
+
+    private fun paintCityLayers(c: Canvas, w: Double, h: Double, camX: Double, clock: Double) {
+        val art = spr.art
+        val lit = pal[P_LIT] / 255.0
+        val neon = pal[P_NEON] / 255.0
+        val tops = doubleArrayOf(h * 0.3, h * 0.4, h * 0.53)
+        val par = doubleArrayOf(0.06, 0.14, 0.3)
+        for (i in 0 until 3) {
+            val img = art.layer[i] ?: continue
+            val top = tops[i]
+            val col = pal[P_FAR + i]
+            maskTile(c, img, w, top, camX * par[i], col, 1.0)
+            c.drawRect(0f, (top + img.h - 0.5).toFloat(), w.toFloat(), h.toFloat(), solid(col))
+            if (lit > 0.02) maskTile(c, art.layerLit[i], w, top, camX * par[i], 0xFFFFC478.toInt(), lit * (0.7 + 0.1 * i))
+            if (neon > 0.02) maskTile(c, art.layerNeon[i], w, top, camX * par[i], if (i == 1) 0xFFFF6EC8.toInt() else 0xFF6EE6FF.toInt(), neon)
+            // atmospheric fog settling between the layers
+            rampRect(c, 0.0, top + img.h * 0.35, w, top + img.h, pal[P_FOG], 0.0, 0.5 - i * 0.08)
+            c.drawRect(0f, (top + img.h).toFloat(), w.toFloat(), h.toFloat(), solid(pal[P_FOG], 0.5 - i * 0.08))
+            if (i == 0) paintShafts(c, w, h, clock)
+        }
+        // the street far below, glimpsed between the buildings
+        val st = h - 30
+        val nightLit = lit
+        rampRect(c, 0.0, st - 30, w, h, 0xFF8A5A40.toInt(), 0.0, 0.18 + 0.3 * nightLit)
+        for (i in 0 until 16) {
+            val speed = 40 + (i % 4) * 26
+            val x = ((i * 113.7 + clock * speed * (if (i % 2 == 0) 1 else -1) - camX * 0.85) % (w + 60) + w + 60) % (w + 60) - 30
+            val yy = h - 7 - (i % 3) * 4.5
+            c.drawRect(x.toFloat(), yy.toFloat(), (x + 4).toFloat(), (yy + 1.6).toFloat(), solid(if (i % 2 == 0) 0xFFFFF0D0.toInt() else 0xFFFF5040.toInt(), 0.35 + 0.55 * nightLit))
+        }
+    }
+
+    /** Volumetric light: long soft beams fanning from the low sun through the haze. */
+    private fun paintShafts(c: Canvas, w: Double, h: Double, clock: Double) {
+        val night = pal[P_NEON] / 255.0
+        val a = (1 - night * 1.4).coerceIn(0.0, 1.0)
+        val gm = spr.art.glowMask ?: return
+        if (a <= 0.02 || reducedMotion && a < 0.1) return
+        val sx = w * 0.72
+        val sy = h * 0.4
+        glowBmp.color = color(pal[P_SUN], 0.11 * a)
+        for (i in 0 until 5) {
+            val ang = 128.0 + i * 11 + sin(clock * 0.12 + i * 1.7) * 2.5
+            val len = h * (1.0 + 0.25 * hash(i + 1.0))
+            val wid = h * (0.07 + 0.06 * hash(i + 5.0))
+            c.save()
+            c.translate(sx.toFloat(), sy.toFloat())
+            c.rotate(ang.toFloat())
+            artRect.set((-len * 0.1).toFloat(), (-wid / 2).toFloat(), len.toFloat(), (wid / 2).toFloat())
+            c.drawBitmap(gm, null, artRect, glowBmp)
+            c.restore()
+        }
+    }
+
+    private fun shaderAt(sh: Shader, x: Double, y: Double) {
+        val k = spr.art.pxPerUnit
+        mat.setScale(1f / k, 1f / k)
+        mat.postTranslate(x.toFloat(), y.toFloat())
+        sh.setLocalMatrix(mat)
+    }
+
+    /** A city building: its rooftop is the walkable roof, the facade drops to the street. */
+    private fun drawBuilding(c: Canvas, p: Plat, x: Double, ys: Double, h: Double, cf: android.graphics.ColorFilter?) {
+        val art = spr.art
+        val top = ys - RunArt.ROOF_TOP
+        val bx0 = x - 3
+        val bx1 = x + p.w + 3
+        val seed = hash(p.x * 0.0137 + 3.1)
+        val style = (seed * 3).toInt().coerceIn(0, 2)
+        val fTop = top + 15
+        // facade
+        val fs = art.facadeShader[style]
+        if (fs != null) {
+            shaderAt(fs, bx0 + seed * 40, fTop)
+            facadePaint.shader = fs
+            facadePaint.colorFilter = cf
+            c.drawRect(bx0.toFloat(), fTop.toFloat(), bx1.toFloat(), (h + 4).toFloat(), facadePaint)
+            facadePaint.shader = null
+        }
+        val lit = pal[P_LIT] / 255.0
+        val ls = art.facadeLitShader[style]
+        if (ls != null && lit > 0.02) {
+            shaderAt(ls, bx0 + seed * 40, fTop)
+            litPaint.shader = ls
+            litPaint.color = color(0xFFFFC27A.toInt(), lit * 0.9)
+            c.drawRect(bx0.toFloat(), fTop.toFloat(), bx1.toFloat(), (h + 4).toFloat(), litPaint)
+            litPaint.shader = null
+        }
+        // form: rim light on the sun side, shadow on the far side, a dark band under the cornice
+        val night = (pal[P_NEON] / 255.0)
+        c.drawRect(bx0.toFloat(), fTop.toFloat(), (bx0 + 2.5).toFloat(), (h + 4).toFloat(), solid(pal[P_RIM], 0.32 * (1 - night * 0.4)))
+        for (k in 0 until 3) c.drawRect((bx1 - 4 - k * 4).toFloat(), fTop.toFloat(), (bx1 - k * 4).toFloat(), (h + 4).toFloat(), solid(0xFF0A0810.toInt(), 0.1 + 0.06 * k))
+        c.drawRect(bx0.toFloat(), fTop.toFloat(), bx1.toFloat(), (fTop + 4).toFloat(), solid(0xFF0A0810.toInt(), 0.35))
+        // rooftop props behind the walk line
+        val back = top + 2
+        val panel = art.panel
+        val w = p.w
+        if (seed < 0.72 && panel != null) {
+            val step = 52.0
+            val n = max(1, ((w - 20) / step).toInt())
+            val x0 = x + (w - n * step) / 2 + 2
+            for (i in 0 until n) art(c, panel, x0 + i * step, back - panel.h * 0.85, panel.w * 0.85, panel.h * 0.85, filter = cf)
+        } else {
+            val pl = art.planter
+            val acu = art.ac
+            var px = x + 12
+            var i = 0
+            while (px < x + w - 50) {
+                val img = if ((i + (seed * 10).toInt()) % 3 == 1) acu else pl
+                if (img != null) { art(c, img, px, back - img.h, filter = cf); px += img.w + 10 } else px += 50
+                i++
+            }
+        }
+        val tall = hash(p.x * 0.031 + 7.7)
+        if (tall < 0.45 && w > 180) {
+            val img = if (tall < 0.22) art.tank else art.antenna
+            if (img != null) art(c, img, if (tall < 0.22) x + w - img.w - 14 else x + 14, back - img.h + 2, filter = cf)
+        } else if (tall > 0.8) {
+            art.vent?.let { art(c, it, x + w * 0.5, back - it.h, filter = cf) }
+        }
+        // parapet: the edge the robot runs along
+        val ps = art.parapetShader
+        if (ps != null) {
+            shaderAt(ps, bx0, top)
+            facadePaint.shader = ps
+            facadePaint.colorFilter = cf
+            c.drawRect(bx0.toFloat(), top.toFloat(), bx1.toFloat(), (top + 18).toFloat(), facadePaint)
+            facadePaint.shader = null
+        }
+        c.drawRect(bx0.toFloat(), top.toFloat(), bx1.toFloat(), (top + 1.2).toFloat(), solid(pal[P_RIM], 0.45))
+    }
+
+    /** City rules: a cracked solar-glass canopy bridge that gives way after a landing. */
+    private fun drawCanopy(c: Canvas, p: Plat, x: Double, ys: Double, clock: Double, cf: android.graphics.ColorFilter?, unitY: Double) {
+        val art = spr.art
+        val stress = if (p.crackT >= 0) min(1.0, p.crackT / RunSim.CRACK_TIME) else 0.0
+        var a = 1.0
+        c.save()
+        if (p.fallen) {
+            a = max(0.0, 1 - p.fallY / 260)
+            c.translate(0f, (p.fallY * unitY).toFloat())
+            c.rotate((p.fallY * 0.03).toFloat(), (x + p.w / 2).toFloat(), ys.toFloat())
+        } else if (stress > 0 && !reducedMotion) {
+            c.translate((sin(clock * 70) * 1.4 * stress).toFloat(), (stress * 2).toFloat())
+        }
+        if (a <= 0.01) { c.restore(); return }
+        alpha = a.toFloat()
+        val panel = art.panel
+        if (panel != null) {
+            val n = max(1, Math.round(p.w / 50.0).toInt())
+            val pw = p.w / n
+            for (i in 0 until n) art(c, panel, x + i * pw - 1, ys - 22, pw + 2, 26.0, a = a, filter = cf)
+        }
+        // steel beam + truss, hazard chevrons at the ends
+        c.drawRect((x - 3).toFloat(), (ys + 1).toFloat(), (x + p.w + 3).toFloat(), (ys + 7).toFloat(), solid(0xFF3A424C.toInt()))
+        c.drawRect((x - 3).toFloat(), (ys + 1).toFloat(), (x + p.w + 3).toFloat(), (ys + 2.2).toFloat(), solid(pal[P_RIM], 0.6))
+        stroke.color = color(0xFF2A3038.toInt()); stroke.strokeWidth = 1.4f; stroke.strokeCap = Paint.Cap.BUTT
+        var tx = x
+        while (tx < x + p.w - 10) {
+            c.drawLine(tx.toFloat(), (ys + 7).toFloat(), (tx + 10).toFloat(), (ys + 15).toFloat(), stroke)
+            c.drawLine((tx + 10).toFloat(), (ys + 15).toFloat(), (tx + 20).toFloat(), (ys + 7).toFloat(), stroke)
+            tx += 20
+        }
+        c.drawRect(x.toFloat(), (ys + 14.3).toFloat(), (x + p.w).toFloat(), (ys + 15.7).toFloat(), solid(0xFF2A3038.toInt()))
+        for (ex in doubleArrayOf(x - 3, x + p.w - 11)) for (k in 0 until 2) {
+            c.drawRect((ex + k * 7).toFloat(), (ys + 2.2).toFloat(), (ex + k * 7 + 3.5).toFloat(), (ys + 7).toFloat(), solid(0xFFE8B830.toInt(), 0.9))
+        }
+        // hazard read at any hour: an amber LED strip along the deck edge and a glass sheen
+        c.drawRect(x.toFloat(), (ys - 22).toFloat(), (x + p.w).toFloat(), (ys + 1).toFloat(), solid(pal[P_RIM], 0.16 * a))
+        line(c, x, ys + 3.4, x + p.w, ys + 3.4, 0xFFFFB648.toInt(), 1.8, (0.75 + 0.25 * stress) * a)
+        // cracks spread as it takes the weight
+        val cr = art.crack
+        if (cr != null) {
+            val ca = 0.25 + 0.75 * stress
+            var cx = x + 8
+            var i = 0
+            while (cx < x + p.w - 30) {
+                art(c, cr, cx, ys - 20 + (i % 2) * 3, cr.w * 0.8, cr.h * 0.8, a = ca * a)
+                cx += 64; i++
+            }
+        }
+        alpha = 1f
+        c.restore()
+    }
+
+    /** City cable between two steel poles; sparking cables crackle, then arc while live. */
+    private fun drawCityWire(c: Canvas, x: Double, y: Double, w: Double, t: Double, grinding: Boolean, state: Int) {
+        val sag = 14.0
+        path.reset()
+        path.moveTo(x.toFloat(), y.toFloat())
+        path.quadTo((x + w * 0.5).toFloat(), (y + sag).toFloat(), (x + w).toFloat(), y.toFloat())
+        stroke.strokeCap = Paint.Cap.ROUND
+        stroke.color = color(0xFF1E2228.toInt()); stroke.strokeWidth = 3.4f
+        c.drawPath(path, stroke)
+        stroke.color = color(if (state == 2) 0xFFB8E8FF.toInt() else if (grinding) 0xFF9AD8FF.toInt() else 0xFF6A7480.toInt()); stroke.strokeWidth = 1.4f
+        c.drawPath(path, stroke)
+        fun at(u: Double) = y + 4 * sag * u * (1 - u) * 0.5 * 2 * 0.5 * 2
+        if (state == 1 && !reducedMotion) {
+            // crackling: a few sparks hopping along the cable
+            for (i in 0 until 3) {
+                if (hash(floor(t * 14) + i * 7.0) < 0.55) continue
+                val u = hash(floor(t * 14) * 1.3 + i)
+                sparkle(c, x + w * u, at(u), 5.0, t * 9, 0xFFFFD27A.toInt(), 0.9)
+            }
+        } else if (state == 2) {
+            // live: an electric arc dancing along the whole span
+            softGlow(c, x + w / 2, y + sag * 0.5, w * 0.6, 0xFF8ACFFF.toInt(), 0.35)
+            path2.reset()
+            val seg = 10
+            for (i in 0..seg) {
+                val u = i / seg.toDouble()
+                val jy = if (i == 0 || i == seg) 0.0 else (hash(floor(t * 30) + i * 3.3) - 0.5) * 12
+                if (i == 0) path2.moveTo((x + w * u).toFloat(), (at(u) + jy).toFloat()) else path2.lineTo((x + w * u).toFloat(), (at(u) + jy).toFloat())
+            }
+            stroke.color = color(0xFF9AD8FF.toInt(), 0.8); stroke.strokeWidth = 3f
+            c.drawPath(path2, stroke)
+            stroke.color = color(Color.WHITE, 0.95); stroke.strokeWidth = 1.2f
+            c.drawPath(path2, stroke)
+        }
+        for (px in doubleArrayOf(x, x + w)) {
+            c.drawRect((px - 2.6).toFloat(), (y - 26).toFloat(), (px + 2.6).toFloat(), (y + 60).toFloat(), solid(0xFF262B32.toInt()))
+            c.drawRect((px - 2.6).toFloat(), (y - 26).toFloat(), (px - 1.4).toFloat(), (y + 60).toFloat(), solid(pal[P_RIM], 0.5))
+            c.drawRect((px - 6).toFloat(), (y - 4).toFloat(), (px + 6).toFloat(), (y - 1).toFloat(), solid(0xFF3A424C.toInt()))
+            if (state >= 1) circle(c, px, y - 28, 2.4, solid(if (state == 2) 0xFFFF4A3A.toInt() else 0xFFFFB03A.toInt(), if (floor(t * 6).toInt() % 2 == 0) 1.0 else 0.4))
+        }
+    }
+
+    /** The maintenance drone: body ([front] false) or its telegraph + beam ([front] true). */
+    private fun drawBoss(c: Canvas, s: RunState, camX: Double, w: Double, sy: (Double) -> Double, clock: Double, front: Boolean) {
+        if (s.bossStage == 0) return
+        val img = spr.art.boss ?: return
+        val bx = s.bossX - camX
+        val by = sy(s.bossY)
+        val y0 = RunSim.BANDS[1]
+        val lane = if (s.bossLane == 0) RunSim.BEAM_LOW else RunSim.BEAM_HIGH
+        val yt = sy(y0 + lane[0])
+        val yb = sy(y0 + lane[1])
+        val ey = by + 2.0 // the emitter under the hull
+        if (!front) {
+            val bw = img.w * 0.95
+            val bh = img.h * 0.95
+            val hot = s.bossStage == 3
+            val tilt = if (hot) sin(clock * 9) * 4 + 8 else sin(clock * 2.1) * 2
+            c.save()
+            c.rotate(tilt.toFloat(), bx.toFloat(), by.toFloat())
+            softGlow(c, bx, by + bh * 0.1, bh * 0.9, if (hot) 0xFFFF6A3A.toInt() else 0xFFFFC870.toInt(), if (hot) 0.4 else 0.18)
+            art(c, img, bx - bw / 2, by - bh * 0.55, bw, bh, filter = spr.art.cityFilter(if (s.classic) 0.0 else RunSim.cityMoodAt(s.distance), false))
+            // rotor blur and a charging eye
+            if (!reducedMotion) for (rx in doubleArrayOf(-bw * 0.38, bw * 0.38)) oval(c, bx + rx, by - bh * 0.38, bw * 0.13, 2.0 + abs(sin(clock * 50)) * 1.5, solid(Color.WHITE, 0.35))
+            val charge = if (s.bossTele > 0) 1 - s.bossTele / RunSim.BOSS_TELE else if (s.bossBeam > 0) 1.0 else 0.2
+            softGlow(c, bx, by - bh * 0.08, 18 + 26 * charge, 0xFFFF5A2A.toInt(), 0.5 + 0.5 * charge)
+            if (hot && !reducedMotion) {
+                for (k in 0 until 6) {
+                    val u = (clock * 0.9 + k / 6.0) % 1.0
+                    circle(c, bx - 10 + hash(k + 2.0) * 20 - u * 20, by - bh * 0.4 - u * 60, 6 + u * 14, solid(0xFF3A3A40.toInt(), 0.45 * (1 - u)))
+                }
+                if (floor(clock * 12).toInt() % 3 == 0) sparkle(c, bx + 20, by, 8.0, clock * 7, 0xFFFFD27A.toInt(), 0.9)
+            }
+            c.restore()
+            // telegraph: the lane lights up, with a jump / slide cue on the robot's side
+            if (s.bossStage == 2 && s.bossTele > 0) {
+                val blink = if (floor(clock * 10).toInt() % 2 == 0) 1.0 else 0.55
+                val u = 1 - s.bossTele / RunSim.BOSS_TELE
+                c.drawRect(0f, yt.toFloat(), (bx - 30).toFloat(), yb.toFloat(), solid(0xFFFF3A2A.toInt(), (0.16 + 0.24 * u) * blink))
+                line(c, 0.0, yt, bx - 30, yt, 0xFFFF6A4A.toInt(), 1.5, 0.75 * blink)
+                line(c, 0.0, yb, bx - 30, yb, 0xFFFF6A4A.toInt(), 1.5, 0.75 * blink)
+                stroke.color = color(0xFFFFB08A.toInt(), 0.9 * blink); stroke.strokeWidth = 2.5f; stroke.strokeCap = Paint.Cap.BUTT
+                var dx = bx - 40
+                while (dx > 0) { c.drawLine(dx.toFloat(), ((yt + yb) / 2).toFloat(), (dx - 12).toFloat(), ((yt + yb) / 2).toFloat(), stroke); dx -= 22 }
+                // the cue sits just ahead of the robot: up = jump the low beam, down = slide under the high one
+                val cx = w * 0.32
+                val cy = if (s.bossLane == 0) yt - 34 else yb + 30
+                circle(c, cx, cy, 19.0, solid(0xFF1A1418.toInt(), 0.62))
+                path.reset()
+                if (s.bossLane == 0) { path.moveTo((cx - 9).toFloat(), (cy + 5).toFloat()); path.lineTo(cx.toFloat(), (cy - 6).toFloat()); path.lineTo((cx + 9).toFloat(), (cy + 5).toFloat()) }
+                else { path.moveTo((cx - 9).toFloat(), (cy - 5).toFloat()); path.lineTo(cx.toFloat(), (cy + 6).toFloat()); path.lineTo((cx + 9).toFloat(), (cy - 5).toFloat()) }
+                stroke.color = color(0xFFFFE0C0.toInt(), blink); stroke.strokeWidth = 4f; stroke.strokeCap = Paint.Cap.ROUND; stroke.strokeJoin = Paint.Join.ROUND
+                c.drawPath(path, stroke)
+            }
+            return
+        }
+        if (s.bossBeam > 0) {
+            val fl = 0.85 + 0.15 * sin(clock * 80)
+            val mid = (yt + yb) / 2
+            val half = (yb - yt) / 2
+            c.drawRect(0f, (yt - 6).toFloat(), (bx - 24).toFloat(), (yb + 6).toFloat(), solid(0xFFFF5A2A.toInt(), 0.35 * fl))
+            c.drawRect(0f, yt.toFloat(), (bx - 24).toFloat(), yb.toFloat(), solid(0xFFFF8A4A.toInt(), 0.75 * fl))
+            c.drawRect(0f, (mid - half * 0.4).toFloat(), (bx - 24).toFloat(), (mid + half * 0.4).toFloat(), solid(0xFFFFF4E0.toInt(), 0.95))
+            softGlow(c, bx - 30, mid, 44.0, 0xFFFFB070.toInt(), 0.9)
+            line(c, bx - 30, ey, bx - 30, mid, 0xFFFF8A4A.toInt(), 3.0, 0.8)
+        }
+    }
+
+    private fun line(c: Canvas, x0: Double, y0: Double, x1: Double, y1: Double, col: Int, wd: Double, a: Double) {
+        stroke.color = color(col, a); stroke.strokeWidth = wd.toFloat(); stroke.strokeCap = Paint.Cap.ROUND
+        c.drawLine(x0.toFloat(), y0.toFloat(), x1.toFloat(), y1.toFloat(), stroke)
+    }
+
+    /** Wind gust: faint streaks while it builds, a hard headwind of streaks while it blows. */
+    private fun paintGust(c: Canvas, s: RunState, w: Double, h: Double, clock: Double) {
+        if (reducedMotion) return
+        val build = if (s.gustWarn > 0) 1 - s.gustWarn / RunSim.GUST_WARN else 0.0
+        val blow = if (s.gustLeft > 0) 1.0 else 0.0
+        val a = max(build * 0.35, blow * 0.6)
+        if (a <= 0.01) return
+        stroke.strokeCap = Paint.Cap.ROUND
+        val n = if (blow > 0) 22 else 10
+        for (i in 0 until n) {
+            val sp = 700 + hash(i + 1.0) * 500
+            val x = w - ((clock * sp + hash(i + 3.0) * 900) % (w + 260)) + 60
+            val y = h * (0.12 + 0.76 * hash(i + 9.0)) + sin(clock * 3 + i) * 6
+            val len = 50 + hash(i + 4.0) * 90
+            stroke.color = color(0xFFF2EEE6.toInt(), a * (0.5 + 0.5 * hash(i + 6.0)))
+            stroke.strokeWidth = (1.2 + hash(i + 7.0) * 1.6).toFloat()
+            c.drawLine(x.toFloat(), y.toFloat(), (x + len).toFloat(), (y - len * 0.06).toFloat(), stroke)
+        }
+        if (blow > 0) for (i in 0 until 6) {
+            // leaves and grit tumbling past
+            val x = w - ((clock * 820 + i * 211) % (w + 100)) + 20
+            val y = h * (0.3 + 0.5 * hash(i + 21.0)) + sin(clock * 9 + i) * 14
+            c.save(); c.translate(x.toFloat(), y.toFloat()); c.rotate((clock * 500 + i * 60).toFloat())
+            c.drawRect(-3f, -1.5f, 3f, 1.5f, solid(if (i % 2 == 0) 0xFF6A7A4A.toInt() else 0xFF8A6A48.toInt(), 0.85))
+            c.restore()
+        }
+    }
+
+    private var grainT = -1
+    /** Subtle film grain over the frame (a tiled noise mask, re-seeded ~12x per second). */
+    private fun paintGrain(c: Canvas, w: Double, h: Double, clock: Double) {
+        val g = spr.art.grainShader ?: return
+        val k = spr.art.pxPerUnit
+        val step = if (reducedMotion) 0 else (clock * 12).toInt()
+        if (step != grainT) {
+            grainT = step
+            mat.setScale(1f / k, 1f / k)
+            mat.postTranslate((hash(step * 1.3) * 160).toFloat(), (hash(step * 2.7) * 160).toFloat())
+            g.setLocalMatrix(mat)
+        }
+        grainPaint.shader = g
+        grainPaint.color = Color.argb(a255(0.07), 255, 255, 255)
+        c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), grainPaint)
+        grainPaint.color = Color.argb(a255(0.06), 0, 0, 0)
+        c.save(); c.translate(37f, 53f)
+        c.drawRect(-37f, -53f, w.toFloat(), h.toFloat(), grainPaint)
+        c.restore()
+        grainPaint.shader = null
     }
 
     /**
@@ -904,6 +1405,9 @@ class RunRenderer(
     fun draw(c: Canvas, wPx: Int, hPx: Int, s: RunState, clock: Double, skin: RunSkin = this.skin) {
         val k = hPx / logicalH
         spr.art.prepare(k.toFloat(), skin)
+        kNow = k
+        heroHNow = min(logicalH * 0.2, 136.0)
+        spr.prepareHero(Math.round(heroHNow * k).toInt())
         c.save()
         c.scale(k.toFloat(), k.toFloat())
         drawWorld(c, wPx / k, logicalH, s, clock, skin)
@@ -941,16 +1445,27 @@ class RunRenderer(
         val trauma = if (reducedMotion) 0.0 else s.shake * s.shake
         val ox = sin(clock * 41.2) * 14 * trauma
         val oy = cos(clock * 33.7) * 10 * trauma
-        val mood = if (s.bonus) 0.0 else RunSim.moodAt(s.distance)
+        val city = spr.art.ready
+        val mood = if (s.bonus) 0.0 else if (s.classic) RunSim.moodAt(s.distance) else RunSim.cityMoodAt(s.distance)
         val dusk = min(1.0, mood)
         val night = max(0.0, mood - 1)
         val storming = !s.bonus && s.distance > 16000
-        if (s.bonus) paintGardenSky(c, w, h, clock) else paintSky(c, w, h, mood)
+        // drawn ~1.6x the web size for phone readability; the sim hitbox (PW/PH) is unchanged
+        val heroH = min(h * 0.2, 136.0)
+        val spd = RunSim.speedAt(s)
+        val look = spd * 0.18
+        val camX = s.x - w * 0.27 + look
+        if (city) palette(mood, storming)
+        if (s.bonus) paintGardenSky(c, w, h, clock)
+        else if (city) paintCitySky(c, w, h, mood, camX, clock)
+        else paintSky(c, w, h, mood)
         if (storming) {
             c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), solid(Color.rgb(8, 16, 40), 0.2 + 0.08 * sin(s.stormT * 1.4)))
         }
-        paintStars(c, w, h, clock, if (s.bonus) 0.0 else night * 0.9)
-        paintAurora(c, w, h, clock, if (s.bonus) 0.0 else max(0.0, night - 0.15))
+        if (!city) {
+            paintStars(c, w, h, clock, if (s.bonus) 0.0 else night * 0.9)
+            paintAurora(c, w, h, clock, if (s.bonus) 0.0 else max(0.0, night - 0.15))
+        }
 
         c.save()
         val fallLook = if (s.phase == Phase.DEAD && s.death == DeathKind.FALL && !reducedMotion) 78.0 else 0.0
@@ -961,47 +1476,23 @@ class RunRenderer(
             c.translate((-w * 0.5).toFloat(), (-h * 0.55).toFloat())
         }
 
-        // drawn ~1.6x the web size for phone readability; the sim hitbox (PW/PH) is unchanged
-        val heroH = min(h * 0.2, 136.0)
         val hillTop = h * 0.87
         val playTop = h * 0.52
         val playBot = hillTop - 14
         fun sy(wy: Double) = playTop + ((wy - 140) / 150) * (playBot - playTop)
-
-        val spd = RunSim.speedAt(s)
-        val look = spd * 0.18
-        val camX = s.x - w * 0.27 + look
         val sunX = w * 0.84
         val sunY = h * (0.13 + dusk * 0.06)
 
         if (!s.bonus) {
-            if (night > 0.35) {
-                softGlow(c, w * 0.14, h * 0.12, 46.0, 0xFFE6ECFF.toInt(), min(0.5, night * 0.4))
-                circle(c, w * 0.14, h * 0.12, 11.0, solid(Color.rgb(230, 236, 255), min(0.85, night * 0.7)))
-            }
-            val day = max(0.0, 1 - night * 1.1)
-            paintRays(c, sunX, sunY, h * 0.75, clock, day * (1 - dusk * 0.5))
-            val kit = spr.art
-            if (kit.ready) {
-                val sunImg = kit.sun
-                if (sunImg != null && day > 0.02) {
-                    val sr = min(h * 0.075, 58.0) / 54.0 * 110.0 // art disc radius 54 of a 220 box
-                    art(c, sunImg, sunX - sr, sunY - sr, sr * 2, sr * 2, a = day)
-                }
-                cloud(c, 0, ((-camX * 0.08) % (w + 300)) - 60, h * 0.08, 1.15, 0.95 - night * 0.45, night)
-                cloud(c, 1, ((-camX * 0.12 + 420) % (w + 300)) - 40, h * 0.22, 0.9, 0.85 - night * 0.4, night)
-                cloud(c, 2, ((-camX * 0.07 + 880) % (w + 280)) - 40, h * 0.05, 0.85, 0.9 - night * 0.4, night)
-                val farF = kit.moodFilter(dusk, night, storming, 1.0)
-                val midF = kit.moodFilter(dusk, night, storming, 0.6)
-                val nearF = kit.moodFilter(dusk, night, storming, 0.25)
-                moodRoof = kit.moodFilter(dusk * 0.5, night * 0.55, storming, 0.0)
-                tileLayer(c, kit.far, w, h * 0.3, camX * 0.05, farF)
-                tileLayer(c, kit.mid, w, h * 0.42, camX * 0.16, midF)
-                // village windows light up from dusk
-                val lit = min(1.0, max(0.0, dusk - 0.35) * 1.2 + night * 0.6)
-                if (lit > 0.02) tileLayer(c, kit.midLights, w, h * 0.42, camX * 0.16, null, lit)
-                tileLayer(c, kit.near, w, h - kit.near!!.h + 6, camX * 0.32, nearF)
+            if (city) {
+                paintCityLayers(c, w, h, camX, clock)
             } else {
+                if (night > 0.35) {
+                    softGlow(c, w * 0.14, h * 0.12, 46.0, 0xFFE6ECFF.toInt(), min(0.5, night * 0.4))
+                    circle(c, w * 0.14, h * 0.12, 11.0, solid(Color.rgb(230, 236, 255), min(0.85, night * 0.7)))
+                }
+                val day = max(0.0, 1 - night * 1.1)
+                paintRays(c, sunX, sunY, h * 0.75, clock, day * (1 - dusk * 0.5))
                 alpha = day.toFloat()
                 if (alpha > 0) paintSun(c, sunX, sunY, min(h * 0.075, 58.0), clock)
                 alpha = 1f
@@ -1012,27 +1503,39 @@ class RunRenderer(
                 c.drawPath(hillPath(w, h, h * 0.86, h * 0.028, camX * 0.48, 0.011, 2.2), fill.also { it.color = rgb(mix3(d(72, 168, 64), d(24, 48, 52), max(dusk * 0.6, night))) })
             }
         } else {
-            if (spr.art.ready) {
-                cloud(c, 0, ((-camX * 0.16) % (w + 300)) - 40, h * 0.12, 1.1, 0.75, 0.0)
-                cloud(c, 1, ((-camX * 0.22 + 420) % (w + 300)) - 40, h * 0.28, 0.9, 0.6, 0.0)
-                cloud(c, 2, ((-camX * 0.12 + 880) % (w + 280)) - 40, h * 0.08, 1.0, 0.65, 0.0)
-                cloud(c, 1, ((-camX * 0.19 + 180) % (w + 300)) - 40, h * 0.44, 0.75, 0.45, 0.0)
+            if (city) {
+                cloud(c, 0, ((-camX * 0.16) % (w + 600)) - 120, h * 0.12, 1.1, 0.75, Color.WHITE)
+                cloud(c, 1, ((-camX * 0.22 + 420) % (w + 600)) - 120, h * 0.3, 0.9, 0.6, Color.WHITE)
+                cloud(c, 0, ((-camX * 0.12 + 880) % (w + 600)) - 120, h * 0.5, 1.0, 0.5, Color.WHITE)
             } else {
                 puffCloud(c, ((-camX * 0.16) % (w + 260)) + 40, h * 0.18, 1.35, 0.7)
                 puffCloud(c, ((-camX * 0.22 + 420) % (w + 300)) + 20, h * 0.32, 1.05, 0.55)
             }
         }
 
-        paintMotes(c, w, h, clock)
+        if (!city || mood < 0.6) paintMotes(c, w, h, clock)
         if (storming && !reducedMotion) paintRain(c, w, h, clock)
 
         val thick = max(16.0, h * 0.028)
         if (!s.bonus) {
+            val cf = if (city) spr.art.cityFilter(mood, storming) else null
             for (p in s.plats) {
                 val x = p.x - camX
                 if (x + p.w < -40 || x > w + 40) continue
                 val live = s.grind && s.grounded && s.x >= p.x - 12 && s.x <= p.x + p.w + 12 && p.kind == PlatKind.WIRE
-                drawPlat(c, x, sy(p.y), p.w, thick, clock, s.fever + night * 0.45, skin, p.kind, live, dim = dusk * 0.12 + night * 0.3)
+                if (!city) {
+                    drawPlat(c, x, sy(p.y), p.w, thick, clock, s.fever + night * 0.45, skin, p.kind, live, dim = dusk * 0.12 + night * 0.3)
+                } else if (p.kind == PlatKind.WIRE) {
+                    drawCityWire(c, x, sy(p.y), p.w, clock, live, if (p.live) RunSim.wireLive(s, p) else -1)
+                } else if (p.crumble) {
+                    drawCanopy(c, p, x, sy(p.y), clock, cf, (playBot - playTop) / 150)
+                } else {
+                    drawBuilding(c, p, x, sy(p.y), h, cf)
+                }
+            }
+            if (city) {
+                // the street is far below: the facades sink into haze
+                rampRect(c, 0.0, h * 0.8, w, h + 2, pal[P_FOG], 0.0, 0.62)
             }
         }
 
@@ -1093,6 +1596,8 @@ class RunRenderer(
                 }
             }
         }
+
+        if (!s.bonus && !s.classic) drawBoss(c, s, camX, w, ::sy, clock, false)
 
         val hx0 = s.x - camX
         val hy0 = sy(s.y) - 6 - heroH * 0.45
@@ -1192,8 +1697,12 @@ class RunRenderer(
             heroGlow(c, hx, hy, heroH, charged)
             // red flinch: from the heart that was just lost, or straight from the sim's hit flash
             val hurt = max(max(0.0, 1 - (clock - hurtAt) / 0.45), if (s.flash > 0.3) min(1.0, s.flash / 0.72) else 0.0)
-            // sliding: a low, wide tuck so the art clears drones the way the 24-unit slide box does
-            drawHero(c, hx, hy, heroH * if (sliding) 0.5 else 1.0, s.runPhase, s.grounded, squash, stretch, s.vy, rot, 1.0, shadow = true, hurt = hurt, clock = clock)
+            // sliding: the leaned-back slide pose, low enough to clear drones like the 24-unit slide box
+            val landing = s.grounded && !sliding && clock - landAt in 0.0..0.09
+            val slideSq = if (sliding) 0.15 else squash
+            val slideRot = if (sliding) 0.0 else rot
+            drawHero(c, hx, hy, heroH, s.runPhase, s.grounded, slideSq, if (sliding) 0.0 else stretch, s.vy, slideRot, 1.0, shadow = true, hurt = hurt, clock = clock,
+                sliding = sliding, landing = landing, rimCol = if (city) pal[P_RIM] else 0, rimA = if (city) 0.85 else 0.0)
             if (s.shield > 0) {
                 // shield bubble (native: the web shows the shield only in the HUD)
                 val cy = hy - heroH * 0.48
@@ -1206,6 +1715,9 @@ class RunRenderer(
                 c.drawArc(rect, 200f, 50f, false, stroke)
             }
         }
+
+        if (!s.bonus && !s.classic) drawBoss(c, s, camX, w, ::sy, clock, true)
+        if (!s.classic) paintGust(c, s, w, h, clock)
 
         drawPops(c, s, camX, h, clock, ::sy)
 
@@ -1224,11 +1736,7 @@ class RunRenderer(
             }
         }
 
-        if (!s.bonus) {
-            val fgImg = spr.art.fg
-            if (spr.art.ready && fgImg != null) tileLayer(c, fgImg, w, h - fgImg.h + 18, camX * 1.35, spr.art.moodFilter(dusk * 0.7, night * 0.85, storming, 0.0))
-            else paintForeground(c, w, h, camX, max(dusk * 0.5, night))
-        }
+        if (!s.bonus && !city) paintForeground(c, w, h, camX, max(dusk * 0.5, night))
 
         if (s.fever > 0) {
             c.drawRect((-ox).toFloat(), (-oy).toFloat(), (w - ox).toFloat(), (h - oy).toFloat(), solid(Color.rgb(255, 210, 40), 0.07 * s.fever))
@@ -1237,7 +1745,7 @@ class RunRenderer(
         c.restore()
 
         // warm key light from the sun side (colour grade)
-        if (!s.bonus) {
+        if (!s.bonus && !city) {
             val day = max(0.0, 1 - night * 1.1)
             softGlow(c, sunX, sunY, h * 1.1, if (dusk > 0.5) 0xFFFF9A5A.toInt() else 0xFFFFE8B0.toInt(), 0.16 * day)
         }
@@ -1247,7 +1755,8 @@ class RunRenderer(
             paintBolt(c, w, h, s.distance.toInt(), s.lightning)
         }
         if (s.flash > 0) c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), solid(Color.rgb(255, 72, 48), s.flash * 0.32))
-        paintVignette(c, w, h)
+        if (city && !s.bonus) paintGrain(c, w, h, clock)
+        paintVignette(c, w, h, if (city) 0.8 + night * 0.4 else 0.65)
         if (s.hearts == 1 && s.phase == Phase.RUNNING) c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), solid(Color.rgb(8, 16, 28), 0.18))
         // transitions: fade in from black on the countdown, settle darker on the game over
         if (s.phase == Phase.COUNTDOWN && s.countdown > 0.9 && !reducedMotion) {
@@ -1323,6 +1832,17 @@ class RunRenderer(
     companion object {
         /** World units per screen height (the desktop browser frame in the reference shot). */
         const val LOGICAL_H = 680.0
+        // palette slots
+        private const val P_TOP = 0
+        private const val P_MID = 1
+        private const val P_HOR = 2
+        private const val P_FAR = 3
+        private const val P_FOG = 6
+        private const val P_SUN = 7
+        private const val P_RIM = 8
+        private const val P_CLOUD = 9
+        private const val P_LIT = 10
+        private const val P_NEON = 11
         private val COIN_SHIMMER = intArrayOf(0, 1, 2, 1, 0, 7, 6, 7)
     }
 }
