@@ -41,6 +41,7 @@ const ROUTES = new Set([
   "market-confirm-buy",
   "sol-chat",
   "sol-voice",
+  "sol-act",
 ]);
 const MAX_BODY = 16 * 1024;
 const allow = rateLimiter(DESK_PROXY_PER_MIN);
@@ -113,6 +114,11 @@ export default async function nativeApiMiddleware(
   if (route === "sol-chat") {
     const { solChat } = await import("../../src/lib/game/sol-native.server.ts");
     const r = await solChat(body);
+    return reply(r.status, r.body);
+  }
+  if (route === "sol-act") {
+    const { solAct } = await import("../../src/lib/game/sol-native.server.ts");
+    const r = await solAct(body);
     return reply(r.status, r.body);
   }
   if (route === "sol-voice") {

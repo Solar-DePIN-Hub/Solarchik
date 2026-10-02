@@ -52,7 +52,7 @@ const GAME_FACTS_EN = [
 ].join(" ");
 
 const PERSONA_UK = [
-  "Ти — Сонячко (англійською Sol), маленький теплий робот-компаньйон із сонячною панеллю в грі Solarchik. Ти не людина, але ти справжній друг гравця.",
+  "Ти — Sol (українською Сол), маленький теплий робот-компаньйон із сонячною панеллю в грі Solarchik. Ти не людина, але ти справжній друг гравця.",
   "Відповідай ЛИШЕ українською: жива розмовна мова, звертання на «ти», без кальок з англійської, без русизмів, без вигаданих приказок і канцеляриту.",
   "Відповідай саме на те, що спитали, 1–2 короткі речення (до 200 символів). Факти гри згадуй лише тоді, коли про них питають. Без markdown, списків і емодзі.",
   "Англійські слова не вживай, окрім назв Solana, SOL, devnet, NFT, Pro.",
@@ -344,4 +344,63 @@ export async function solVoice(input: Record<string, unknown>): Promise<SolVoice
   );
   if (won) return { status: 200, audio: won.audio, model: won.model };
   return { status: 503, body: { ok: false, error: "unavailable", tried, ms: Date.now() - t0 } };
+}
+
+/* ------------------------------ Sol actions (0.21.7) ------------------------------ */
+
+/**
+ * "Do things" mode: Gemini structured output (JSON schema) → one validated action. The server
+ * never executes: the phone/web shows a confirmation card and runs the real devnet flow on tap.
+ */
+export async function solAct(input: Record<string, unknown>): Promise<SolChatResult> {
+  const { ACTION_SCHEMA, actionPrompt, ctxLines, normalizeAction, readCtx, withoutNames } = await import("./sol-actions.ts");
+  const lang = solLang(input.language ?? input.lang);
+  const message = clip(input.message, 600);
+  if (!message) return { status: 400, body: { ok: false, error: "message" } };
+  const ctx = readCtx(input.context);
+  const system = actionPrompt(lang) + "\n\nCONTEXT\n" + ctxLines(ctx);
+  const body = (thinking: string) => ({
+    systemInstruction: { parts: [{ text: system }] },
+    contents: contents(input.history, message),
+    generationConfig: {
+      maxOutputTokens: 400,
+      responseMimeType: "application/json",
+      responseSchema: ACTION_SCHEMA,
+      thinkingConfig: { thinkingLevel: thinking },
+    },
+  });
+  const t0 = Date.now();
+  const tried: Tried[] = [];
+  const won = await hedge(
+    CHAT_MODELS.map(({ model, thinking }, i) => ({
+      hedgeMs: CHAT_HEDGE_MS[i] ?? 0,
+      run: async (signal: AbortSignal) => {
+        const s = Date.now();
+        const { status, json } = await gemini(model, body(thinking), CHAT_TIMEOUT_MS, signal);
+        const raw = partsOf(json).filter((p) => !p.thought).map((p) => p.text || "").join("");
+        let parsed: Record<string, unknown> | null = null;
+        try {
+          const v = JSON.parse(raw);
+          if (v && typeof v === "object") parsed = v as Record<string, unknown>;
+        } catch {
+          parsed = null;
+        }
+        const said = parsed ? cleanReply(String(parsed.reply ?? ""), 320) : "";
+        const fits = said === "" || replyFits(withoutNames(said, ctx), lang);
+        // A valid action is worth more than its sentence: keep the action, drop a wrong-language reply (the app has its own card text).
+        const hasAction = parsed != null && normalizeAction(parsed, ctx) != null;
+        const ok = status === 200 && parsed != null && (fits || hasAction);
+        const reply = fits ? said : "";
+        tried.push({ model, status: status === 200 && !ok ? (parsed ? "wrong-language" : "bad-json") : status, ms: Date.now() - s });
+        return ok && parsed ? { parsed, reply, model } : null;
+      },
+    })),
+    CHAT_BUDGET_MS,
+  );
+  if (!won) return { status: 503, body: { ok: false, error: "unavailable", language: lang, tried, ms: Date.now() - t0 } };
+  const action = normalizeAction(won.parsed, ctx);
+  return {
+    status: 200,
+    body: { ok: true, reply: won.reply, action, raw: won.parsed.action ?? "none", language: lang, provider: "gemini", model: won.model, ms: Date.now() - t0, tried },
+  };
 }

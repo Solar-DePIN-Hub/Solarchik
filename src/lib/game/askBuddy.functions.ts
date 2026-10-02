@@ -26,7 +26,8 @@ const VIBE_LINE: Record<PetVibe, string> = {
 };
 
 const CHAT_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.6-flash"] as const;
-const TTS_MODELS = ["gemini-2.5-flash-preview-tts", "gemini-3.1-flash-tts-preview"] as const;
+// 3.8 ids are current (Sep 2026); 2.5 preview hung past the timeout and 3.1 preview answered 429 on this key.
+const TTS_MODELS = ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts", "gemini-3.1-flash-tts-preview"] as const;
 const STT_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.6-flash"] as const;
 
 type HistoryItem = { role: "user" | "buddy"; text: string };
