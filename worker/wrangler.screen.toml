@@ -3,7 +3,10 @@
 # (compat date 2026-09-19, KV BALANCES, secret OPENAI_API_KEY). Optional var/secret SOLANA_RPC (mainnet RPC URL).
 # Secrets stay in Cloudflare; never put them here: OPENAI_API_KEY, OPENAI_WEBHOOK_SECRET (enforces /sip signatures),
 # SECRETARY_TOKEN (/expect /voicemail /phone), OWNER_USER_ID (default number +380914810885 -> owner/demo account).
-# Live 78069545 (2 Oct). Rollback: wrangler rollback 58787520-b5de-43ff-ae1c-352d900b8a25 --name solarchik-screen (older base 744a4bf8).
+# Live 241bf359-f4d5-4e84-90df-3a13cd32a153 (2 Oct 2026, ~23:46 Kyiv): robust called-number detection + masked header log, webhook dedup,
+# /secretary-lang, starter credit + TRIAL_DAILY_CAP / TRIAL_CALLER_CAP / TRIAL_SESSIONS (optional vars), demo line budget.
+# Rollback: npx wrangler rollback 71b66276-8aad-4cc8-890c-f2d33a72e1ba --name solarchik-screen (78069545 code + current secrets;
+# older: 58787520, base 744a4bf8).
 name = "solarchik-screen"
 main = "solarchik-screen.js"
 compatibility_date = "2026-09-19"

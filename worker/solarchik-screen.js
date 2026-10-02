@@ -278,14 +278,38 @@ async function topup(env, body) {
 /** The secretary's own line. Calls diverted to it map to the owner/demo account unless KV maps them. */
 export const DEFAULT_NUMBER = "+380914810885";
 
-/** "+380 91 481-08-85", "sip:+380914810885@x", "<tel:380914810885>;reason=unconditional" -> "+380914810885". */
+/**
+ * One phone number as E.164. plus=true when the source had a leading "+". Ukrainian local numbers
+ * (0XXXXXXXXX) become +380XXXXXXXXX; 380XXXXXXXXX without "+" gets it; 00-prefixed international loses 00.
+ */
+export function normNumber(raw, plus = false) {
+  let d = String(raw || "").replace(/\D/g, "");
+  if (!plus && d.startsWith("00")) d = d.slice(2);
+  if (!plus && /^0\d{9}$/.test(d)) return "+38" + d;
+  if (d.length < 8 || d.length > 15 || d.startsWith("0")) return "";
+  return "+" + d;
+}
+
+/**
+ * Every phone number in one SIP header value, in order: user parts of sip:/sips:/tel: URIs
+ * ("<sip:380914810885;user=phone@x>", "tel:+380-91-481-08-85", URL-encoded %2B), a quoted all-digit display
+ * name, or a value that is only a number ("+380 91 481-08-85", "0914810885"). Dots are not number separators,
+ * so Call-IDs, IPs and timestamps with dots are never read as numbers.
+ */
+export function numbersIn(value) {
+  const v = String(value || "").replace(/%2B/gi, "+");
+  const out = [];
+  const add = (n) => n && !out.includes(n) && out.push(n);
+  for (const m of v.matchAll(/(?:sips?|tel):(\+?)([\d()\- ]{6,24})(?=[@;>,?\s"]|$)/gi)) add(normNumber(m[2], m[1] === "+"));
+  for (const m of v.matchAll(/"\s*(\+?)(\d[\d\s()-]{6,22}\d)\s*"/g)) add(normNumber(m[2], m[1] === "+"));
+  const whole = /^\s*<?\s*(\+?)(\d[\d\s()-]{6,22}\d)\s*>?\s*$/.exec(v);
+  if (whole) add(normNumber(whole[2], whole[1] === "+"));
+  return out;
+}
+
+/** "+380 91 481-08-85", "sip:+380914810885@x", "<tel:380914810885>;reason=unconditional", "0914810885" -> "+380914810885". */
 export function e164(raw) {
-  const t = String(raw || "");
-  const m = /(?:sip:|tel:|^|[<\s"])\+?(\d[\d\s().-]{6,20}\d)/.exec(t);
-  if (!m) return "";
-  const digits = m[1].replace(/\D/g, "");
-  if (digits.length < 8 || digits.length > 15 || digits.startsWith("0")) return "";
-  return "+" + digits;
+  return numbersIn(raw)[0] || "";
 }
 
 function header(sipHeaders, name) {
@@ -296,26 +320,261 @@ function header(sipHeaders, name) {
   return "";
 }
 
+/** The secretary's own line (SECRETARY_NUMBER, else DEFAULT_NUMBER). */
+export function ownLine(env) {
+  return e164(env?.SECRETARY_NUMBER) || DEFAULT_NUMBER;
+}
+
+/** Headers that may carry the number the call was meant for (player's number or the secretary line), in priority order. */
+const CALLED_HEADERS = ["Diversion", "History-Info", "P-Called-Party-ID", "Request-URI", "X-Original-To", "Original-To", "X-Called-Party-ID"];
+/** X-* header names that hint at the called side / at the caller (the latter are never read as the called number). */
+const X_CALLED = /num|did|dnis|called|(^|-)to($|-)|dest|ext|line|phone|target|orig|redirect|forward|divert|request|uri/i;
+const X_CALLER = /from|caller|calling|cli|ani|source|src|remote|asserted|pai|rpid/i;
+
 /**
- * Who the call is for and who is calling. A forwarded call carries the player's own number in Diversion
- * (or History-Info); a direct call only has To. The From number is the caller.
+ * Who the call is for and who is calling. A forwarded call carries the player's own number in Diversion /
+ * History-Info / P-Called-Party-ID (or a Zadarma X-header); a direct call may only have To. From (then
+ * P-Asserted-Identity, Remote-Party-ID) is the caller. OpenAI's To is usually the proj_…@sip.api.openai.com URI
+ * (no number). When no called number is found at all, the call is for the secretary's own line: this OpenAI
+ * project receives SIP only from that line (assumed: true).
  */
-export function callParties(sipHeaders) {
-  const forwarded = e164(header(sipHeaders, "Diversion")) || e164(header(sipHeaders, "History-Info"));
-  const to = e164(header(sipHeaders, "To"));
-  return { forwardedFrom: forwarded, to, number: forwarded || to, caller: e164(header(sipHeaders, "From")) || "unknown" };
+export function callParties(sipHeaders, env = {}) {
+  const list = Array.isArray(sipHeaders) ? sipHeaders : [];
+  const caller =
+    e164(header(list, "From")) || e164(header(list, "P-Asserted-Identity")) || e164(header(list, "Remote-Party-ID")) || "unknown";
+  const candidates = [];
+  const add = (n, via) => {
+    if (n && n !== caller && !candidates.some((c) => c.number === n)) candidates.push({ number: n, via });
+  };
+  for (const name of CALLED_HEADERS) for (const n of numbersIn(header(list, name))) add(n, name);
+  for (const h of list) {
+    const name = String(h?.name || "");
+    if (!/^x-/i.test(name) || X_CALLER.test(name) || CALLED_HEADERS.some((c) => c.toLowerCase() === name.toLowerCase())) continue;
+    const value = String(h?.value || "");
+    if (X_CALLED.test(name) || /(?:sips?|tel):/i.test(value)) for (const n of numbersIn(value)) add(n, name);
+  }
+  const to = e164(header(list, "To"));
+  if (to) add(to, "To");
+  const forwarded = candidates.find((c) => c.via !== "To");
+  if (!candidates.length) {
+    const own = ownLine(env);
+    return { forwardedFrom: "", to: "", number: own, caller, candidates: [], via: "", assumed: true };
+  }
+  return {
+    forwardedFrom: forwarded?.number || "",
+    to: to && to !== caller ? to : "",
+    number: candidates[0].number,
+    caller,
+    candidates: candidates.map((c) => c.number),
+    via: candidates[0].via,
+    assumed: false,
+  };
 }
 
 /** KV phone:<number> -> userId (set with POST /phone); the secretary's own number -> OWNER_USER_ID. */
 export async function playerFor(env, parties) {
-  for (const n of [parties.forwardedFrom, parties.to]) {
-    if (!n) continue;
+  const nums = parties.candidates?.length ? parties.candidates : [parties.forwardedFrom, parties.to].filter(Boolean);
+  for (const n of nums) {
     const mapped = await env.BALANCES.get("phone:" + n);
     if (mapped) return mapped;
   }
-  const own = e164(env.SECRETARY_NUMBER) || DEFAULT_NUMBER;
-  if ((parties.number === own || parties.to === own) && env.OWNER_USER_ID) return String(env.OWNER_USER_ID);
+  if (isOwnLine(env, parties) && env.OWNER_USER_ID) return String(env.OWNER_USER_ID);
   return "";
+}
+
+export function isOwnLine(env, parties) {
+  const own = ownLine(env);
+  return parties.number === own || parties.to === own || (parties.candidates || []).includes(own);
+}
+
+/**
+ * Privacy-safe copy of a SIP header value for logs: quoted display names dropped, IPv4 addresses replaced,
+ * every run of 5+ digits reduced to its last 4 ("+380914810885" -> "+…0885"), length capped.
+ */
+export function maskValue(value) {
+  return String(value ?? "")
+    .slice(0, 400)
+    .replace(/"[^"]*"/g, '"…"')
+    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, "ip")
+    .replace(/(\+?)(\d[\d\s()-]{3,}\d)/g, (m, plus, body) => {
+      const d = body.replace(/\D/g, "");
+      return d.length >= 5 ? plus + "…" + d.slice(-4) : m;
+    })
+    .slice(0, 160);
+}
+
+export function maskHeaders(sipHeaders) {
+  return (Array.isArray(sipHeaders) ? sipHeaders : []).slice(0, 40).map((h) => ({ n: String(h?.name || "").slice(0, 60), v: maskValue(h?.value) }));
+}
+
+const last4 = (n) => (n && n !== "unknown" ? "…" + String(n).slice(-4) : String(n || ""));
+
+// ---- Secretary language (per player): KV secretary_lang:<userId> = auto | uk | en (default auto) ----
+
+export const LANGS = ["auto", "uk", "en"];
+export const LANG_RULE = {
+  uk: "Always speak Ukrainian.",
+  en: "Always speak English.",
+  auto: "Greet in Ukrainian, then reply in the language the caller speaks.",
+};
+
+export async function langOf(env, userId) {
+  if (!userId) return "auto";
+  const v = await env.BALANCES.get("secretary_lang:" + userId);
+  return LANGS.includes(v) ? v : "auto";
+}
+
+export function voiceFor(lang, withNote) {
+  return VOICE + "\n" + (LANG_RULE[lang] || LANG_RULE.auto) + (withNote ? NOTE_RULE : "");
+}
+
+function validUserId(userId) {
+  return typeof userId === "string" && userId.length >= 8 && userId.length <= 80 && !/\s/.test(userId);
+}
+
+// ---- Starter (trial) credit and the demo line budget ----
+
+/** Sessions of starter credit per user id (env TRIAL_SESSIONS, default 3 -> $0.60). 0 turns the trial off. */
+export const TRIAL_SESSIONS = 3;
+/** Trial-funded sessions per UTC day across everyone (env TRIAL_DAILY_CAP). */
+export const TRIAL_DAILY_CAP = 30;
+/** Trial-funded calls per caller number per UTC day (env TRIAL_CALLER_CAP). Hidden numbers share one bucket. */
+export const TRIAL_CALLER_CAP = 3;
+const COUNTER_TTL = 2 * 86400;
+
+function capOf(v, d) {
+  if (v === undefined || v === null || v === "") return d;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : d;
+}
+
+const cents = (x) => Math.round(x * 100) / 100;
+
+function dayKey(now = Date.now()) {
+  return new Date(now).toISOString().slice(0, 10);
+}
+
+async function sha16(text) {
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(String(text))));
+  return [...h.slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Starter credit of a user id. It is granted once per id: until the first trial-funded session it is
+ * virtual (nothing written, so reading /balance costs no KV writes), shown to ids that have never had a paid
+ * balance key; the first trial session writes trial_granted:<id> and trial:<id>. Ids that already have a
+ * paid balance key before claiming it do not get it.
+ */
+export async function trialOf(env, userId) {
+  const sessions = capOf(env.TRIAL_SESSIONS, TRIAL_SESSIONS);
+  if (!validUserId(userId) || sessions === 0) return { usd: 0, granted: false };
+  if (await env.BALANCES.get("trial_granted:" + userId)) {
+    return { usd: Number((await env.BALANCES.get("trial:" + userId)) || 0), granted: true };
+  }
+  if ((await env.BALANCES.get(userId)) !== null) return { usd: 0, granted: false };
+  return { usd: cents(sessions * SESSION_USD), granted: false };
+}
+
+/**
+ * Takes one slot of the shared trial/demo budget: the global daily cap and, for phone calls, the per-caller
+ * cap. Returns "" when taken, else TRIAL_DAILY_CAP / TRIAL_CALLER_CAP. KV counters are best effort (not atomic).
+ */
+export async function takeTrialSlot(env, caller = null, now = Date.now()) {
+  const day = dayKey(now);
+  const gKey = "trial_day:" + day;
+  const used = Number((await env.BALANCES.get(gKey)) || 0);
+  if (used >= capOf(env.TRIAL_DAILY_CAP, TRIAL_DAILY_CAP)) return "TRIAL_DAILY_CAP";
+  let cKey = "";
+  let cUsed = 0;
+  if (caller !== null) {
+    cKey = "trial_caller:" + day + ":" + (await sha16(caller || "unknown"));
+    cUsed = Number((await env.BALANCES.get(cKey)) || 0);
+    if (cUsed >= capOf(env.TRIAL_CALLER_CAP, TRIAL_CALLER_CAP)) return "TRIAL_CALLER_CAP";
+  }
+  await env.BALANCES.put(gKey, String(used + 1), { expirationTtl: COUNTER_TTL });
+  if (cKey) await env.BALANCES.put(cKey, String(cUsed + 1), { expirationTtl: COUNTER_TTL });
+  return "";
+}
+
+/**
+ * One session for userId: starter credit first (within the caps), then paid credit.
+ * -> { ok, source: "trial" | "paid", usd (total left), refund() } or { ok: false, reason, usd }.
+ * caller = the caller number for phone calls (per-caller cap), null for /screen.
+ */
+export async function chargeSession(env, userId, caller = null) {
+  const paid = await getUsd(env, userId);
+  const t = await trialOf(env, userId);
+  let reason = "";
+  if (t.usd >= SESSION_USD - 1e-9) {
+    reason = await takeTrialSlot(env, caller);
+    if (!reason) {
+      if (!t.granted) await env.BALANCES.put("trial_granted:" + userId, String(Date.now()));
+      const left = cents(t.usd - SESSION_USD);
+      await env.BALANCES.put("trial:" + userId, String(left));
+      return {
+        ok: true,
+        source: "trial",
+        usd: cents(paid + left),
+        trialUsd: left,
+        refund: async () => {
+          const cur = Number((await env.BALANCES.get("trial:" + userId)) || 0);
+          await env.BALANCES.put("trial:" + userId, String(cents(cur + SESSION_USD)));
+        },
+      };
+    }
+  }
+  if (paid >= SESSION_USD - 1e-9) {
+    const next = await setUsd(env, userId, paid - SESSION_USD);
+    return {
+      ok: true,
+      source: "paid",
+      usd: cents(next + t.usd),
+      trialUsd: t.usd,
+      refund: async () => void (await setUsd(env, userId, (await getUsd(env, userId)) + SESSION_USD)),
+    };
+  }
+  return { ok: false, reason: reason || "NEED_TOPUP", usd: cents(paid + t.usd) };
+}
+
+const MISSED = {
+  NEED_TOPUP: "Missed call: the secretary has no credit. Top up to let it answer.",
+  TRIAL_DAILY_CAP: "Missed call: today's free trial calls are used up for everyone. Top up to let the secretary answer.",
+  TRIAL_CALLER_CAP: "Missed call: this caller used up today's free trial calls. Top up to let the secretary answer.",
+};
+
+// ---- Webhook dedup: the same realtime.call.incoming may be delivered more than once ----
+
+export const DEDUP_TTL_SEC = 600;
+const SEEN = new Map();
+
+/** Tests only: forget the in-isolate dedup memory. */
+export function resetDedupMemory() {
+  SEEN.clear();
+}
+
+/**
+ * true for the first delivery of these keys (dedup:wh:<webhook-id>, dedup:call:<call_id>), false for a repeat.
+ * The in-isolate map is checked and set before any await, so two deliveries racing into the same isolate are
+ * caught; KV (TTL 10 min) catches later repeats across isolates. KV is eventually consistent, so two
+ * deliveries landing in different data centres within ~a second can still both pass (strict dedup would need
+ * a Durable Object).
+ */
+export async function firstDelivery(env, keys, now = Date.now()) {
+  for (const [k, exp] of SEEN) if (exp < now) SEEN.delete(k);
+  const ks = keys.filter(Boolean);
+  if (ks.some((k) => SEEN.has(k))) return false;
+  for (const k of ks) SEEN.set(k, now + DEDUP_TTL_SEC * 1000);
+  for (const k of ks) if (await env.BALANCES.get(k)) return false;
+  await Promise.all(ks.map((k) => env.BALANCES.put(k, String(now), { expirationTtl: DEDUP_TTL_SEC })));
+  return true;
+}
+
+/** After a failed accept: let OpenAI's retry try again. */
+async function forgetDelivery(env, keys) {
+  for (const k of keys.filter(Boolean)) {
+    SEEN.delete(k);
+    await env.BALANCES.delete?.(k);
+  }
 }
 
 async function hmacHex(key, text) {
@@ -431,32 +690,72 @@ async function acceptCall(env, callId, body) {
 }
 
 /**
- * realtime.call.incoming: find the player, charge one session from their credit, accept with the note tool.
- * Unmapped numbers are accepted as before (no player to bill or notify) so live calls never break.
- * A mapped player without credit gets a missed-call line in the inbox and the call is rejected (busy).
+ * realtime.call.incoming: find the player, charge one session (starter credit within the caps, else paid),
+ * accept with the note tool and the player's language. The secretary's own line falls back to the shared
+ * demo budget when its owner cannot pay, so a judge can simply dial it. Unmapped calls (no OWNER_USER_ID, no
+ * KV phone map) are answered from the demo budget too, without billing or a note. When the budget/credit is
+ * gone: a missed-call line in the inbox (if there is a player) and reject 486.
  */
-async function incomingCall(env, origin, callId, sipHeaders) {
-  const parties = callParties(sipHeaders);
+async function incomingCall(env, origin, callId, sipHeaders, dedupKeys = [], dataKeys = []) {
+  const parties = callParties(sipHeaders, env);
+  console.log(
+    JSON.stringify({
+      event: "sip_headers",
+      callId: String(callId).slice(-8),
+      headers: maskHeaders(sipHeaders),
+      number: last4(parties.number),
+      via: parties.via || (parties.assumed ? "assumed_own_line" : ""),
+      caller: last4(parties.caller),
+      dataKeys: dataKeys.slice(0, 20),
+    }),
+  );
   const userId = await playerFor(env, parties);
-  const base = { type: "realtime", model: "gpt-realtime", instructions: VOICE };
-  if (!userId) {
-    console.log(JSON.stringify({ event: "sip_unmapped", number: parties.number ? parties.number.slice(0, 6) + "…" : "" }));
-    const accept = await acceptCall(env, callId, base);
-    return json({ accepted: accept.ok, status: accept.status, player: false });
-  }
-  const cur = await getUsd(env, userId);
-  if (cur < SESSION_USD) {
-    await addInbox(env, userId, { callId, caller: parties.caller, text: "Missed call: the secretary has no credit. Top up to let it answer.", at: Date.now(), status: "need_topup" });
-    const rej = await fetch("https://api.openai.com/v1/realtime/calls/" + encodeURIComponent(callId) + "/reject", {
+  const own = isOwnLine(env, parties);
+  const lang = await langOf(env, userId);
+  const base = { type: "realtime", model: "gpt-realtime", instructions: voiceFor(lang, false) };
+  const reject = () =>
+    fetch("https://api.openai.com/v1/realtime/calls/" + encodeURIComponent(callId) + "/reject", {
       method: "POST",
       headers: { Authorization: "Bearer " + env.OPENAI_API_KEY, "Content-Type": "application/json" },
       body: JSON.stringify({ status_code: 486 }),
     }).catch(() => null);
-    return json({ accepted: false, rejected: Boolean(rej?.ok), error: "NEED_TOPUP" });
+
+  if (!userId) {
+    const reason = await takeTrialSlot(env, parties.caller);
+    console.log(
+      JSON.stringify({
+        event: "sip_unmapped",
+        number: last4(parties.number),
+        assumed: parties.assumed,
+        ownLine: own,
+        why: own ? "OWNER_USER_ID not set" : "no phone:<number> mapping",
+        budget: reason || "demo",
+      }),
+    );
+    if (reason) {
+      const rej = await reject();
+      return json({ accepted: false, rejected: Boolean(rej?.ok), error: "NEED_TOPUP", reason, player: false });
+    }
+    const accept = await acceptCall(env, callId, base);
+    if (!accept.ok) await forgetDelivery(env, dedupKeys);
+    return json({ accepted: accept.ok, status: accept.status, player: false, trial: true, source: "demo", lang });
   }
-  const charged = await setUsd(env, userId, cur - SESSION_USD);
+
+  let charge = await chargeSession(env, userId, parties.caller);
+  if (!charge.ok && own) {
+    // The demo line: its owner pays when they can; otherwise the shared demo budget answers.
+    const reason = await takeTrialSlot(env, parties.caller);
+    charge = reason ? { ...charge, reason } : { ok: true, source: "demo", usd: charge.usd, refund: async () => {} };
+  }
+  if (!charge.ok) {
+    await addInbox(env, userId, { callId, caller: parties.caller, text: MISSED[charge.reason] || MISSED.NEED_TOPUP, at: Date.now(), status: "need_topup", reason: charge.reason });
+    const rej = await reject();
+    return json({ accepted: false, rejected: Boolean(rej?.ok), error: "NEED_TOPUP", reason: charge.reason });
+  }
+  const trial = charge.source !== "paid";
+  const chargedUsd = charge.source === "demo" ? 0 : SESSION_USD;
   await env.BALANCES.put("call:" + callId, JSON.stringify({ userId, caller: parties.caller, at: Date.now() }), { expirationTtl: 3600 });
-  await addInbox(env, userId, { callId, caller: parties.caller, text: "Call answered by the secretary. Note follows.", at: Date.now(), status: "pending", chargedUsd: SESSION_USD });
+  await addInbox(env, userId, { callId, caller: parties.caller, text: "Call answered by the secretary. Note follows.", at: Date.now(), status: "pending", chargedUsd, trial, source: charge.source });
   const tool = {
     type: "mcp",
     server_label: "solarchik",
@@ -465,7 +764,7 @@ async function incomingCall(env, origin, callId, sipHeaders) {
     require_approval: "never",
     allowed_tools: [NOTE_TOOL.name],
   };
-  let accept = await acceptCall(env, callId, { ...base, instructions: VOICE + NOTE_RULE, tools: [tool] });
+  let accept = await acceptCall(env, callId, { ...base, instructions: voiceFor(lang, true), tools: [tool] });
   let withTool = accept.ok;
   if (!accept.ok && accept.status !== 404) {
     // The note tool must never cost the call: answer without it (the inbox keeps the "answered" line).
@@ -473,11 +772,12 @@ async function incomingCall(env, origin, callId, sipHeaders) {
     withTool = false;
   }
   if (!accept.ok) {
-    await setUsd(env, userId, charged + SESSION_USD);
+    await charge.refund();
     await patchInbox(env, userId, callId, { text: "Missed call: the secretary could not pick up (refunded).", status: "failed", chargedUsd: 0 });
+    await forgetDelivery(env, dedupKeys);
     return json({ accepted: false, status: accept.status, refunded: true });
   }
-  return json({ accepted: true, status: accept.status, player: true, noteTool: withTool, usd: charged });
+  return json({ accepted: true, status: accept.status, player: true, noteTool: withTool, usd: charge.usd, trial, source: charge.source, lang });
 }
 
 export default {
@@ -513,7 +813,14 @@ export default {
         (type === "realtime.call.incoming" || type === "live.transport.incoming" || type === "live.call.incoming") &&
         callId
       ) {
-        return incomingCall(env, url.origin, callId, body.data?.sip_headers);
+        const keys = ["dedup:call:" + callId];
+        const whId = request.headers.get("webhook-id");
+        if (whId) keys.unshift("dedup:wh:" + whId.slice(0, 120));
+        if (!(await firstDelivery(env, keys))) {
+          console.log(JSON.stringify({ event: "sip_duplicate", callId: String(callId).slice(-8) }));
+          return json({ ok: true, duplicate: true });
+        }
+        return incomingCall(env, url.origin, callId, body.data?.sip_headers, keys, Object.keys(body.data || {}));
       }
       return json({ ignored: type || "empty" });
     }
@@ -570,7 +877,21 @@ export default {
     if (request.method === "GET" && url.pathname === "/balance") {
       const userId = url.searchParams.get("userId") || "";
       if (!userId) return json({ error: "userId required" }, 400);
-      return json({ userId, usd: await getUsd(env, userId), sessionUsd: SESSION_USD });
+      const paidUsd = await getUsd(env, userId);
+      const t = await trialOf(env, userId);
+      return json({ userId, usd: cents(paidUsd + t.usd), paidUsd, trialUsd: t.usd, trial: t.usd > 0, sessionUsd: SESSION_USD });
+    }
+
+    if (url.pathname === "/secretary-lang" && (request.method === "GET" || request.method === "POST")) {
+      // Same access model as /inbox and /balance: the caller holds the player's random userId.
+      const body = request.method === "POST" ? await request.json().catch(() => ({})) : {};
+      const userId = String((request.method === "POST" ? body.userId : url.searchParams.get("userId")) || "").trim();
+      if (!validUserId(userId)) return json({ error: "userId required" }, 400);
+      if (request.method === "GET") return json({ userId, lang: await langOf(env, userId), options: LANGS });
+      const lang = String(body.lang || "").trim().toLowerCase();
+      if (!LANGS.includes(lang)) return json({ error: "lang must be one of auto, uk, en", options: LANGS }, 400);
+      await env.BALANCES.put("secretary_lang:" + userId, lang);
+      return json({ userId, lang, options: LANGS });
     }
 
     if (request.method === "POST" && url.pathname === "/topup") {
@@ -583,9 +904,10 @@ export default {
       const userId = String(body.userId || "");
       const text = String(body.text || "").trim();
       if (!userId || !text) return json({ error: "userId and text required" }, 400);
-      const cur = await getUsd(env, userId);
-      if (cur < SESSION_USD) return json({ error: "NEED_TOPUP", usd: cur }, 402);
-      const charged = await setUsd(env, userId, cur - SESSION_USD);
+      const charge = await chargeSession(env, userId, null);
+      if (!charge.ok) {
+        return json({ error: "NEED_TOPUP", reason: charge.reason, usd: charge.usd, ...(charge.reason !== "NEED_TOPUP" && { detail: MISSED[charge.reason] }) }, 402);
+      }
       try {
         const out = await secretary(env, text);
         return json({
@@ -593,11 +915,12 @@ export default {
           reply: out.reply,
           summary: out.summary,
           chargedUsd: SESSION_USD,
-          usd: charged,
+          usd: charge.usd,
+          trial: charge.source === "trial",
         });
       } catch (e) {
-        const usd = await setUsd(env, userId, charged + SESSION_USD);
-        return json({ error: "API_FAIL_REFUNDED", usd, detail: String(e) }, 500);
+        await charge.refund();
+        return json({ error: "API_FAIL_REFUNDED", usd: cents(charge.usd + SESSION_USD), detail: String(e) }, 500);
       }
     }
 
