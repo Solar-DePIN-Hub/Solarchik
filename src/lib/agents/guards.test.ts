@@ -467,3 +467,14 @@ describe("Combo is paid only", () => {
     assert.ok(buy.indexOf("sku.nft.classId === 3") < buy.indexOf("callMintStatus"));
   });
 });
+
+describe("buffer alias on the server", () => {
+  it("the `buffer` shim hands back the real Node Buffer (web3 layouts need writeUIntLE)", async () => {
+    const mod = await import("../../polyfill.ts");
+    assert.equal(mod.Buffer, globalThis.Buffer);
+    assert.equal(typeof mod.Buffer.alloc(8).writeUIntLE, "function");
+    const { SystemProgram, Keypair } = await import("@solana/web3.js");
+    const ix = SystemProgram.transfer({ fromPubkey: Keypair.generate().publicKey, toPubkey: Keypair.generate().publicKey, lamports: 200_000_000 });
+    assert.equal(ix.data.length, 12);
+  });
+});

@@ -126,8 +126,11 @@ class SolBuffer extends Uint8Array {
 }
 
 const g = globalThis as typeof globalThis & { Buffer?: typeof SolBuffer; global?: typeof globalThis };
+// Server (Node / Vercel functions): `buffer` is aliased here for every build, so hand back the real
+// Node Buffer. The shim lacks writeUIntLE & co., which broke web3.js SystemProgram.transfer on the server.
+const Impl: typeof SolBuffer = typeof g.Buffer === "undefined" ? SolBuffer : g.Buffer;
 if (typeof g.Buffer === "undefined") g.Buffer = SolBuffer;
 g.global = g;
 
-export { SolBuffer as Buffer };
-export default SolBuffer;
+export { Impl as Buffer, SolBuffer };
+export default Impl;
