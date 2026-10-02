@@ -576,11 +576,11 @@ Everything stays native Kotlin (Canvas + SoundPool/MediaPlayer). No engine was a
 
 Owner feedback from the 0.21.7 phone test (9 items) plus the secretary's duplicate-call bug.
 
-- **Secretary worker** (web-fees `c2f5d44`, Cloudflare `solarchik-screen` version `79a77437-e167-4f58-88dc-50905b082e88`; rollback with `npx wrangler rollback 81e336fa-670a-4e95-b818-e67a1ce609f2 --name solarchik-screen`).
+- **Secretary worker** (web-fees `c2f5d44` + `209ffb1`, Cloudflare `solarchik-screen` version `75c667e3-57eb-4529-b923-d8e6479ae999`; the previous good version is `79a77437-e167-4f58-88dc-50905b082e88`, and the pre-0.21.8 version is `81e336fa-670a-4e95-b818-e67a1ce609f2`. Roll back with `npx wrangler rollback <id> --name solarchik-screen`).
   - **Duplicate `realtime.call.incoming`.** A real call got two webhooks 166 ms apart. The second accept failed, refunded the call and overwrote the good inbox entry with "Missed call … (refunded)". Now a `CallRoom` Durable Object runs once per callId and keeps `call:<id>` markers (accepting / accepted / failed). A duplicate never charges, refunds or patches the inbox, and the charge happens exactly once.
   - **Notes.** A stronger NOTE_FIRST rule in the prompt. A sideband WebSocket transcribes the call. If the call ends without `save_call_note`, `finishNote` writes a gpt-4o-mini summary, or "Call answered; the caller left no details." It runs on close or by an alarm 16 min after accept.
-  - The called number is read from P-Called-Party-ID. Prompts ask only for name + reason, and the callback defaults to the caller's number. There is no company field.
-  - Worker tests: 28 + 19 pass.
+  - The called number is read from P-Called-Party-ID. Prompts ask only for name + reason, and the callback defaults to the caller's number. There is no company field anywhere: the tool schema, the legacy SUMMARY_JSON, the note text and the stored summary all drop it (`209ffb1`).
+  - Worker tests: 47/47 pass.
   - **Not yet seen on a real call:** the sideband note.
 - **Worker `/sol/chat`** (gpt-4.1-mini, fallback gpt-4o-mini, `propose_action` tool, NDJSON stream `{"d":…}` then `{"done":true,…}`). **Worker `/sol/tts`** (gpt-4o-mini-tts, default voice marin, PCM 24 kHz s16le streamed and edge-cached). `/balance` and `/secretary-lang` (auto/uk/en).
 - **#1 Ownership.** `agents/Ownership.kt`. `Desk.start` refuses an unowned PAPER start (`NOT_OWNED`).
