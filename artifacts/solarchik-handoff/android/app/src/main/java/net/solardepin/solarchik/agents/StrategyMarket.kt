@@ -208,7 +208,8 @@ data class StrategyCard(
 
 /** HTTP client for the strategy/market routes of the web server. */
 object StrategyApi {
-    const val BASE = "https://solarchik-super-app.vercel.app"
+    /** Production web server for the judges build (serves every /api/native route this app calls). */
+    const val BASE = "https://solarchik-market.vercel.app"
     private val json = Json { ignoreUnknownKeys = true }
 
     suspend fun post(route: String, body: JsonObject): JsonObject = withContext(Dispatchers.IO) {
