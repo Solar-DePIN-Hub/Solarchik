@@ -19,6 +19,7 @@ import {
 import type { StrategyInfo } from "@/lib/agents/strategy.server";
 import type { MarketItem } from "@/lib/agents/strategy-client";
 import { Button } from "@/components/ui/button";
+import { DEVNET_STRATEGY } from "@/lib/agents/devnet-demo";
 
 const field =
   "h-10 w-full rounded-md border border-border bg-surface px-2 text-sm text-fg outline-none focus-visible:outline-2 focus-visible:outline-accent";
@@ -472,6 +473,38 @@ export function JudgeStart() {
         <li>Магазин → «Ринок»: купи виставлений Strategy NFT; свій можна виставити після замка.</li>
         <li>На кожній картці: посилання Explorer і «Перевірити APR».</li>
       </ol>
+      <DevnetDemo />
     </section>
+  );
+}
+
+/** The real devnet run: demo Strategy NFTs (seller wallet) and the lock test, each with Explorer links. */
+function DevnetDemo() {
+  const now = useNow();
+  const d = DEVNET_STRATEGY;
+  const lockText = (unlockSec: number) => {
+    const left = saleLockLeftMs(unlockSec, now);
+    return left > 0 ? `замок до ${when(unlockSec * 1000)} (${lockLabel(left)})` : "замок знято";
+  };
+  return (
+    <div className="grid gap-1 text-xs" data-testid="devnet-demo">
+      <p className="font-medium">Демо Strategy NFT на devnet</p>
+      <p className="text-muted">
+        Колекція <Ext href={explorerUrl("address", d.collection)}>{short(d.collection)}</Ext> · продавець <Ext href={explorerUrl("address", d.seller)}>{short(d.seller)}</Ext>
+      </p>
+      <ul className="grid gap-1">
+        {d.demos.map((n) => (
+          <li key={n.asset} className="break-words">
+            <Ext href={coreExplorerUrl(n.asset)}>{n.name}</Ext> · <Ext href={explorerUrl("address", n.asset)}>{short(n.asset)}</Ext> ·{" "}
+            <Ext href={explorerUrl("tx", n.mintTx)}>мінт</Ext> · {lockText(n.unlockSec)}
+          </li>
+        ))}
+        <li className="break-words">
+          <Ext href={coreExplorerUrl(d.lockTest.asset)}>{d.lockTest.name}</Ext> · <Ext href={explorerUrl("tx", d.lockTest.strategyTx)}>зміна стратегії</Ext> ·{" "}
+          <Ext href={explorerUrl("tx", d.lockTest.refusedTransferTx)}>переказ відхилено ланцюгом</Ext> · <Ext href={explorerUrl("tx", d.lockTest.resultsTx)}>запис результатів</Ext> ·{" "}
+          {lockText(d.lockTest.unlockSec)}
+        </li>
+      </ul>
+    </div>
   );
 }

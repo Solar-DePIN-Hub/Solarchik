@@ -521,3 +521,17 @@ describe("judge faucet (devnet fallback, rate-limited)", () => {
     assert.equal(sent.length, 3);
   });
 });
+
+describe("devnet demo constants", () => {
+  it("are real-looking public addresses and signatures, locks end after the mint", async () => {
+    const { DEVNET_STRATEGY: d } = await import("./devnet-demo.ts");
+    const addr = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+    const sig = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
+    for (const a of [d.authority, d.collection, d.seller, d.buyer, d.lockTest.asset, ...d.demos.map((x) => x.asset)]) assert.match(a, addr);
+    for (const s of [...d.lockTest.mintTxs, d.lockTest.strategyTx, d.lockTest.refusedTransferTx, d.lockTest.resultsTx, ...d.demos.map((x) => x.mintTx)]) assert.match(s, sig);
+    assert.equal(new Set(d.demos.map((x) => x.asset)).size, d.demos.length);
+    // Locks end 240 h after the 2026-10-02 run, not earlier.
+    for (const u of [d.lockTest.unlockSec, ...d.demos.map((x) => x.unlockSec)]) assert.ok(u - SALE_LOCK_HOURS * 3600 >= Date.UTC(2026, 9, 2) / 1000);
+    for (const x of d.demos) assert.ok(x.priceSol >= 0.05 && x.priceSol <= 0.2);
+  });
+});

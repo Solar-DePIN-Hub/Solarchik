@@ -33,6 +33,8 @@
   - Market: list = freeze + TransferDelegate to the server (escrow); buy = one tx (buyer → seller 95%, → treasury 5%, server thaw + transfer); unlist = server thaw; no strategy change while listed; broken escrows are cancelled.
   - Judges: every card links to Solana Explorer (devnet) for the asset, Core attributes, strategy-change, results-write, sale and fee txs; "Verify APR" recomputes in the browser/phone from the listed trade records at the on-chain write time `pu` and shows match or the mismatches. Browser trades are labelled simulated. One-tap devnet SOL: public airdrop, then `faucet-drip` (server faucet wallet; one drip per wallet per UTC day, per-IP and daily caps, refuses funded wallets and mainnet RPCs).
 
+- STEP 23. Strategy NFTs on devnet with real signatures (`scripts/strategy-devnet-run.ts`, `docs/devnet-strategy-run.md`, `src/lib/agents/devnet-demo.ts`, judge panel list). Done on devnet: co-signed mint (collection `74Tyscw6…uQC`), strategy change v2 with the lock reset, listing refused by the server, owner transfer failed on chain (mpl-core 0x9), server-written results/APR with a matching judge recompute, faucet drip; three demo NFTs (Calm Hourly BTC, Momentum Rider 5m, Mean Revert Scout) owned by the test seller. Not done on devnet: list + buy, because every mint starts the 240 h lock (ends 2026-10-12 16:38 UTC); run `PHASE=market` after that.
+
 ## Env vars (see `.env.example`)
 
 - `DATABASE_URL` — Neon/Postgres. Needed for arb, arb credit, fee verification, Pro payment checks and mint slots. Migrations run in `npm run build` (new: `0004_payments.sql`, `0005_positions.sql`).

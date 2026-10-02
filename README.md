@@ -151,6 +151,17 @@ ETH, DOGE, XRP та інші без Solana-виводу не входять. І�
 
 Треба окремо: APK, цей GitHub, демо-відео з живого телефона, pitch. Старі скрінкасти за відео сабміту не рахуються.
 
+## For judges (devnet)
+
+Strategy NFTs live on Solana devnet in the server collection [`74Tyscw6gL9mDxvNsSSDuj6v4YHqFPCyUULirjLPeuQC`](https://explorer.solana.com/address/74Tyscw6gL9mDxvNsSSDuj6v4YHqFPCyUULirjLPeuQC?cluster=devnet) (server key `8eKeV2Vh7QhGHjsTgQN2m938iyeALqsGyhSiNQRJAxR3`). Demo NFTs owned by the test seller [`u2irHRaC…srQq`](https://explorer.solana.com/address/u2irHRaCwjogBYjdRQK7NmmzkGtLZzUqGfsSWAqsrQq?cluster=devnet):
+
+- **Calm Hourly BTC** — [`sZ4R4sbUtuGc8ygfmwHvG34zqL5LoSBRF5YkHDTDfVH`](https://core.metaplex.com/explorer/sZ4R4sbUtuGc8ygfmwHvG34zqL5LoSBRF5YkHDTDfVH?env=devnet) (calm, hourly windows, small stake)
+- **Momentum Rider 5m** — [`AV8EgTtPaZydbrRDZtFFUfeuDR32jB6oHuRozUhKWEwX`](https://core.metaplex.com/explorer/AV8EgTtPaZydbrRDZtFFUfeuDR32jB6oHuRozUhKWEwX?env=devnet) (risky, buys the side already above 0.6)
+- **Mean Revert Scout** — [`2ijiD193pRVfhomaFtXSNuc13ki9XVwhxw7AFXL1dsK7`](https://core.metaplex.com/explorer/2ijiD193pRVfhomaFtXSNuc13ki9XVwhxw7AFXL1dsK7?env=devnet) (balanced, buys cheap sides ≤ 0.35)
+- **Lock Test BTC Windows** — [`BxXZvfVhEbBDqYRYu3pK8pkBfWq6YQ3GL4QevGm1TDip`](https://core.metaplex.com/explorer/BxXZvfVhEbBDqYRYu3pK8pkBfWq6YQ3GL4QevGm1TDip?env=devnet): strategy changed to v2 ([tx](https://explorer.solana.com/tx/FU9HaQSHsQqU9x2s9T7HogELLk3b51i2jMdfkLFhHLzbqnEiZb6LGdt3NT6tN55HLBbqskNDyJsh65JpqwgY7p6?cluster=devnet)), owner transfer while frozen failed on chain ([tx](https://explorer.solana.com/tx/2kUUn4L8rNN6ntfEvMawocHDqsrysdSdEhoxYbuugZuSH3wnUw1rz8Zjgdqhg9HaouA3ghvw7g5MhMJfeHTxN9if?cluster=devnet)), server wrote APR / PnL / trades / win rate into the attributes ([tx](https://explorer.solana.com/tx/3JZbHzWkShuR54dc46frsas2zrBK6vSNPGuxwYaWoDHoZTGttkKGTghUpm8UjxxEEoR4Sk8zzwivPTh5GjwbjTqH?cluster=devnet)).
+
+Every mint writes strategy v1 and starts the 240 h sale lock, so these NFTs can be listed from 2026-10-12 16:38 UTC (19:38 Kyiv). Listing and buying (escrow, 95% seller / 5% royalty) were run on a local validator with the real mpl-core program; on devnet they are not done yet. All signatures: [docs/devnet-strategy-run.md](docs/devnet-strategy-run.md). The same list is in the app: Work → «Для суддів». To see these NFTs in a deployed app's market, its `MINT_AUTHORITY_SECRET` must be the key of `8eKeV2Vh…AxR3` (the collection is derived from it) and `DATABASE_URL` must be set.
+
 ## English
 
 Solarchik is a solar robot: a roof runner, a daily Solana Mobile **CLOCK IN** signature, and a Work desk.
