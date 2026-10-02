@@ -201,8 +201,11 @@ class RunShotsTest {
 
     @Test fun wireGrind() {
         val s = RunSim.create(seed, DayMod.WIRE)
-        assertTrue(stepUntil(s) { st -> st.grind && st.grounded && st.runTime > 3 })
-        repeat(4) { RunSim.step(s, RunSim.TICK, Input()) }
+        // on the wire, with no buffered jump about to fire, a few frames into the grind
+        assertTrue(stepUntil(s) { st ->
+            st.grind && st.grounded && st.jumpBuf == 0.0 && st.runTime > 3 &&
+                st.plats.any { it.kind == PlatKind.WIRE && st.x - it.x in 26.0..(it.w - 20) }
+        })
         shot("10-wire-grind", s)
     }
 
