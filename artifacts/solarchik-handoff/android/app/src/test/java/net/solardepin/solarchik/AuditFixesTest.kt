@@ -20,7 +20,6 @@ import net.solardepin.solarchik.core.AgentTier
 import net.solardepin.solarchik.core.Catalog
 import net.solardepin.solarchik.game.GameSave
 import net.solardepin.solarchik.notify.Notes
-import net.solardepin.solarchik.screen.IncomingScreenService
 import net.solardepin.solarchik.sol.SolChat
 import net.solardepin.solarchik.sol.SolChatStore
 import net.solardepin.solarchik.solana.Rpc
@@ -29,6 +28,7 @@ import net.solardepin.solarchik.wallet.SentTx
 import net.solardepin.solarchik.wallet.SolanaWallet
 import net.solardepin.solarchik.wallet.StickyBlockhash
 import net.solardepin.solarchik.wallet.WalletError
+import net.solardepin.solarchik.screen.Secretary
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -328,12 +328,12 @@ class AuditFixesTest {
 
     // ---- Call screening ----
 
-    @Test fun callScreeningNeverRejectsWhenContactsAreUnreadable() {
-        assertFalse(IncomingScreenService.shouldReject(incoming = true, screeningOn = true, contactsReadable = false, known = false))
-        assertFalse(IncomingScreenService.shouldReject(incoming = false, screeningOn = true, contactsReadable = true, known = false))
-        assertFalse(IncomingScreenService.shouldReject(incoming = true, screeningOn = false, contactsReadable = true, known = false))
-        assertFalse(IncomingScreenService.shouldReject(incoming = true, screeningOn = true, contactsReadable = true, known = true))
-        assertTrue(IncomingScreenService.shouldReject(incoming = true, screeningOn = true, contactsReadable = true, known = false))
+    @Test fun callScreeningOnlyActsOnIncomingCallsWithTheSecretaryOn() {
+        assertEquals(Secretary.Action.ALLOW, Secretary.decide(incoming = false, enabled = true, mode = Secretary.Mode.DECLINE, sdk = 34))
+        assertEquals(Secretary.Action.ALLOW, Secretary.decide(incoming = true, enabled = false, mode = Secretary.Mode.DECLINE, sdk = 34))
+        assertEquals(Secretary.Action.ALLOW, Secretary.decide(incoming = true, enabled = true, mode = Secretary.Mode.SILENCE, sdk = 28))
+        assertEquals(Secretary.Action.SILENCE, Secretary.decide(incoming = true, enabled = true, mode = Secretary.Mode.SILENCE, sdk = 29))
+        assertEquals(Secretary.Action.DECLINE, Secretary.decide(incoming = true, enabled = true, mode = Secretary.Mode.DECLINE, sdk = 34))
     }
 
     // ---- Locale: plurals and formatted strings ----

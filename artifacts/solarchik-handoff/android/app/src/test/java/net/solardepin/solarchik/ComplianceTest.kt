@@ -36,13 +36,14 @@ class ComplianceTest {
     private val dangerousAllowed = mapOf(
         "android.permission.RECORD_AUDIO" to "Sol voice input (SpeechRecognizer), asked on first mic tap",
         "android.permission.POST_NOTIFICATIONS" to "streak / reward / desk notes, asked from Settings",
-        "android.permission.READ_CONTACTS" to "call screening: only to tell known callers from unknown ones",
     )
 
     @Test fun onlyUsedPermissions() {
         val perms = requested()
         listOf(
             "android.permission.READ_CALL_LOG",
+            "android.permission.READ_CONTACTS",
+            "android.permission.REORDER_TASKS",
             "android.permission.READ_PHONE_STATE",
             "android.permission.MODIFY_AUDIO_SETTINGS",
             "android.permission.ACCESS_FINE_LOCATION",

@@ -42,7 +42,7 @@ object Catalog {
         AgentSku("sku-pred-events", "Events Scout #04", AgentClass.PREDICTION, "e", R.string.sku_events_blurb, R.drawable.robot_prism, 0xFFA78BFA.toInt()),
         AgentSku("sku-pred-weather", "Weather Station", AgentClass.PREDICTION, "w", R.string.sku_weather_blurb, R.drawable.robot_frost, 0xFF7AD1FF.toInt()),
         AgentSku("sku-combo-prime", "Combo Prime", AgentClass.COMBO, "cew", R.string.sku_combo_blurb, R.drawable.robot_sunflower, 0xFFF5C542.toInt()),
-        AgentSku("sku-dex-arb", "Titan × Backpack", AgentClass.DEX, "dex", R.string.sku_arb_blurb, R.drawable.robot_midnight, 0xFF5BD69A.toInt()),
+        AgentSku("sku-dex-arb", "Backpack SOL Desk", AgentClass.DEX, "dex", R.string.sku_arb_blurb, R.drawable.robot_midnight, 0xFF5BD69A.toInt()),
     )
 
     private val proIds = skus.map { "${it.id}-pro" }.toSet()
@@ -53,9 +53,20 @@ object Catalog {
 
     fun baseOf(skuId: String): AgentSku? = skus.firstOrNull { it.id == skuId.removeSuffix("-pro") }
 
+    /**
+     * Names already minted on-chain before a rename. "Titan × Backpack" (until 0.20.4) promised an arbitrage, but the
+     * native agent forecasts SOL/USDC direction from Backpack prices, so it is "Backpack SOL Desk" now (same sku id).
+     */
+    private val legacyNames = mapOf("Titan × Backpack" to "sku-dex-arb")
+
     /** Recovers sku + tier from an on-chain Core name ("Combo Prime Pro"). */
     fun fromName(name: String): Pair<AgentSku, String>? {
         val clean = name.trim()
+        for ((old, id) in legacyNames) {
+            val sku = skus.first { it.id == id }
+            if (clean == "$old Pro") return sku to AgentTier.PRO
+            if (clean == old) return sku to AgentTier.FREE
+        }
         for (sku in skus) {
             if (clean == sku.nameFor(AgentTier.PRO)) return sku to AgentTier.PRO
             if (clean == sku.name) return sku to AgentTier.FREE

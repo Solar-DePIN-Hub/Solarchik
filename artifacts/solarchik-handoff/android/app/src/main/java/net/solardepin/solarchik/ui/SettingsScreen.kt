@@ -12,13 +12,19 @@ import android.widget.CompoundButton
 import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import net.solardepin.solarchik.BuildConfig
 import net.solardepin.solarchik.MainActivity
 import net.solardepin.solarchik.R
 import net.solardepin.solarchik.core.AppData
 import net.solardepin.solarchik.core.SolarchikConfig
+import net.solardepin.solarchik.screen.CallReports
+import net.solardepin.solarchik.screen.PlayerIds
+import net.solardepin.solarchik.screen.ScreenApi
+import net.solardepin.solarchik.screen.Secretary
 import net.solardepin.solarchik.ui.Ui.dp
 
 class SettingsScreen(host: MainActivity) : Screen(host) {
@@ -28,6 +34,10 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     private var balance: Double? = null
     private var airdropping = false
     private lateinit var notesState: LinearLayout
+    private lateinit var secretaryBox: LinearLayout
+    private var secCredit: Double? = null
+    private var secBusy = false
+    private var voicemails: List<ScreenApi.Voicemail>? = null
 
     override fun build(): View = page {
         addView(Ui.display(ctx, ctx.getString(R.string.settings_title), 26f))
@@ -80,6 +90,11 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
                     if (on) host.requestNotifications(fromUser = false)
                 }, 8))
             }
+        })
+
+        addView(section(R.string.sec_title, R.drawable.ic_mic, Ui.PURPLE).apply {
+            secretaryBox = Ui.column(ctx)
+            addView(Ui.top(secretaryBox, 8))
         })
 
         addView(section(R.string.settings_language, R.drawable.ic_nav_yard, Ui.GREEN).apply {
@@ -136,6 +151,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     override fun onShow() {
         render()
         refreshBalance()
+        if (Secretary.supported() && (PlayerIds.screeningOn(ctx) || Secretary.pendingRef(ctx) != null)) refreshSecretary()
     }
 
     private fun refreshBalance() {
@@ -148,6 +164,7 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
     override fun render() {
         if (!this::walletBox.isInitialized) return
         renderNotes()
+        renderSecretary()
         val w = host.wallet
         networkBody.text = ctx.getString(
             R.string.join_dot,
@@ -202,6 +219,165 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
             notesState.addView(Ui.top(Ui.button(ctx, ctx.getString(R.string.notes_allow), Ui.Btn.SECONDARY, R.drawable.ic_timer) {
                 host.requestNotifications(fromUser = true)
             }, 10))
+        }
+    }
+
+    // ---- Call secretary ----
+
+    private fun renderSecretary() {
+        val box = secretaryBox
+        box.removeAllViews()
+        box.addView(Ui.muted(ctx, ctx.getString(R.string.sec_body)).apply { setLineSpacing(0f, 1.3f) })
+        if (!Secretary.supported()) {
+            box.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.sec_needs_android10), 13f, Ui.AMBER, 700), 10))
+            return
+        }
+        val on = PlayerIds.screeningOn(ctx) && Secretary.holdsRole(ctx)
+        box.addView(Ui.top(switchRow(ctx.getString(R.string.sec_toggle), on) { sw, want ->
+            if (!want) {
+                PlayerIds.setScreening(ctx, false)
+                render()
+            } else if (!(PlayerIds.screeningOn(ctx) && Secretary.holdsRole(ctx))) {
+                sw.isChecked = false
+                askToEnable()
+            }
+        }, 10))
+        if (on) {
+            box.addView(Ui.top(Ui.label(ctx, ctx.getString(R.string.sec_mode)), 12))
+            val modes = Ui.row(ctx, gap = 10)
+            val cur = Secretary.mode(ctx)
+            listOf(Secretary.Mode.SILENCE to R.string.sec_mode_silence, Secretary.Mode.DECLINE to R.string.sec_mode_decline).forEach { (m, label) ->
+                modes.addView(Ui.weight(Ui.button(ctx, ctx.getString(label), if (m == cur) Ui.Btn.SECONDARY else Ui.Btn.GHOST) {
+                    Secretary.setMode(ctx, m)
+                    render()
+                }))
+            }
+            box.addView(Ui.top(modes, 6))
+            box.addView(Ui.top(Ui.muted(ctx, ctx.getString(if (cur == Secretary.Mode.SILENCE) R.string.sec_mode_silence_body else R.string.sec_mode_decline_body), 12f), 6))
+        }
+
+        box.addView(Ui.top(switchRow(ctx.getString(R.string.sec_ai_notes, Fmt.sol(Secretary.NOTE_USD, 2)), Secretary.aiNotes(ctx)) { _, want ->
+            Secretary.setAiNotes(ctx, want)
+        }, 12))
+
+        val credit = secCredit ?: Secretary.lastUsd(ctx)
+        val creditRow = Ui.row(ctx)
+        creditRow.addView(Ui.weight(Ui.label(ctx, ctx.getString(R.string.sec_credit))))
+        creditRow.addView(Ui.text(ctx, credit?.let { "$" + Fmt.sol(it, 2) } ?: "—", 20f, Ui.TEXT, 900).apply {
+            setOnClickListener { refreshSecretary() }
+        })
+        box.addView(Ui.top(creditRow, 12))
+        if (Secretary.needTopup(ctx)) {
+            box.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.sec_need_topup), 13f, Ui.AMBER, 700), 6))
+        }
+        val pay = Ui.row(ctx, gap = 10)
+        pay.addView(Ui.weight(Ui.button(ctx, ctx.getString(R.string.sec_topup, Secretary.TOPUP_USD), Ui.Btn.SECONDARY, R.drawable.ic_wallet) { startTopup() }))
+        val check = Ui.button(ctx, ctx.getString(if (secBusy) R.string.sec_checking else R.string.sec_check), Ui.Btn.GHOST) { checkPayment() }
+        Ui.setEnabled(check, !secBusy && Secretary.pendingRef(ctx) != null)
+        pay.addView(Ui.weight(check))
+        box.addView(Ui.top(pay, 10))
+        box.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sec_topup_how), 12f), 6))
+
+        val reports = CallReports.list(ctx).take(8)
+        box.addView(Ui.top(Ui.label(ctx, ctx.getString(R.string.sec_reports)), 14))
+        if (reports.isEmpty()) box.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sec_reports_empty), 12f), 6))
+        reports.forEach { r ->
+            val head = ctx.getString(
+                R.string.sec_report_head,
+                Fmt.time(r.at),
+                r.callerName.ifBlank { r.number },
+                ctx.getString(if (r.action == "declined") R.string.sec_action_declined else R.string.sec_action_silenced),
+            )
+            box.addView(Ui.top(Ui.body(ctx, head), 8))
+            val detail = when (r.status) {
+                CallReports.STATUS_DONE -> listOf(r.reason, r.note).filter { it.isNotBlank() }.joinToString("\n")
+                CallReports.STATUS_PENDING -> ctx.getString(R.string.sec_status_pending)
+                CallReports.STATUS_NEED_TOPUP -> ctx.getString(R.string.sec_status_need_topup)
+                CallReports.STATUS_FAILED -> ctx.getString(R.string.sec_status_failed)
+                else -> ""
+            }
+            if (detail.isNotBlank()) box.addView(Ui.top(Ui.muted(ctx, detail, 12f), 2))
+        }
+
+        box.addView(Ui.top(Ui.label(ctx, ctx.getString(R.string.sec_voicemails)), 14))
+        val vm = voicemails
+        when {
+            vm == null -> box.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sec_voicemails_tap), 12f).apply {
+                setOnClickListener { refreshSecretary() }
+            }, 6))
+            vm.isEmpty() -> box.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sec_voicemails_empty), 12f), 6))
+            else -> vm.take(5).forEach { v ->
+                box.addView(Ui.top(Ui.body(ctx, Fmt.time(v.at) + " · " + v.caller.ifBlank { "—" }), 8))
+                box.addView(Ui.top(Ui.muted(ctx, v.text, 12f), 2))
+            }
+        }
+    }
+
+    /** Rationale first, then the system role dialog. */
+    private fun askToEnable() {
+        android.app.AlertDialog.Builder(host)
+            .setTitle(R.string.sec_rationale_title)
+            .setMessage(R.string.sec_rationale_body)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.sec_rationale_go) { _, _ ->
+                host.requestScreeningRole { ok ->
+                    PlayerIds.setScreening(ctx, ok)
+                    if (!ok) host.toast(ctx.getString(R.string.sec_role_denied))
+                    render()
+                }
+            }
+            .show()
+    }
+
+    private fun startTopup() {
+        val ref = Secretary.newReference()
+        val uri = Secretary.payUri(PlayerIds.get(ctx), ref)
+        Secretary.setPendingRef(ctx, ref)
+        runCatching { host.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri))) }
+            .onFailure {
+                copy(uri)
+                host.toast(ctx.getString(R.string.sec_no_wallet))
+            }
+        render()
+    }
+
+    private fun checkPayment() {
+        val ref = Secretary.pendingRef(ctx) ?: return
+        if (secBusy) return
+        secBusy = true
+        render()
+        val userId = PlayerIds.get(ctx)
+        host.scope.launch {
+            val out = withContext(Dispatchers.IO) { ScreenApi.topup(userId, ref = ref) }
+            when (out) {
+                is ScreenApi.Topup.Credited -> {
+                    Secretary.setPendingRef(ctx, null)
+                    Secretary.setLastUsd(ctx, out.usd)
+                    secCredit = out.usd
+                    host.toast(ctx.getString(R.string.sec_paid, "$" + Fmt.sol(out.added, 2)))
+                }
+                ScreenApi.Topup.AlreadyUsed -> {
+                    Secretary.setPendingRef(ctx, null)
+                    withContext(Dispatchers.IO) { ScreenApi.balance(userId) }?.let { secCredit = it; Secretary.setLastUsd(ctx, it) }
+                    host.toast(ctx.getString(R.string.sec_paid_already))
+                }
+                ScreenApi.Topup.NotFound -> host.toast(ctx.getString(R.string.sec_not_found))
+                is ScreenApi.Topup.Invalid -> host.toast(ctx.getString(R.string.sec_invalid, out.detail))
+                is ScreenApi.Topup.Failed -> host.toast(ctx.getString(R.string.sec_offline))
+            }
+            secBusy = false
+            render()
+        }
+    }
+
+    private fun refreshSecretary() {
+        val userId = PlayerIds.get(ctx)
+        host.scope.launch {
+            val bal = withContext(Dispatchers.IO) { ScreenApi.balance(userId) }
+            val vm = withContext(Dispatchers.IO) { ScreenApi.inbox(userId) }
+            if (bal != null) { secCredit = bal; Secretary.setLastUsd(ctx, bal) }
+            if (vm != null) voicemails = vm
+            render()
         }
     }
 

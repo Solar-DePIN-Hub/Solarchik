@@ -130,9 +130,9 @@
     <string name="class_pred_title">Prediction Agent</string>
     <string name="class_pred_short">Predictions</string>
     <string name="class_pred_blurb">Forecasts on live market data: Bitcoin windows and Polymarket events.</string>
-    <string name="class_dex_title">Titan × Backpack</string>
-    <string name="class_dex_short">Arbitrage</string>
-    <string name="class_dex_blurb">SOL/USDC on Backpack against Coinbase. Acts only when the move clears the edge.</string>
+    <string name="class_dex_title">Backpack SOL Desk</string>
+    <string name="class_dex_short">SOL forecast</string>
+    <string name="class_dex_blurb">Forecasts SOL/USDC direction from Backpack price moves. Acts only when the move clears the edge.</string>
     <string name="class_combo_title">Combo Agent</string>
     <string name="class_combo_short">Combo</string>
     <string name="class_combo_blurb">One strategy: crypto 15m, events and weather. Takes the strongest forecast.</string>
@@ -142,7 +142,7 @@
     <string name="sku_events_blurb" formatted="false">Polymarket events beyond Bitcoin. Follows the favorite outcome only when it is at ≥65%.</string>
     <string name="sku_weather_blurb" formatted="false">Kyiv temperature from Open-Meteo in 1-hour windows. Forecasts the next move, enters at ≥65% confidence.</string>
     <string name="sku_combo_blurb" formatted="false">Three markets in one strategy: Bitcoin 15m, events, weather. Takes the strongest forecast at ≥65%.</string>
-    <string name="sku_arb_blurb" formatted="false">SOL/USDC on Backpack in 10-minute windows. Enters only when the move clears the edge and confidence ≥65%.</string>
+    <string name="sku_arb_blurb" formatted="false">Forecasts the direction of SOL/USDC from Backpack prices in 10-minute windows. Paper forecast, not an arbitrage: it acts only when the move clears the edge and confidence is ≥65%.</string>
 
     <!-- Sol -->
     <string name="sol_title">Sol</string>
@@ -319,4 +319,42 @@
     <string name="settings_delete_body">This wipes your streak, fee-free windows, agents list, fee ledger, desk, chat history, notification settings and the saved wallet session. Your wallet and anything already on chain are not touched.</string>
     <string name="settings_delete_confirm">Delete</string>
     <string name="settings_delete_done">All app data on this phone was deleted.</string>
+    <!-- Call secretary (Settings) -->
+    <string name="sec_title">Call secretary</string>
+    <string name="sec_body">Calls from numbers outside your contacts can be silenced or declined. Contacts always ring: Solarchik never reads your contacts. Each screened call is logged here, on this phone.</string>
+    <string name="sec_needs_android10">Needs Android 10 or newer.</string>
+    <string name="sec_toggle">Screen unknown callers</string>
+    <string name="sec_mode">When an unknown number calls</string>
+    <string name="sec_mode_silence">Silence</string>
+    <string name="sec_mode_decline">Decline</string>
+    <string name="sec_mode_silence_body">The call still comes in and stays in your call log, it just does not ring.</string>
+    <string name="sec_mode_decline_body">The call is rejected. It stays in your call log and you get a missed-call note.</string>
+    <string name="sec_ai_notes">AI note per screened call ($%1$s from credit)</string>
+    <string name="sec_credit">Secretary credit</string>
+    <string name="sec_need_topup">Out of credit: AI notes are paused until you top up.</string>
+    <string name="sec_topup">Top up $%1$d USDC</string>
+    <string name="sec_check">Check payment</string>
+    <string name="sec_checking">Checking…</string>
+    <string name="sec_topup_how">Opens your Solana wallet with a mainnet USDC payment request. After you approve it, tap Check payment. Credit pays for AI notes only.</string>
+    <string name="sec_reports">Screened calls</string>
+    <string name="sec_reports_empty">No screened calls yet.</string>
+    <string name="sec_report_head">%1$s · %2$s · %3$s</string>
+    <string name="sec_action_silenced">silenced</string>
+    <string name="sec_action_declined">declined</string>
+    <string name="sec_status_pending">AI note on the way…</string>
+    <string name="sec_status_need_topup">No AI note: out of credit.</string>
+    <string name="sec_status_failed">AI note failed. The call was still handled.</string>
+    <string name="sec_voicemails">Voicemails</string>
+    <string name="sec_voicemails_tap">Tap to load voicemails.</string>
+    <string name="sec_voicemails_empty">No voicemails.</string>
+    <string name="sec_rationale_title">Make Solarchik your call screener?</string>
+    <string name="sec_rationale_body">Android will ask you to pick Solarchik as the call screening app. It only sees numbers that are not in your contacts and only the number itself, never the conversation. You can turn it off here or in system settings at any time.</string>
+    <string name="sec_rationale_go">Continue</string>
+    <string name="sec_role_denied">Call screening was not enabled.</string>
+    <string name="sec_no_wallet">No Solana wallet app found. The payment link was copied.</string>
+    <string name="sec_paid">Payment received: %1$s added.</string>
+    <string name="sec_paid_already">That payment was already credited.</string>
+    <string name="sec_not_found">Payment not found yet. Give it a minute and check again.</string>
+    <string name="sec_invalid">Payment not accepted (%1$s).</string>
+    <string name="sec_offline">Could not reach the secretary. Try again later.</string>
 </resources>

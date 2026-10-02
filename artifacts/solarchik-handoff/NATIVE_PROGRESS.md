@@ -289,3 +289,28 @@ Seeker CLOCK IN default (mainnet) left as is, as asked.
 - `solarchik-0.20.4-release-boxkey.apk`: 3209230 B, sha256 `7edce19585f743f2aeff20007706c1ec88f1bf2a9f53bf728e99b4646261664f`. Signed v2+v3 with `CN=Solarchik BOX TEST KEY (not production)`, cert SHA-256 `91102f8f…59a01e`. This is not the production key (`CN=Solar DePin`), so it cannot update an install of 0.19.51.
 
 **Still open**: the call secretary is dead code in 0.20.x (screening is never switched on, ROLE_CALL_SCREENING and READ_CONTACTS are never requested, and no reports UI exists). Wire it up or remove it, then drop READ_CONTACTS.
+
+## 0.20.5 (versionCode 65): call secretary, permissions, honest rename (2026-10-02)
+
+**Changes**
+- Permissions: READ_CONTACTS is gone. Android passes only calls from numbers outside the contacts to a CallScreeningService that lacks READ_CONTACTS (CallScreeningService.onScreenCall docs), so contacts always ring and the app never reads the phone book (`ContactsGate` deleted). REORDER_TASKS and the androidx.test core/monitor/services classes are gone from the APK: `mobile-wallet-adapter-clientlib-ktx:2.0.7` now excludes `androidx.test*` (it listed junit-ktx as a runtime dependency), and the manifest also has `tools:node="remove"` for REORDER_TASKS. The release APK requests INTERNET, POST_NOTIFICATIONS and RECORD_AUDIO, plus WorkManager's four normal permissions.
+- Call secretary is now wired up (Settings → Call secretary, Android 10+; older devices show "Needs Android 10"):
+  - Turning it on shows a rationale, then the system `ROLE_CALL_SCREENING` dialog.
+  - Mode: Silence (default; `setSilenceCall`, the call still shows and is logged) or Decline (reject; call log and missed-call notification kept).
+  - The decision is local and instant (`Secretary.decide`) and never waits on the network.
+  - Every screened call is saved as a local report (`CallReports`, last 40).
+  - Optional "AI note per screened call" (off by default) calls worker `/screen` ($0.20 from credit) after the call has been answered. With no credit, the report and Settings show "out of credit".
+  - Credit: "Top up $5 USDC" opens a Solana Pay `solana:` request (USDC to treasury `8J3hxf1X…67ic`, a random reference, memo = player id first 32 chars). "Check payment" posts `/topup {userId, ref}`. 200 credits the payment, 409 means already credited (reads balance), PAYMENT_NOT_FOUND means try again, other 402s are shown.
+  - Voicemails from worker `/inbox` are listed under the reports.
+  - The app never moves funds. The user approves the payment in their own wallet.
+- Agent rename: sku-dex-arb is now "Backpack SOL Desk", with a "SOL forecast" class and a blurb saying it is a paper SOL/USDC direction forecast from Backpack prices, not arbitrage. Already-minted "Titan × Backpack" (and "… Pro") NFT names still resolve (`Catalog.legacyNames`).
+- Repo moved to github.com/Solar-DePIN-Hub/Solarchik. The privacy URL in the app, PRIVACY.md, CLOCKIN_COMPLIANCE.md and LISTING.md were updated.
+- PRIVACY.md and docs/CLOCKIN_COMPLIANCE.md now describe the secretary data and the single real-money feature (optional USDC credit).
+
+**Tests**: `testDebugUnitTest` ran 138 tests: 133 passed, 0 failed, 5 skipped (opt-in live/devnet ITs). New `SecretaryTest` (8): permissions, decision, prefs, Solana Pay URI against the worker contract, topup/screen/balance/inbox parsing, report store with 0.20.4 row migration, and the legacy NFT name. `lintDebug` reported no issues.
+
+**APKs** (box only, not committed)
+- `solarchik-0.20.5-debug.apk`: 6745996 B, sha256 `49a43eec8e59388c15068b862278309424d31323d1e189aad3ff3cedfec10882`, Android Debug key.
+- `solarchik-0.20.5-release-boxkey.apk`: 3221791 B, sha256 `fc53a564ec76aeed5f2582e99f39a88415571ba555823d5b832900031adab824`, v2+v3 signed with `CN=Solarchik BOX TEST KEY (not production)` (cert SHA-256 `91102f8f…59a01e`). Not the production key.
+
+**Not verified here**: the role dialog and the real call path need a phone (no emulator by rule). No real USDC payment was made: the worker's positive path is covered by its unit tests and by parsing a real mainnet USDC+memo transaction.

@@ -23,8 +23,8 @@ android {
         applicationId = "net.solardepin.solarchik"
         minSdk = 26
         targetSdk = 35
-        versionCode = 64
-        versionName = "0.20.4"
+        versionCode = 65
+        versionName = "0.20.5"
         buildConfigField("boolean", "MAINNET_PAID_MINT", "false")
     }
 
@@ -95,7 +95,13 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    implementation("com.solanamobile:mobile-wallet-adapter-clientlib-ktx:2.0.7")
+    // clientlib-ktx 2.0.7 lists androidx.test.ext:junit-ktx as a runtime dependency (upstream packaging bug). It pulled
+    // androidx.test core/monitor/services and the REORDER_TASKS permission into the release APK. MWA never uses them.
+    implementation("com.solanamobile:mobile-wallet-adapter-clientlib-ktx:2.0.7") {
+        exclude(group = "androidx.test")
+        exclude(group = "androidx.test.ext")
+        exclude(group = "androidx.test.services")
+    }
     implementation("org.sol4k:sol4k:0.5.14")
     implementation("io.github.funkatronics:kborsh:0.1.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

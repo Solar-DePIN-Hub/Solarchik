@@ -3,6 +3,7 @@ package net.solardepin.solarchik
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -94,6 +95,24 @@ class MainActivity : ComponentActivity() {
     private val permLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         permCallback?.invoke(ok)
         permCallback = null
+    }
+
+    private var roleCallback: ((Boolean) -> Unit)? = null
+    private val roleLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        roleCallback?.invoke(res.resultCode == RESULT_OK || net.solardepin.solarchik.screen.Secretary.holdsRole(this))
+        roleCallback = null
+    }
+
+    /** Android 10+: asks the system to make Solarchik the call screening app (the role dialog). */
+    fun requestScreeningRole(cb: (Boolean) -> Unit) {
+        val sec = net.solardepin.solarchik.screen.Secretary
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return cb(false)
+        if (sec.holdsRole(this)) return cb(true)
+        val rm = getSystemService(android.app.role.RoleManager::class.java)
+        if (rm == null || !rm.isRoleAvailable(android.app.role.RoleManager.ROLE_CALL_SCREENING)) return cb(false)
+        roleCallback = cb
+        runCatching { roleLauncher.launch(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_CALL_SCREENING)) }
+            .onFailure { roleCallback = null; cb(false) }
     }
 
     /** Runtime permission with a callback (microphone for Sol). */

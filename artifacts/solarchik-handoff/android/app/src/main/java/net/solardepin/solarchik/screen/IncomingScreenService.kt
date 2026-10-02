@@ -4,69 +4,88 @@ import android.os.Build
 import android.telecom.Call
 import android.telecom.CallScreeningService
 import android.util.Log
-import org.json.JSONObject
 
+/**
+ * Call secretary. Android only binds this for calls from numbers outside the user's contacts
+ * (the app has no READ_CONTACTS), so contacts always ring. The decision is local and instant;
+ * the optional AI note runs afterwards and never delays the call.
+ */
 class IncomingScreenService : CallScreeningService() {
     override fun onScreenCall(details: Call.Details) {
-        // Call.Details.getCallDirection() exists only on API 29+; before that the
-        // service is only bound for incoming calls.
+        // getCallDirection() exists on API 29+; before that the service only sees incoming calls
+        // (and the role itself needs API 29, see Secretary.MIN_SDK).
         val incoming = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
             details.callDirection == Call.Details.DIRECTION_INCOMING
-        val number = details.handle?.schemeSpecificPart.orEmpty()
-        val readable = ContactsGate.canRead(this)
-        val screeningOn = incoming && PlayerIds.screeningOn(this)
-        val hit = if (screeningOn && readable) ContactsGate.lookup(this, number) else ContactsGate.Hit(false, "", number)
-        if (!shouldReject(incoming, screeningOn, readable, hit.known)) {
-            respondToCall(details, CallResponse.Builder().build())
-            return
-        }
+        val action = Secretary.decide(incoming, PlayerIds.screeningOn(this), Secretary.mode(this))
+        respondToCall(details, response(action))
+        if (action == Secretary.Action.ALLOW) return
 
-        respondToCall(
-            details,
-            CallResponse.Builder()
-                .setDisallowCall(true)
-                .setRejectCall(true)
-                .setSkipCallLog(false)
-                .setSkipNotification(true)
-                .build(),
+        val number = details.handle?.schemeSpecificPart.orEmpty().ifBlank { "unknown" }
+        val id = "call-" + System.currentTimeMillis().toString(36)
+        val wantNote = Secretary.aiNotes(this)
+        CallReports.add(
+            this,
+            CallReports.Report(
+                id = id,
+                at = System.currentTimeMillis(),
+                number = number,
+                action = if (action == Secretary.Action.DECLINE) "declined" else "silenced",
+                status = if (wantNote) CallReports.STATUS_PENDING else CallReports.STATUS_LOGGED,
+            ),
         )
-
+        if (!wantNote) return
+        val app = applicationContext
         Thread {
-            runCatching { screenUnknown(hit.number.ifBlank { number }) }
-                .onFailure { Log.w("SolarchikScreen", "screen failed", it) }
+            runCatching { note(app, id, number) }
+                .onFailure {
+                    Log.w("SolarchikScreen", "note failed", it)
+                    CallReports.update(app, id) { r -> r.copy(status = CallReports.STATUS_FAILED) }
+                }
         }.start()
     }
 
-    private fun screenUnknown(number: String) {
-        val userId = PlayerIds.get(this)
-        val label = number.ifBlank { "unknown number" }
-        val text = "Incoming call from $label. Not in the player's phone book. Screen this caller for Solarchik."
-        val out = ScreenApi.screen(userId, text)
-        val summary = out.summary
-        if (summary.optString("callback").isBlank()) summary.put("callback", label)
-        if (summary.optString("caller_name").isBlank()) summary.put("caller_name", label)
-        val row = JSONObject()
-            .put("id", "sec-${System.currentTimeMillis().toString(36)}")
-            .put("at", System.currentTimeMillis())
-            .put("user", label)
-            .put("reply", if (out.needTopup) "Need credit to screen this caller." else out.reply)
-            .put("summary", summary)
-            .put("chargedUsd", out.chargedUsd)
-            .put("usd", out.usd)
-            .put("archived", false)
-            .put("read", false)
-            .put("needTopup", out.needTopup)
-        DeskStore.addMessage(this, row)
-        IncomingBus.emit(row)
+    private fun response(action: Secretary.Action): CallResponse = when (action) {
+        Secretary.Action.ALLOW -> CallResponse.Builder().build()
+        // The call still reaches the call log and the in-call UI, just without ringing.
+        Secretary.Action.SILENCE -> CallResponse.Builder().apply {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) setSilenceCall(true)
+        }.build()
+        // Rejected like a busy line; the call log keeps it and the missed-call notification shows.
+        Secretary.Action.DECLINE -> CallResponse.Builder()
+            .setDisallowCall(true)
+            .setRejectCall(true)
+            .setSkipCallLog(false)
+            .setSkipNotification(false)
+            .build()
     }
 
     companion object {
-        /**
-         * Reject only an incoming call, with screening on, that we could check
-         * against the phone book and did not find. Without READ_CONTACTS every
-         * caller would look unknown, so we let the call through.
-         */
-        fun shouldReject(incoming: Boolean, screeningOn: Boolean, contactsReadable: Boolean, known: Boolean): Boolean =
-            incoming && screeningOn && contactsReadable && !known
+        /** The paid AI note: what the number likely is and what to do. Only runs with credit. */
+        fun note(ctx: android.content.Context, id: String, number: String) {
+            val text = "Incoming call from $number, not in the player's contacts. " +
+                "Give a short caller note: likely caller type, spam risk, and whether to call back."
+            val out = ScreenApi.screen(PlayerIds.get(ctx), text)
+            if (out.needTopup) {
+                Secretary.setNeedTopup(ctx, true)
+                CallReports.update(ctx, id) { it.copy(status = CallReports.STATUS_NEED_TOPUP) }
+                return
+            }
+            if (!out.ok) {
+                CallReports.update(ctx, id) { it.copy(status = CallReports.STATUS_FAILED) }
+                return
+            }
+            Secretary.setLastUsd(ctx, out.usd)
+            val s = out.summary
+            CallReports.update(ctx, id) {
+                it.copy(
+                    status = CallReports.STATUS_DONE,
+                    note = s.optString("notes").ifBlank { out.reply }.take(400),
+                    callerName = s.optString("caller_name").take(60),
+                    reason = listOf(s.optString("intent"), s.optString("spam_risk").takeIf { r -> r.isNotBlank() }?.let { r -> "spam: $r" })
+                        .filter { r -> !r.isNullOrBlank() }.joinToString(" · ").take(120),
+                    chargedUsd = out.chargedUsd,
+                )
+            }
+        }
     }
 }

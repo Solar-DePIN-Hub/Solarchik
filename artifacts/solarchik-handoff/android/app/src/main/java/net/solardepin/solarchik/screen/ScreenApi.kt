@@ -4,67 +4,109 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
+/** Client for the solarchik-screen worker (balance, USDC top-up check, AI note, voicemail inbox). */
 object ScreenApi {
     const val BASE = "https://solarchik-screen.davidbell1603.workers.dev"
 
-    data class Balance(val usd: Double)
     data class Screened(
         val reply: String,
         val summary: JSONObject,
         val chargedUsd: Double,
         val usd: Double,
         val needTopup: Boolean,
+        val ok: Boolean,
     )
 
-    fun balance(userId: String): Balance {
-        val (code, body) = request("GET", "$BASE/balance?userId=${enc(userId)}", null)
-        val json = parse(body)
-        if (code == 402) return Balance(0.0)
-        return Balance(json.optDouble("usd", json.optDouble("balance", 0.0)))
+    sealed class Topup {
+        data class Credited(val usd: Double, val added: Double) : Topup()
+        /** The payment was already credited earlier (409): read the balance instead. */
+        object AlreadyUsed : Topup()
+        /** No transaction with this reference yet: the wallet may still be confirming. */
+        object NotFound : Topup()
+        data class Invalid(val detail: String) : Topup()
+        data class Failed(val code: Int, val detail: String) : Topup()
     }
 
-    fun topup(userId: String): Balance {
-        val payload = JSONObject().put("userId", userId).toString()
-        val (_, body) = request("POST", "$BASE/topup", payload)
-        val json = parse(body)
-        return Balance(json.optDouble("usd", json.optDouble("balance", 0.0)))
+    data class Voicemail(val caller: String, val text: String, val at: Long)
+
+    fun balance(userId: String): Double? {
+        val (code, body) = request("GET", "$BASE/balance?userId=${enc(userId)}", null)
+        return parseBalance(code, body)
+    }
+
+    /** Ask the worker to verify an on-chain USDC payment by Solana Pay reference or by signature. */
+    fun topup(userId: String, ref: String? = null, sig: String? = null): Topup {
+        val payload = JSONObject().put("userId", userId)
+        if (!ref.isNullOrBlank()) payload.put("ref", ref)
+        if (!sig.isNullOrBlank()) payload.put("sig", sig)
+        val (code, body) = request("POST", "$BASE/topup", payload.toString())
+        return parseTopup(code, body)
     }
 
     fun screen(userId: String, text: String): Screened {
         val payload = JSONObject().put("userId", userId).put("text", text).toString()
         val (code, body) = request("POST", "$BASE/screen", payload)
+        return parseScreen(code, body)
+    }
+
+    fun inbox(userId: String): List<Voicemail>? {
+        val (code, body) = request("GET", "$BASE/inbox?userId=${enc(userId)}", null)
+        return parseInbox(code, body)
+    }
+
+    fun parseBalance(code: Int, body: String): Double? {
+        if (code !in 200..299) return null
+        val v = parse(body).optDouble("usd", Double.NaN)
+        return v.takeIf { it.isFinite() }
+    }
+
+    fun parseTopup(code: Int, body: String): Topup {
+        val json = parse(body)
+        val err = json.optString("error")
+        return when {
+            code in 200..299 && json.has("usd") -> Topup.Credited(json.optDouble("usd", 0.0), json.optDouble("added", 0.0))
+            code == 409 || err == "ALREADY_USED" -> Topup.AlreadyUsed
+            code == 402 && err == "PAYMENT_NOT_FOUND" -> Topup.NotFound
+            code == 402 -> Topup.Invalid(json.optString("detail").ifBlank { err.ifBlank { "payment_invalid" } })
+            else -> Topup.Failed(code, json.optString("detail").ifBlank { err.ifBlank { "http_$code" } })
+        }
+    }
+
+    fun parseScreen(code: Int, body: String): Screened {
         val json = parse(body)
         val need = code == 402 || json.optString("error") == "NEED_TOPUP"
         val summary = json.optJSONObject("summary") ?: JSONObject()
-        if (summary.length() == 0 && json.optString("summary").isNotBlank()) {
-            summary.put("notes", json.optString("summary"))
-        }
+        if (summary.length() == 0 && json.optString("summary").isNotBlank()) summary.put("notes", json.optString("summary"))
         return Screened(
             reply = json.optString("reply"),
             summary = summary,
             chargedUsd = json.optDouble("chargedUsd", 0.0),
             usd = json.optDouble("usd", 0.0),
             needTopup = need,
+            ok = code in 200..299 && !need,
         )
+    }
+
+    fun parseInbox(code: Int, body: String): List<Voicemail>? {
+        if (code !in 200..299) return null
+        val items = parse(body).optJSONArray("items") ?: return emptyList()
+        return (0 until items.length()).mapNotNull { i ->
+            val o = items.optJSONObject(i) ?: return@mapNotNull null
+            val text = o.optString("text").trim()
+            if (text.isEmpty()) null else Voicemail(o.optString("caller").trim(), text.take(600), o.optLong("at"))
+        }
     }
 
     private fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
 
-    private fun parse(body: String): JSONObject {
-        return runCatching { JSONObject(body.ifBlank { "{}" }) }.getOrElse { JSONObject() }
-    }
+    private fun parse(body: String): JSONObject = runCatching { JSONObject(body.ifBlank { "{}" }) }.getOrElse { JSONObject() }
 
-    private fun open(method: String, url: String): HttpURLConnection {
+    private fun request(method: String, url: String, body: String?): Pair<Int, String> {
         val c = URL(url).openConnection() as HttpURLConnection
         c.requestMethod = method
         c.connectTimeout = 12000
         c.readTimeout = 20000
         c.setRequestProperty("Accept", "application/json")
-        return c
-    }
-
-    private fun request(method: String, url: String, body: String?): Pair<Int, String> {
-        val c = open(method, url)
         return try {
             if (body != null) {
                 c.doOutput = true
@@ -73,10 +115,9 @@ object ScreenApi {
             }
             val code = c.responseCode
             val stream = if (code in 200..299) c.inputStream else c.errorStream
-            val text = stream?.bufferedReader()?.readText().orEmpty()
-            code to text
+            code to stream?.bufferedReader()?.readText().orEmpty()
         } catch (e: Throwable) {
-            0 to JSONObject().put("error", e.message ?: "offline").toString()
+            0 to JSONObject().put("error", "offline").put("detail", e.message ?: "offline").toString()
         } finally {
             c.disconnect()
         }

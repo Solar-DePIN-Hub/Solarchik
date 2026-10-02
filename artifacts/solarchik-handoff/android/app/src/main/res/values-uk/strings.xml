@@ -124,9 +124,9 @@
     <string name="class_pred_title">Prediction Agent</string>
     <string name="class_pred_short">Прогнози</string>
     <string name="class_pred_blurb">Прогнози на живих даних ринку: вікна біткоїна і події Polymarket.</string>
-    <string name="class_dex_title">Titan × Backpack</string>
-    <string name="class_dex_short">Арбітраж</string>
-    <string name="class_dex_blurb">SOL/USDC на Backpack проти Coinbase. Діє лише коли рух більший за поріг.</string>
+    <string name="class_dex_title">Backpack SOL Desk</string>
+    <string name="class_dex_short">Прогноз SOL</string>
+    <string name="class_dex_blurb">Прогнозує напрямок SOL/USDC за рухом ціни на Backpack. Діє лише коли рух більший за поріг.</string>
     <string name="class_combo_title">Combo Agent</string>
     <string name="class_combo_short">Комбо</string>
     <string name="class_combo_blurb">Одна стратегія: крипто 15 хв, події і погода. Бере найсильніший прогноз.</string>
@@ -135,7 +135,7 @@
     <string name="sku_events_blurb" formatted="false">Події Polymarket поза біткоїном. Іде за фаворитом лише коли він має ≥65%.</string>
     <string name="sku_weather_blurb" formatted="false">Температура Києва з Open-Meteo, вікна по 1 год. Прогнозує наступний рух, входить від 65% впевненості.</string>
     <string name="sku_combo_blurb" formatted="false">Три ринки в одній стратегії: біткоїн 15 хв, події, погода. Бере найсильніший прогноз від 65%.</string>
-    <string name="sku_arb_blurb" formatted="false">SOL/USDC на Backpack, вікна по 10 хв. Входить лише коли рух більший за поріг і впевненість ≥65%.</string>
+    <string name="sku_arb_blurb" formatted="false">Прогнозує напрямок SOL/USDC за цінами Backpack у вікнах по 10 хв. Паперовий прогноз, не арбітраж: діє лише коли рух більший за поріг і впевненість ≥65%.</string>
 
     <string name="sol_title">Сол</string>
     <string name="sol_sub">Твій кишеньковий сонячний друг. Говори або пиши; Sol відповідає твоєю мовою.</string>
@@ -307,4 +307,42 @@
     <string name="settings_delete_body">Буде стерто стрік, вікна без комісій, список агентів, журнал комісій, стіл, історію чату, налаштування сповіщень і збережену сесію гаманця. Сам гаманець і те, що вже в мережі, не зачіпається.</string>
     <string name="settings_delete_confirm">Видалити</string>
     <string name="settings_delete_done">Усі дані застосунку на цьому телефоні видалено.</string>
+    <!-- Секретар дзвінків (Налаштування) -->
+    <string name="sec_title">Секретар дзвінків</string>
+    <string name="sec_body">Дзвінки з номерів, яких немає у ваших контактах, можна вимкнути без звуку або відхилити. Контакти завжди дзвонять: Solarchik не читає ваші контакти. Кожен перевірений дзвінок записується тут, на цьому телефоні.</string>
+    <string name="sec_needs_android10">Потрібен Android 10 або новіший.</string>
+    <string name="sec_toggle">Перевіряти невідомі номери</string>
+    <string name="sec_mode">Коли дзвонить невідомий номер</string>
+    <string name="sec_mode_silence">Без звуку</string>
+    <string name="sec_mode_decline">Відхилити</string>
+    <string name="sec_mode_silence_body">Дзвінок надходить і лишається в журналі, просто без звуку.</string>
+    <string name="sec_mode_decline_body">Дзвінок відхиляється. Він лишається в журналі, і ви бачите сповіщення про пропущений.</string>
+    <string name="sec_ai_notes">ШІ-нотатка до кожного дзвінка ($%1$s з кредиту)</string>
+    <string name="sec_credit">Кредит секретаря</string>
+    <string name="sec_need_topup">Кредит закінчився: ШІ-нотатки на паузі до поповнення.</string>
+    <string name="sec_topup">Поповнити $%1$d USDC</string>
+    <string name="sec_check">Перевірити оплату</string>
+    <string name="sec_checking">Перевіряю…</string>
+    <string name="sec_topup_how">Відкриває ваш Solana-гаманець із запитом на оплату USDC у mainnet. Після підтвердження натисніть «Перевірити оплату». Кредит іде лише на ШІ-нотатки.</string>
+    <string name="sec_reports">Перевірені дзвінки</string>
+    <string name="sec_reports_empty">Перевірених дзвінків ще немає.</string>
+    <string name="sec_report_head">%1$s · %2$s · %3$s</string>
+    <string name="sec_action_silenced">без звуку</string>
+    <string name="sec_action_declined">відхилено</string>
+    <string name="sec_status_pending">ШІ-нотатка готується…</string>
+    <string name="sec_status_need_topup">Без ШІ-нотатки: немає кредиту.</string>
+    <string name="sec_status_failed">ШІ-нотатка не вдалася. Дзвінок оброблено.</string>
+    <string name="sec_voicemails">Голосові повідомлення</string>
+    <string name="sec_voicemails_tap">Торкніться, щоб завантажити голосові.</string>
+    <string name="sec_voicemails_empty">Голосових немає.</string>
+    <string name="sec_rationale_title">Зробити Solarchik фільтром дзвінків?</string>
+    <string name="sec_rationale_body">Android попросить обрати Solarchik застосунком для перевірки дзвінків. Він бачить лише номери, яких немає у ваших контактах, і лише сам номер, ніколи не розмову. Вимкнути можна тут або в системних налаштуваннях будь-коли.</string>
+    <string name="sec_rationale_go">Далі</string>
+    <string name="sec_role_denied">Перевірку дзвінків не ввімкнено.</string>
+    <string name="sec_no_wallet">Не знайдено Solana-гаманця. Посилання на оплату скопійовано.</string>
+    <string name="sec_paid">Оплату отримано: додано %1$s.</string>
+    <string name="sec_paid_already">Цю оплату вже зараховано.</string>
+    <string name="sec_not_found">Оплату ще не знайдено. Зачекайте хвилину й перевірте знову.</string>
+    <string name="sec_invalid">Оплату не прийнято (%1$s).</string>
+    <string name="sec_offline">Не вдалося зв\'язатися із секретарем. Спробуйте пізніше.</string>
 </resources>
