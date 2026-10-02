@@ -175,7 +175,9 @@ export async function confirmStrategy(env: StrategyEnv, input: { asset: string; 
 
 /* ------------------------------ results ------------------------------ */
 
-export type SyncResult = { ok: true; closed: number; perfSig: string | null; thawSig: string | null; releaseSig?: string | null; perf: Perf | null } | Fail;
+export type SyncResult =
+  | { ok: true; closed: number; perfSig: string | null; thawSig: string | null; releaseSig?: string | null; perf: Perf | null; throttled?: boolean }
+  | Fail;
 
 async function sendServer(env: StrategyEnv, umi: Umi, builder: ReturnType<typeof perfBuilder>): Promise<string> {
   const server = serverSigner(umi, env.authority as Keypair);
@@ -198,7 +200,8 @@ async function releaseMintLock(env: StrategyEnv, umi: Umi, got: Loaded, sql: Gua
 }
 
 /** Stop/take sweep, results write (only when they changed) and thaw after the lock (when not listed). */
-export async function syncAsset(env: StrategyEnv, asset: string): Promise<SyncResult> {
+/** `throttle`: public callers (route, after a close) are capped by perfWriteAllowed; the cron and dev scripts are not. */
+export async function syncAsset(env: StrategyEnv, asset: string, opts: { throttle?: boolean } = {}): Promise<SyncResult> {
   const umi = umiOf(env);
   let got = await load(env, umi, asset);
   if ("ok" in got) return got;
@@ -234,8 +237,14 @@ export async function syncAsset(env: StrategyEnv, asset: string): Promise<SyncRe
   const next = perfAttrs(perf, ledger.lifetimeOf(trades), now);
   const cur = next.map((a) => ({ key: a.key, value: got.map.get(a.key) ?? "" }));
   let perfSig: string | null = null;
+  let throttled = false;
   const strip = (l: Attr[]) => l.filter((a) => a.key !== "pu");
-  if (!attrsEqual(strip(cur), strip(next))) {
+  if (!attrsEqual(strip(cur), strip(next)) && opts.throttle) {
+    const val = (l: Attr[], k: string) => l.find((a) => a.key === k)?.value ?? "";
+    const newTrades = val(cur, "rn") !== val(next, "rn") || val(cur, "jobs") !== val(next, "jobs");
+    throttled = !(await ledger.perfWriteAllowed(sql, asset, now, newTrades));
+  }
+  if (!throttled && !attrsEqual(strip(cur), strip(next))) {
     const merged = mergeAttrs(got.attrs, next);
     perfSig = await sendServer(env, umi, perfBuilder(umi, env.authority as Keypair, got.asset, got.collection, merged));
     await ledger.notePerfWrite(sql, asset, perfSig, JSON.stringify(next), now);
@@ -249,7 +258,7 @@ export async function syncAsset(env: StrategyEnv, asset: string): Promise<SyncRe
     const b = thawBuilder(umi, env.authority as Keypair, fresh, got.collection, true);
     if (b) thawSig = await sendServer(env, umi, b);
   }
-  return { ok: true, closed, perfSig, thawSig, releaseSig, perf };
+  return { ok: true, closed, perfSig, thawSig, releaseSig, perf, ...(throttled ? { throttled } : {}) };
 }
 
 /* ------------------------------ market ------------------------------ */
@@ -439,20 +448,34 @@ export async function strategyInfo(env: StrategyEnv, asset: string): Promise<({ 
   };
 }
 
-export async function marketListings(env: StrategyEnv): Promise<{ ok: true; items: (StrategyInfo & { priceLamports: number })[] } | Fail> {
+let listingsCache: { at: number; items: (StrategyInfo & { priceLamports: number })[] } | null = null;
+const LISTINGS_TTL_MS = 10_000;
+
+export async function marketListings(env: StrategyEnv, opts: { fresh?: boolean } = {}): Promise<{ ok: true; items: (StrategyInfo & { priceLamports: number })[] } | Fail> {
   if (!env.sql) return fail("Немає бази.");
-  const items: (StrategyInfo & { priceLamports: number })[] = [];
-  for (const l of await ledger.activeListings(env.sql)) {
-    const info = await strategyInfo(env, l.asset);
-    if (!info.ok) continue;
-    if (info.owner !== l.seller || !info.lockedByServer || !info.frozen) {
-      await ledger.setListingStatus(env.sql, l.asset, ["active"], "cancelled", env.now());
-      continue;
-    }
-    const { ok: _ok, ...rest } = info;
-    items.push({ ...rest, priceLamports: l.priceLamports });
-  }
+  const sql = env.sql;
+  if (!opts.fresh && listingsCache && env.now() - listingsCache.at < LISTINGS_TTL_MS) return { ok: true, items: listingsCache.items };
+  // Chain reads in parallel (one per listing): the market tab waited for them one by one.
+  const rows = await Promise.all(
+    (await ledger.activeListings(sql)).map(async (l) => {
+      const info = await strategyInfo(env, l.asset);
+      if (!info.ok) return null;
+      if (info.owner !== l.seller || !info.lockedByServer || !info.frozen) {
+        await ledger.setListingStatus(sql, l.asset, ["active"], "cancelled", env.now());
+        return null;
+      }
+      const { ok: _ok, ...rest } = info;
+      return { ...rest, priceLamports: l.priceLamports };
+    }),
+  );
+  const items = rows.filter((x): x is StrategyInfo & { priceLamports: number } => x != null);
+  listingsCache = { at: env.now(), items };
   return { ok: true, items };
+}
+
+/** A listing, sale or unlist changes the market: the next read goes to the chain. */
+export function dropListingsCache() {
+  listingsCache = null;
 }
 
 /* ------------------------------ process env ------------------------------ */
@@ -487,7 +510,7 @@ export async function envFromProcess(sqlIn?: GuardSql | null): Promise<StrategyE
 export async function syncStrategyAsset(asset: string, sql: GuardSql): Promise<void> {
   const env = await envFromProcess(sql);
   if (!env.authority) return;
-  await syncAsset(env, asset);
+  await syncAsset(env, asset, { throttle: true });
 }
 
 /** Cron / manual job: every asset with new closes or a lock to release. */
@@ -548,7 +571,7 @@ export async function strategyRoute(route: string, body: Record<string, unknown>
     case "strategy-confirm":
       return confirmStrategy(env, { asset, version: int(body.version), sig: b58(body.sig, 100) });
     case "strategy-sync":
-      if (asset) return syncAsset(env, asset);
+      if (asset) return syncAsset(env, asset, { throttle: !opts.cron });
       if (!opts.cron) return fail("Повний прохід лише для крону.");
       return syncAllStrategies();
     case "market-list":
@@ -556,13 +579,13 @@ export async function strategyRoute(route: string, body: Record<string, unknown>
     case "market-prepare-list":
       return prepareList(env, { proof, asset, priceLamports: int(body.priceLamports) });
     case "market-confirm-list":
-      return confirmList(env, { asset });
+      return confirmList(env, { asset }).finally(dropListingsCache);
     case "market-unlist":
-      return unlist(env, { proof, asset });
+      return unlist(env, { proof, asset }).finally(dropListingsCache);
     case "market-prepare-buy":
       return prepareBuy(env, { proof, asset, priceLamports: int(body.priceLamports) });
     case "market-confirm-buy":
-      return confirmBuy(env, { asset, sig: b58(body.sig, 100) });
+      return confirmBuy(env, { asset, sig: b58(body.sig, 100) }).finally(dropListingsCache);
     default:
       return fail("route");
   }

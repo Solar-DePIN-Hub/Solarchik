@@ -19,6 +19,16 @@ import { isMuted, setMuted, startMusic, stopMusic, unlockAudio } from "@/lib/gam
 import { isNativeApp } from "@/lib/game/buddyNet";
 import { DayCard } from "./DayCard";
 
+/**
+ * Android build link. The old public/…0.19.51.apk called a retired server (its market failed), so the
+ * yard no longer offers it. Set VITE_APK_URL to a published current APK; until then this opens the
+ * native branch's "For judges" notes (APK status, build steps, hashes).
+ */
+const APK_URL: string = (import.meta.env.VITE_APK_URL as string | undefined)?.trim() || "https://github.com/Solar-DePIN-Hub/Solarchik/tree/native-full#for-judges";
+function apkLinkProps() {
+  return /\.apk(\?|$)/i.test(APK_URL) ? { href: APK_URL, download: "" } : { href: APK_URL, target: "_blank", rel: "noopener noreferrer" };
+}
+
 export function Yard({
   save,
   t,
@@ -129,8 +139,7 @@ export function Yard({
               </button>
               {!native && (
               <a
-                href="/Solarchik-CLOCK-IN-0.19.51.apk"
-                download="Solarchik-CLOCK-IN-0.19.51.apk"
+                {...apkLinkProps()}
                 className="flex h-11 items-center gap-1.5 rounded-md bg-elevated px-3 text-sm font-semibold text-fg"
               >
                 <Download className="size-4" />
@@ -318,8 +327,7 @@ export function Yard({
 
           {!native && (
           <a
-            href="/Solarchik-CLOCK-IN-0.19.51.apk"
-            download="Solarchik-CLOCK-IN-0.19.51.apk"
+            {...apkLinkProps()}
             className="mt-3 flex h-12 items-center justify-center gap-2 rounded-md bg-elevated px-5 text-sm font-semibold text-fg"
           >
             <Download className="size-4" />

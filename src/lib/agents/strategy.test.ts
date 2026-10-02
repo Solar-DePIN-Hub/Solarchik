@@ -600,3 +600,24 @@ describe("devnet demo constants", () => {
     for (const u of [d.lockTest.unlockSec, m.unlockSec]) assert.ok(u - SALE_LOCK_HOURS * 3600 >= Date.UTC(2026, 9, 2) / 1000);
   });
 });
+
+describe("server-paid results writes are capped outside the cron", () => {
+  let sql: GuardSql;
+  before(async () => {
+    const pg = new PGlite();
+    await pg.exec("create table if not exists agent_positions (id text primary key)");
+    await pg.exec(readFileSync(new URL("../../../migrations/0006_strategy_market.sql", import.meta.url), "utf8"));
+    sql = { query: async (text: string, params: unknown[] = []) => (await pg.query(text, params)).rows as never[] };
+  });
+  it("clock drift only: once per 6 h per asset; new trades: allowed; global hourly cap", async () => {
+    const t0 = 1_800_000_000_000;
+    const a = "AssetAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    assert.equal(await ledger.perfWriteAllowed(sql, a, t0, false), true, "never written");
+    await ledger.notePerfWrite(sql, a, "sig", "[]", t0);
+    assert.equal(await ledger.perfWriteAllowed(sql, a, t0 + 60_000, false), false, "APR drift a minute later: no write");
+    assert.equal(await ledger.perfWriteAllowed(sql, a, t0 + 60_000, true), true, "a new trade still writes");
+    assert.equal(await ledger.perfWriteAllowed(sql, a, t0 + ledger.PERF_DRIFT_GAP_MS + 1, false), true);
+    for (let i = 0; i < ledger.PERF_HOUR_CAP; i++) await ledger.notePerfWrite(sql, `Asset${i}`, "s", "[]", t0 + 1000);
+    assert.equal(await ledger.perfWriteAllowed(sql, "AssetNew", t0 + 2000, true), false, "global hourly cap");
+  });
+});

@@ -174,6 +174,23 @@ export async function assetsToSync(sql: GuardSql, limit = 25): Promise<string[]>
   return [...new Set([...rows.map((r) => r.asset), ...listed.map((r) => r.asset)])].slice(0, limit);
 }
 
+/** Results writes cost the server key a fee. Outside the cron they are capped. */
+export const PERF_DRIFT_GAP_MS = 6 * 3_600_000;
+export const PERF_HOUR_CAP = 60;
+
+/**
+ * May a non-cron caller write results now? New trades: yes (under the global hourly cap).
+ * Only time-derived values moved (APR drifts with the clock): once per PERF_DRIFT_GAP_MS per asset.
+ */
+export async function perfWriteAllowed(sql: GuardSql, asset: string, now: number, newTrades: boolean): Promise<boolean> {
+  if (!newTrades) {
+    const last = await sql.query<{ written_ms: string }>("select written_ms from strategy_perf_writes where asset = $1", [asset]);
+    if (last[0] && now - Number(last[0].written_ms) < PERF_DRIFT_GAP_MS) return false;
+  }
+  const [{ n }] = await sql.query<{ n: string }>("select count(*) as n from strategy_perf_writes where written_ms > $1", [now - 3_600_000]);
+  return Number(n) < PERF_HOUR_CAP;
+}
+
 export async function notePerfWrite(sql: GuardSql, asset: string, sig: string, attrs: string, now: number): Promise<void> {
   await sql.query(
     `insert into strategy_perf_writes (asset, written_ms, sig, attrs) values ($1, $2, $3, $4)

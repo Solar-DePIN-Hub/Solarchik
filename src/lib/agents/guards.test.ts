@@ -567,3 +567,27 @@ describe("class titles are Ukrainian source text with English swaps (UK audit, O
     assert.match(phrases, /"Комбо-агент": "Combo Agent"/);
   });
 });
+
+describe("/solana-rpc proxy: retry and devnet fallback", () => {
+  it("retries 429/5xx, then the fallback node; a JSON-RPC error with 200 is final", async () => {
+    const rpc = await import("../../../server/middleware/solana-rpc.ts");
+    assert.equal(rpc.retryable(429), true);
+    assert.equal(rpc.retryable(503), true);
+    assert.equal(rpc.retryable(200), false);
+    assert.equal(rpc.rpcUpstreams("mainnet").length, 1);
+    assert.equal(rpc.rpcUpstreams(null).length, 2);
+    const realFetch = globalThis.fetch;
+    const hits: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      hits.push(url);
+      return url.includes("main") ? new Response("busy", { status: 429 }) : new Response('{"result":1}', { status: 200 });
+    }) as typeof fetch;
+    try {
+      const res = await rpc.forward(["https://main", "https://fallback"], "POST", "{}", async () => {});
+      assert.equal(res.status, 200);
+      assert.deepEqual(hits, ["https://main", "https://main", "https://main", "https://fallback"]);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
