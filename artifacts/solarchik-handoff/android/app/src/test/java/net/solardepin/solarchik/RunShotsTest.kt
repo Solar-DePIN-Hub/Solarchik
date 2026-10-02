@@ -237,20 +237,27 @@ class RunShotsTest {
         shot("13-heat", s)
     }
 
-    @Test fun dayPhasesAndMaintenanceDrone() {
+    @Test fun dayPhasesNightAndStorm() {
         val s = RunSim.create(seed, goalMeters = 99_999)
         assertTrue(stepUntil(s, max = 60 * 900) { it.distance > 5_600 && it.grounded })
         shot("14-dusk-district", s)
+        // deep night between the drone's arena and the storm line
+        assertTrue(stepUntil(s, max = 60 * 900) { it.distance in 12_500.0..15_500.0 && it.grounded && it.bossStage == 0 })
+        shot("18-night-city", s)
+        assertTrue(stepUntil(s, max = 60 * 900) { it.distance in 17_000.0..21_000.0 && it.grounded && it.lightning == 0.0 })
+        shot("18a-storm-line", s)
+        assertTrue(stepUntil(s, max = 60 * 900) { it.distance in 16_600.0..21_500.0 && it.lightning in 0.3..0.45 })
+        shot("18b-storm-lightning", s, moment = true)
+    }
+
+    @Test fun maintenanceDrone() {
+        val s = RunSim.create(seed, goalMeters = 99_999)
         assertTrue(stepUntil(s, max = 60 * 900) { it.bossStage == 2 && it.bossTele in 0.15..0.4 && it.grounded })
         shot("15-boss-telegraph", s, moment = true)
         assertTrue(stepUntil(s, max = 60 * 900) { it.bossStage == 2 && it.bossBeam in 0.08..0.2 && it.bossShots >= 1 })
         shot("16-boss-beam", s, moment = true)
         assertTrue(stepUntil(s, max = 60 * 900) { it.bossStage == 3 && it.bossT > 0.35 })
         shot("17-boss-overheat", s, moment = true)
-        assertTrue(stepUntil(s, max = 60 * 900) { it.distance > 13_000 && it.grounded })
-        shot("18-night-city", s)
-        assertTrue(stepUntil(s, max = 60 * 900) { it.distance > 16_300 && it.grounded && it.lightning > 0.3 })
-        shot("18b-storm-lightning", s)
     }
 
     @Test fun cityHazards() {
@@ -355,7 +362,7 @@ class RunShotsTest {
     @Test fun solCaption() {
         val s = RunSim.create(seed)
         stepUntil(s) { it.meters > 60 && it.grounded }
-        shot("24-sol-caption", s) { it.setCaption("Nice roofline! Keep the rhythm, the village is close.") }
+        shot("24-sol-caption", s) { it.setCaption("Nice roofline! Keep the rhythm, the solar district is close.") }
         shot("25-mic-listening", s) { it.setListening(true); it.setCaption(ctx.getString(R.string.run_listening)) }
     }
 

@@ -444,3 +444,27 @@ The owner's feedback on 0.21.3 was that it felt childish, too easy and the art w
 **APKs** (box only)
 - `solarchik-0.21.4-debug.apk`: 8405662 B, sha256 `290a454776c312d83103bd40360cf8a54ebc731afba85b6fda49041d9008df75`.
 - `solarchik-0.21.4-release-boxkey.apk`: 4714702 B (−842 KB vs 0.21.3: the hero/robot PNGs became WebP and the old village layers are gone), sha256 `069fa66d0c98d46d5844b2ba855223922e5241720f8b6ed812520a56e2a6896d`. R8, `CN=Solarchik BOX TEST KEY (not production)`.
+
+## 0.21.5 (versionCode 70): polish pass on the city run (2026-10-02)
+
+- **Tutorial text is first-run only.** The "Tap to jump · swipe down to slide" line shows for the first 4.5 s of the first run on the phone, or until the player has jumped and slid, then fades out over 0.5 s. A `GameSave.runTutorialDone` flag is set once it has shown and gone, and later runs never show it. The intro TAP bubble and the first-drone SLIDE pop follow the same flag (`RunState.tutorial`). Classic/web-parity rules keep the SLIDE pop.
+- **Storm line palette.** The city storm is now a section, 1600–2200 m of every 2400 m cycle (`RunSim.cityStormAt`, rolling in and out over 80 m). Before, it ran forever after 1600 m and turned every later section grey. It has:
+  - a deep indigo sky with a teal horizon glow and a layered storm deck;
+  - a teal/indigo grade on the painted kit (not desaturated) and a cool rim light on the hero;
+  - warm windows and neon that stay on;
+  - brighter two-depth wind-driven rain;
+  - lightning that lights the sky behind the skyline (the layers silhouette and brighten), with a smaller full-screen flash.
+- **Camera lift.** On high double jumps the world eases down so the robot stays below the HUD chips (layers parallax with it).
+- **Pops stack.** Pops born on the same spot (NICE + "+1") stack instead of printing over each other.
+- **Localisation and frames.**
+  - UK distance chip reads "м".
+  - The Sol caption sample no longer mentions the village.
+  - RunShotsTest: night city and storm (with and without lightning) are separate scenes from the boss run (`dayPhasesNightAndStorm`, `maintenanceDrone`).
+- **New tests:** `tutorialHintOnlyEarlyInTheFirstRun`, `cityStormIsASectionNotForever`.
+- The web spec (`web-city-rules.diff`) gains `cityStormAt`, `HINT_TIME` and the tutorial rule.
+
+**Checks**: 220 unit tests (5 skipped, 0 failed), lint 1 warning (IconMissingDensityFolder, as before).
+
+**APKs** (box only)
+- `solarchik-0.21.5-debug.apk`: 8410066 B, sha256 `a0e0512397d00f0e6e019274f0ec87c7052b4f20050212aebf95b50a741f9fab`.
+- `solarchik-0.21.5-release-boxkey.apk`: 4717671 B, sha256 `2057b95086c12deb847c8ba866e7b25a6f75d2cbbd9dca8a5f4f9806010baf51`. R8, `CN=Solarchik BOX TEST KEY (not production)`.

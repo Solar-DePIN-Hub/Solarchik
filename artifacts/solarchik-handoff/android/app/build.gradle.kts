@@ -23,8 +23,8 @@ android {
         applicationId = "net.solardepin.solarchik"
         minSdk = 26
         targetSdk = 35
-        versionCode = 69
-        versionName = "0.21.4"
+        versionCode = 70
+        versionName = "0.21.5"
         buildConfigField("boolean", "MAINNET_PAID_MINT", "false")
     }
 

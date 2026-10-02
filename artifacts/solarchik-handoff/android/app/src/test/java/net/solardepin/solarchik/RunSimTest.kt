@@ -10,6 +10,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
+import net.solardepin.solarchik.game.RunHud
 import net.solardepin.solarchik.game.run.DayMod
 import net.solardepin.solarchik.game.run.Enemy
 import net.solardepin.solarchik.game.run.Pick
@@ -201,6 +202,33 @@ class RunSimTest {
         assertEquals(RunSim.SPEED_CAP + 16, RunSim.speedAt(s), 1e-9) // cap incl. heat/grind headroom
         s.fever = 1.0; s.grind = true; s.distance = 0.0
         assertEquals(RunSim.SPEED0 + 28, RunSim.speedAt(s), 1e-9)
+    }
+
+    @Test fun tutorialHintOnlyEarlyInTheFirstRun() {
+        fun run(tutorial: Boolean, inputs: (RunState) -> Input): List<Boolean> {
+            val s = RunSim.create(7).also { it.tutorial = tutorial }
+            val seen = ArrayList<Boolean>()
+            repeat(60 * 12) { RunSim.step(s, RunSim.TICK, inputs(s)); if (s.phase == Phase.RUNNING) seen.add(RunHud.of(s).hint) }
+            return seen
+        }
+        val first = run(true) { Input() }
+        assertTrue(first.first())
+        assertTrue(first.take(60 * 4).all { it })
+        assertTrue(first.drop(60 * 5).none { it }) // gone after ~4.5 s for good
+        assertTrue(run(false) { Input() }.none { it }) // never on later runs
+        // a jump and a slide early also clear it
+        val quick = run(true) { st ->
+            if (st.phase == Phase.RUNNING && st.runTime in 0.3..0.32) Input(true, true)
+            else if (st.phase == Phase.RUNNING && st.runTime in 1.6..1.9) Input(slidePressed = true, slideHeld = true) else Input()
+        }
+        assertTrue(quick.drop(132).take(100).none { it })
+    }
+
+    @Test fun cityStormIsASectionNotForever() {
+        assertEquals(0.0, RunSim.cityStormAt(15_000.0), 0.0)
+        assertEquals(1.0, RunSim.cityStormAt(18_000.0), 0.0)
+        assertEquals(0.0, RunSim.cityStormAt(23_000.0), 0.0)
+        assertEquals(1.0, RunSim.cityStormAt(42_000.0), 0.0) // the next cycle storms again
     }
 
     @Test fun citySpeedRampsHarderAndCapsHigher() {

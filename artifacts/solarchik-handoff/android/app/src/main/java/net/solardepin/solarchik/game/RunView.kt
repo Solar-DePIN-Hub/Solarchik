@@ -39,6 +39,8 @@ class RunSetup(
     /** Equipped roof skin and robot (RunGarage ids). */
     val skin: String = "flag",
     val robot: String = "stock",
+    /** First run on this phone: show the tutorial hints. */
+    val tutorial: Boolean = false,
 )
 
 /** HUD snapshot (web snapshot()), built on the game thread and posted to the UI thread. */
@@ -64,12 +66,17 @@ data class RunHud(
     val stomps: Int = 0,
     val grinds: Int = 0,
     val unders: Int = 0,
+    /** Tutorial hint line on (first run, first [RunSim.HINT_TIME] s, until a jump and a slide). */
+    val hint: Boolean = false,
 ) {
     companion object {
+        fun hintOn(s: RunState) = s.tutorial && s.phase == Phase.RUNNING && !s.bonus && !s.clockOpen &&
+            s.runTime < RunSim.HINT_TIME && !(s.hasJumped && s.slid)
+
         fun of(s: RunState) = RunHud(
             s.hearts, s.shield, Math.round(s.score).toInt(), s.meters, s.combo, s.phase, s.countdown, s.death,
             s.suns, s.maxCombo, s.bonus, s.bonusLeft, s.grind, s.didBonus, s.chapter, s.announce,
-            s.announceLife > 0, s.clockOpen, s.stomps, s.grinds, s.unders,
+            s.announceLife > 0, s.clockOpen, s.stomps, s.grinds, s.unders, hintOn(s),
         )
     }
 }
@@ -256,7 +263,7 @@ class RunView(context: Context, private val listener: Listener? = null) :
         renderer.skin = RunSkin.of(s.skin)
         renderer.robot = s.robot
         renderer.reset()
-        return RunSim.create(s.seed, s.mod, s.offerBonus, s.careBoost, s.goalMeters)
+        return RunSim.create(s.seed, s.mod, s.offerBonus, s.careBoost, s.goalMeters).also { it.tutorial = s.tutorial }
     }
 
     private fun loop(my: Int) {
@@ -287,7 +294,7 @@ class RunView(context: Context, private val listener: Listener? = null) :
                 if (hudAcc > 0.12) {
                     hudAcc = 0.0
                     val cd = if (s.phase == Phase.COUNTDOWN) (if (s.countdown > 0.28) ceil(s.countdown).toInt() else 0) else -1
-                    val key = "${s.phase}|${s.hearts}|${s.shield}|${Math.round(s.score)}|${s.combo}|${(s.distance / 8).toInt()}|${s.bonus}|${s.clockOpen}|$cd|${s.announceLife > 0}|${s.grind}|${s.bonusLeft.toInt()}"
+                    val key = "${s.phase}|${s.hearts}|${s.shield}|${Math.round(s.score)}|${s.combo}|${(s.distance / 8).toInt()}|${s.bonus}|${s.clockOpen}|$cd|${s.announceLife > 0}|${s.grind}|${s.bonusLeft.toInt()}|${RunHud.hintOn(s)}"
                     if (key != hudKey) {
                         hudKey = key
                         val hud = RunHud.of(s)

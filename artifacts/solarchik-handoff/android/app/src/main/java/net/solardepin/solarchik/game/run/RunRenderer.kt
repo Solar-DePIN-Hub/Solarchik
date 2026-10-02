@@ -17,6 +17,7 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.floor
+import kotlin.math.roundToInt
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
@@ -804,14 +805,28 @@ class RunRenderer(
         }
     }
 
-    private fun paintRain(c: Canvas, w: Double, h: Double, t: Double) {
-        stroke.color = rgba(190, 214, 255, 0.28)
-        stroke.strokeWidth = 1.2f
+    private fun paintRain(c: Canvas, w: Double, h: Double, t: Double, k: Double = 1.0, city: Boolean = false) {
         stroke.strokeCap = Paint.Cap.ROUND
-        for (i in 0 until 46) {
-            val px = ((hash(i.toDouble()) * w + t * 420) % (w + 40)) - 20
-            val py = ((hash(i + 8.0) * h + t * 760) % (h + 30)) - 10
-            c.drawLine(px.toFloat(), py.toFloat(), (px + 7).toFloat(), (py + 18).toFloat(), stroke)
+        if (!city) {
+            stroke.color = rgba(190, 214, 255, 0.28)
+            stroke.strokeWidth = 1.2f
+            for (i in 0 until 46) {
+                val px = ((hash(i.toDouble()) * w + t * 420) % (w + 40)) - 20
+                val py = ((hash(i + 8.0) * h + t * 760) % (h + 30)) - 10
+                c.drawLine(px.toFloat(), py.toFloat(), (px + 7).toFloat(), (py + 18).toFloat(), stroke)
+            }
+            return
+        }
+        // city storm: two depths of wind-driven rain, the near streaks catching the light
+        for (i in 0 until 90) {
+            val near = i % 3 == 0
+            val sp = if (near) 1.0 else 0.72
+            val px = ((hash(i.toDouble()) * (w + 120) - t * 300 * sp) % (w + 120) + w + 120) % (w + 120) - 60
+            val py = ((hash(i + 8.0) * h + t * 980 * sp) % (h + 40)) - 20
+            val len = if (near) 26.0 else 15.0
+            stroke.color = if (near) rgba(214, 238, 255, 0.55 * k) else rgba(170, 210, 236, 0.32 * k)
+            stroke.strokeWidth = if (near) 1.6f else 1.1f
+            c.drawLine(px.toFloat(), py.toFloat(), (px - len * 0.32).toFloat(), (py + len).toFloat(), stroke)
         }
     }
 
@@ -972,18 +987,32 @@ class RunRenderer(
         return (0xFF shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
     }
 
-    private fun palette(mood: Double, storm: Boolean) {
+    /** Storm line keyframe: deep indigo sky, teal horizon glow, cool rim, teal haze (see [P_TOP] … [P_CLOUD]). */
+    private val stormKey = intArrayOf(
+        0xFF0C1230.toInt(), 0xFF142C4C.toInt(), 0xFF1F5A6E.toInt(), 0xFF1E3E52.toInt(), 0xFF13283E.toInt(), 0xFF0A1628.toInt(),
+        0xFF285A6C.toInt(), 0xFF9FD8E8.toInt(), 0xFFA8E8F8.toInt(), 0xFF35566E.toInt(),
+    )
+    private var stormNow = 0.0
+
+    private fun palette(mood: Double, storm: Double, flash: Double = 0.0) {
         val m = mood.coerceIn(0.0, 2.0)
         val i = min(1, floor(m).toInt())
         val t = m - i
+        stormNow = storm
         for (k in 0 until 10) {
             var v = lerpArgb(keys[i][k], keys[i + 1][k], t)
-            if (storm) v = lerpArgb(v, 0xFF3C4452.toInt(), 0.42)
+            if (storm > 0) v = lerpArgb(v, stormKey[k], storm * 0.9)
+            // a lightning flash lights the skyline layers and the haze from behind
+            if (flash > 0 && k in P_FAR..P_FOG) v = lerpArgb(v, 0xFF5A7EA0.toInt(), flash * (0.42 - (k - P_FAR) * 0.1))
             pal[k] = v
         }
         pal[P_LIT] = (keys[i][P_LIT] + (keys[i + 1][P_LIT] - keys[i][P_LIT]) * t).toInt()
         pal[P_NEON] = (keys[i][P_NEON] + (keys[i + 1][P_NEON] - keys[i][P_NEON]) * t).toInt()
-        if (storm) pal[P_LIT] = max(pal[P_LIT], 120)
+        // the city keeps its warm windows and neon on under the storm
+        if (storm > 0) {
+            pal[P_LIT] = max(pal[P_LIT], (215 * storm).toInt())
+            pal[P_NEON] = max(pal[P_NEON], (170 * storm).toInt())
+        }
     }
 
     /** An ALPHA_8 skyline tile repeated across the screen, tinted [col]. */
@@ -1016,9 +1045,9 @@ class RunRenderer(
         }
     }
 
-    private fun paintCitySky(c: Canvas, w: Double, h: Double, mood: Double, camX: Double, clock: Double) {
+    private fun paintCitySky(c: Canvas, w: Double, h: Double, mood: Double, camX: Double, clock: Double, flash: Double = 0.0) {
         if (skyCacheH != h) { skyCache.clear(); skyCacheH = h }
-        val key = (mood * 16).toInt() * 2 + (if (pal[P_TOP] != keys[0][P_TOP] && false) 1 else 0) + ((pal[P_HOR] and 0xFF) shl 8)
+        val key = (mood * 16).toInt() + ((stormNow * 8).roundToInt() shl 6) + ((pal[P_HOR] and 0xFF) shl 10)
         val sh = skyCache.getOrPut(key) {
             LinearGradient(0f, 0f, 0f, h.toFloat(), intArrayOf(pal[P_TOP], pal[P_MID], pal[P_HOR], pal[P_HOR]), floatArrayOf(0f, 0.4f, 0.66f, 1f), Shader.TileMode.CLAMP)
         }
@@ -1028,16 +1057,18 @@ class RunRenderer(
         fill.shader = null
         val dusk = min(1.0, mood)
         val night = max(0.0, mood - 1)
-        // stars and the moon come out after dusk
-        paintStars(c, w, h, clock, night * 0.95)
-        if (night > 0.15) {
+        val clear = 1 - stormNow
+        if (flash > 0.01) c.drawRect(0f, 0f, w.toFloat(), (h * 0.75).toFloat(), solid(0xFFA8CCE8.toInt(), flash * 0.4 * stormNow))
+        // stars and the moon come out after dusk (hidden behind the storm deck)
+        paintStars(c, w, h, clock, night * 0.95 * clear)
+        if (night > 0.15 && clear > 0.05) {
             val mx = w * 0.2; val my = h * 0.14
-            softGlow(c, mx, my, h * 0.2, 0xFFB8C8FF.toInt(), 0.35 * night)
-            circle(c, mx, my, h * 0.028, solid(0xFFE6ECFF.toInt(), min(1.0, night * 1.2)))
-            circle(c, mx + h * 0.008, my - h * 0.006, h * 0.024, solid(pal[P_TOP], min(0.9, night)))
+            softGlow(c, mx, my, h * 0.2, 0xFFB8C8FF.toInt(), 0.35 * night * clear)
+            circle(c, mx, my, h * 0.028, solid(0xFFE6ECFF.toInt(), min(1.0, night * 1.2) * clear))
+            circle(c, mx + h * 0.008, my - h * 0.006, h * 0.024, solid(pal[P_TOP], min(0.9, night) * clear))
         }
         // a low sun sinking into the skyline, its glow washing the haze
-        val sunA = (1 - night * 1.25).coerceIn(0.0, 1.0)
+        val sunA = (1 - night * 1.25).coerceIn(0.0, 1.0) * clear
         if (sunA > 0.01) {
             val sx = w * 0.72
             val syy = h * (0.36 + 0.16 * dusk)
@@ -1049,13 +1080,23 @@ class RunRenderer(
         val ca = 0.55 - night * 0.25
         cloud(c, 0, ((-camX * 0.03 - clock * 3) % (w + 700) + w + 700) % (w + 700) - 600, h * 0.12, 1.3, ca, pal[P_CLOUD])
         cloud(c, 1, ((-camX * 0.05 - clock * 2 + 640) % (w + 700) + w + 700) % (w + 700) - 600, h * 0.24, 1.0, ca * 0.8, pal[P_CLOUD])
+        if (stormNow > 0.02) {
+            // the storm deck: low, fast, layered cloud bands, their undersides lit by the city
+            val sa = stormNow
+            for (k in 0 until 4) {
+                val sp = 9.0 + k * 5
+                val x = ((-camX * (0.04 + k * 0.02) - clock * sp + k * 410) % (w + 700) + w + 700) % (w + 700) - 600
+                cloud(c, k % 2, x, h * (0.04 + k * 0.07), 1.5 - k * 0.12, (0.75 - k * 0.1) * sa, if (k % 2 == 0) 0xFF22344E.toInt() else 0xFF2C4A62.toInt())
+            }
+            rampRect(c, 0.0, h * 0.18, w, h * 0.42, 0xFF3A7484.toInt(), 0.0, 0.16 * sa)
+        }
     }
 
-    private fun paintCityLayers(c: Canvas, w: Double, h: Double, camX: Double, clock: Double) {
+    private fun paintCityLayers(c: Canvas, w: Double, h: Double, camX: Double, clock: Double, lift: Double = 0.0) {
         val art = spr.art
         val lit = pal[P_LIT] / 255.0
         val neon = pal[P_NEON] / 255.0
-        val tops = doubleArrayOf(h * 0.3, h * 0.4, h * 0.53)
+        val tops = doubleArrayOf(h * 0.3 + lift * 0.2, h * 0.4 + lift * 0.35, h * 0.53 + lift * 0.55)
         val par = doubleArrayOf(0.06, 0.14, 0.3)
         for (i in 0 until 3) {
             val img = art.layer[i] ?: continue
@@ -1296,7 +1337,7 @@ class RunRenderer(
             c.save()
             c.rotate(tilt.toFloat(), bx.toFloat(), by.toFloat())
             softGlow(c, bx, by + bh * 0.1, bh * 0.9, if (hot) 0xFFFF6A3A.toInt() else 0xFFFFC870.toInt(), if (hot) 0.4 else 0.18)
-            art(c, img, bx - bw / 2, by - bh * 0.55, bw, bh, filter = spr.art.cityFilter(if (s.classic) 0.0 else RunSim.cityMoodAt(s.distance), false))
+            art(c, img, bx - bw / 2, by - bh * 0.55, bw, bh, filter = spr.art.cityFilter(if (s.classic) 0.0 else RunSim.cityMoodAt(s.distance), if (s.classic) 0.0 else RunSim.cityStormAt(s.distance)))
             // rotor blur and a charging eye
             if (!reducedMotion) for (rx in doubleArrayOf(-bw * 0.38, bw * 0.38)) oval(c, bx + rx, by - bh * 0.38, bw * 0.13, 2.0 + abs(sin(clock * 50)) * 1.5, solid(Color.WHITE, 0.35))
             val charge = if (s.bossTele > 0) 1 - s.bossTele / RunSim.BOSS_TELE else if (s.bossBeam > 0) 1.0 else 0.2
@@ -1449,17 +1490,19 @@ class RunRenderer(
         val mood = if (s.bonus) 0.0 else if (s.classic) RunSim.moodAt(s.distance) else RunSim.cityMoodAt(s.distance)
         val dusk = min(1.0, mood)
         val night = max(0.0, mood - 1)
-        val storming = !s.bonus && s.distance > 16000
+        val stormK = if (s.bonus) 0.0 else if (s.classic || !spr.art.ready) (if (s.distance > 16000) 1.0 else 0.0) else RunSim.cityStormAt(s.distance)
+        val storming = stormK > 0.01
+        val flash = if (s.bonus) 0.0 else s.lightning / 0.55
         // drawn ~1.6x the web size for phone readability; the sim hitbox (PW/PH) is unchanged
         val heroH = min(h * 0.2, 136.0)
         val spd = RunSim.speedAt(s)
         val look = spd * 0.18
         val camX = s.x - w * 0.27 + look
-        if (city) palette(mood, storming)
+        if (city) palette(mood, stormK, flash * stormK)
         if (s.bonus) paintGardenSky(c, w, h, clock)
-        else if (city) paintCitySky(c, w, h, mood, camX, clock)
+        else if (city) paintCitySky(c, w, h, mood, camX, clock, flash)
         else paintSky(c, w, h, mood)
-        if (storming) {
+        if (storming && !city) {
             c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), solid(Color.rgb(8, 16, 40), 0.2 + 0.08 * sin(s.stormT * 1.4)))
         }
         if (!city) {
@@ -1479,13 +1522,18 @@ class RunRenderer(
         val hillTop = h * 0.87
         val playTop = h * 0.52
         val playBot = hillTop - 14
-        fun sy(wy: Double) = playTop + ((wy - 140) / 150) * (playBot - playTop)
+        fun sy0(wy: Double) = playTop + ((wy - 140) / 150) * (playBot - playTop)
+        // camera lift: on a high (double) jump the world eases down so the robot stays clear of the HUD
+        val headroom = h * 0.15 + heroH
+        val liftRaw = max(0.0, headroom - sy0(s.y))
+        val lift = if (s.bonus) 0.0 else liftRaw * liftRaw / (liftRaw + h * 0.05)
+        fun sy(wy: Double) = sy0(wy) + lift
         val sunX = w * 0.84
         val sunY = h * (0.13 + dusk * 0.06)
 
         if (!s.bonus) {
             if (city) {
-                paintCityLayers(c, w, h, camX, clock)
+                paintCityLayers(c, w, h, camX, clock, lift)
             } else {
                 if (night > 0.35) {
                     softGlow(c, w * 0.14, h * 0.12, 46.0, 0xFFE6ECFF.toInt(), min(0.5, night * 0.4))
@@ -1514,11 +1562,11 @@ class RunRenderer(
         }
 
         if (!city || mood < 0.6) paintMotes(c, w, h, clock)
-        if (storming && !reducedMotion) paintRain(c, w, h, clock)
+        if (storming && !reducedMotion) paintRain(c, w, h, clock, if (city) stormK else 1.0, city)
 
         val thick = max(16.0, h * 0.028)
         if (!s.bonus) {
-            val cf = if (city) spr.art.cityFilter(mood, storming) else null
+            val cf = if (city) spr.art.cityFilter(mood, stormK) else null
             for (p in s.plats) {
                 val x = p.x - camX
                 if (x + p.w < -40 || x > w + 40) continue
@@ -1723,7 +1771,7 @@ class RunRenderer(
 
         val intro = s.plats.firstOrNull { it.kind == PlatKind.ROOF && it.x < 40 }
         val lip = if (intro != null) intro.x + intro.w else 1020.0
-        if (!s.bonus && s.phase == Phase.RUNNING && s.grounded && s.x > lip - 380 && s.x < lip - 18) {
+        if (s.tutorial && !s.bonus && s.phase == Phase.RUNNING && s.grounded && s.x > lip - 380 && s.x < lip - 18) {
             val gx = lip - 28 - camX
             if (gx > 48 && gx < w - 36) {
                 val pulse = 0.72 + sin(clock * 5) * 0.18
@@ -1751,7 +1799,7 @@ class RunRenderer(
         }
         if (clockAt >= 0) paintClockMoment(c, w, h, clock - clockAt, hx + ox, hy - heroH * 0.5 + oy)
         if (s.lightning > 0 && !s.bonus) {
-            c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), solid(Color.rgb(230, 240, 255), s.lightning * 0.42))
+            c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), solid(Color.rgb(230, 240, 255), s.lightning * (if (spr.art.ready && !s.classic) 0.18 else 0.42)))
             paintBolt(c, w, h, s.distance.toInt(), s.lightning)
         }
         if (s.flash > 0) c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), solid(Color.rgb(255, 72, 48), s.flash * 0.32))
@@ -1769,12 +1817,24 @@ class RunRenderer(
     }
 
     /** Score / combo pops: elastic pop-in, outlined game text, combos bigger and hotter. */
+    private val popXY = DoubleArray(POP_SLOTS * 3)
+
     private fun drawPops(c: Canvas, s: RunState, camX: Double, h: Double, clock: Double, sy: (Double) -> Double) {
         val base = max(22.0, h * 0.048)
         text.typeface = displayFace ?: textFace ?: Typeface.DEFAULT_BOLD
         outline.typeface = text.typeface
+        var placed = 0
         for (pop in s.pops) {
-            val py = sy(pop.y) - 34 // clear of the larger hero art
+            var py = sy(pop.y) - 34 // clear of the larger hero art
+            // pops born on the same spot (NICE + "+1") stack instead of printing over each other
+            val px = pop.x - camX
+            val half = pop.text.length * base * 0.34
+            var guard = 0
+            var k = 0
+            while (k < placed && guard < 6) {
+                if (abs(popXY[k * 3] - px) < popXY[k * 3 + 2] + half && abs(popXY[k * 3 + 1] - py) < base * 0.95) { py = popXY[k * 3 + 1] - base * 1.0; guard++; k = 0 } else k++
+            }
+            if (placed < POP_SLOTS) { popXY[placed * 3] = px; popXY[placed * 3 + 1] = py; popXY[placed * 3 + 2] = half; placed++ }
             if (py < 78 || py > h - 24) continue
             val age = clock - (popBorn[pop] ?: clock)
             val a = min(1.0, pop.life * 2)
@@ -1833,6 +1893,7 @@ class RunRenderer(
         /** World units per screen height (the desktop browser frame in the reference shot). */
         const val LOGICAL_H = 680.0
         // palette slots
+        private const val POP_SLOTS = 24
         private const val P_TOP = 0
         private const val P_MID = 1
         private const val P_HOR = 2

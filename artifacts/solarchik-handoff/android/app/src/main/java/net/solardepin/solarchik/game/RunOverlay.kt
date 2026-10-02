@@ -701,7 +701,18 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         pauseLayer.visibility = if (paused && !dead) VISIBLE else GONE
         slideBtn.visibility = if (!dead && !paused && h?.bonus != true) VISIBLE else GONE
         micBtn.visibility = if (live && !paused && micBtn.tag != false) VISIBLE else GONE
-        hintV.visibility = if (h?.phase == Phase.RUNNING && !h.bonus && !h.clockOpen) VISIBLE else GONE
+        val wantHint = h?.hint == true && !paused
+        if (wantHint) {
+            hintV.animate().cancel()
+            hintV.alpha = 1f
+            hintV.visibility = VISIBLE
+        } else if (hintV.visibility == VISIBLE && hintV.alpha == 1f && animations && !paused && h?.phase == Phase.RUNNING) {
+            // fade out instead of popping off
+            hintV.animate().alpha(0f).setDuration(500).withEndAction { hintV.visibility = GONE }.start()
+        } else if (!animations || paused || h?.phase != Phase.RUNNING) {
+            hintV.animate().cancel()
+            hintV.visibility = GONE
+        }
         gardenV.visibility = if (h?.bonus == true) VISIBLE else GONE
         countdownV.visibility = if (h?.phase == Phase.COUNTDOWN && !paused) VISIBLE else GONE
         announceV.visibility = if (h != null && h.announceOn && h.phase == Phase.RUNNING && h.announce.isNotEmpty() && !banner) VISIBLE else GONE

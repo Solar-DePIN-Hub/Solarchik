@@ -43,6 +43,11 @@ class GameSave(context: Context, private val clock: () -> Long = { System.curren
         get() = prefs.getInt("lastScore", 0)
         set(value) { prefs.edit().putInt("lastScore", value).apply() }
 
+    /** The first-run tutorial hints were shown once; later runs go without them. */
+    var runTutorialDone: Boolean
+        get() = prefs.getBoolean("runTutorialDone", false)
+        set(value) { prefs.edit().putBoolean("runTutorialDone", value).apply() }
+
     var bestScore: Int
         get() = prefs.getInt("bestScore", 0)
         set(value) { prefs.edit().putInt("bestScore", value).apply() }
