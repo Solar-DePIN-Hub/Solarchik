@@ -118,13 +118,13 @@
     <string name="reason_unsent">Комісія до сплати</string>
     <string name="ledger_row_time">відкрито %1$s · закрито %2$s</string>
 
-    <string name="class_pred_title">Prediction Agent</string>
+    <string name="class_pred_title">Агент прогнозів</string>
     <string name="class_pred_short">Прогнози</string>
     <string name="class_pred_blurb">Прогнози на живих даних ринку: вікна біткоїна і події Polymarket.</string>
     <string name="class_dex_title">Backpack SOL Desk</string>
     <string name="class_dex_short">Прогноз SOL</string>
     <string name="class_dex_blurb">Прогнозує напрямок SOL/USDC за рухом ціни на Backpack. Діє лише коли рух більший за поріг.</string>
-    <string name="class_combo_title">Combo Agent</string>
+    <string name="class_combo_title">Комбо-агент</string>
     <string name="class_combo_short">Комбо</string>
     <string name="class_combo_blurb">Одна стратегія: крипто 15 хв, події і погода. Бере найсильніший прогноз.</string>
 
@@ -560,7 +560,6 @@
     <string name="sm_unlist">Зняти з продажу</string>
     <string name="sm_price">Ціна, SOL</string>
     <string name="sm_list">Виставити на продаж</string>
-    <string name="sm_wallet_refused">Гаманець не підписав: %1$s</string>
     <string name="sm_need_devnet">Спершу підключи гаманець на devnet.</string>
     <string name="sm_working">Працюю…</string>
     <string name="sm_saved">Стратегію записано · %1$s · замок продажу %2$d год</string>

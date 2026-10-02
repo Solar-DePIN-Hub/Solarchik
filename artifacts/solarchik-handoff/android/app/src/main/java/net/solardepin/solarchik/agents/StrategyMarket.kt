@@ -220,7 +220,7 @@ object StrategyApi {
             c.readTimeout = 45_000
             c.doOutput = true
             c.setRequestProperty("content-type", "application/json")
-            c.outputStream.use { it.write(body.toString().encodeToByteArray()) }
+            c.outputStream.use { it.write(withLang(body).toString().encodeToByteArray()) }
             val stream = if (c.responseCode in 200..299) c.inputStream else c.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             runCatching { json.parseToJsonElement(text).jsonObject }.getOrElse {
@@ -230,6 +230,12 @@ object StrategyApi {
             c.disconnect()
         }
     }
+
+    /** Server texts are Ukrainian at the source; `lang=en` asks for the English swap (any non-Ukrainian phone). */
+    fun lang(locale: java.util.Locale = java.util.Locale.getDefault()): String = if (locale.language == "uk") "uk" else "en"
+
+    fun withLang(body: JsonObject, locale: java.util.Locale = java.util.Locale.getDefault()): JsonObject =
+        JsonObject(body + ("lang" to JsonPrimitive(lang(locale))))
 
     fun proof(wallet: String, ts: Long, sig: String): JsonObject = buildJsonObject {
         put("wallet", wallet)
