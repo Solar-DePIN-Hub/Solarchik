@@ -82,7 +82,7 @@ class RunShotsTest {
         val r = renderer().also { it.skin = RunSkin.of(skin); it.robot = robot }
         // a live renderer has been drawing for a while (one-shot effects already played),
         // unless the shot is about that moment
-        if (!moment) r.draw(c, w, h, s, clock - 3.0)
+        r.draw(c, w, h, s, clock - if (moment) 0.35 else 3.0) // a moment shot: 0.35 s into the effect
         r.draw(c, w, h, s, clock)
         if (hud) {
             val o = overlay()
@@ -285,6 +285,9 @@ class RunShotsTest {
         repeat(20) { RunSim.step(s, RunSim.TICK, Autopilot.input(s)) }
         assertEquals(Phase.RUNNING, s.phase)
         assertTrue("the run keeps going", s.x > x)
+        // frame it with the hero back on a roof (still inside the 2.8 s banner)
+        var n = 0
+        while (!(s.grounded && s.slide <= 0) && n++ < 150) RunSim.step(s, RunSim.TICK, Autopilot.input(s))
         // celebratory banner + shockwave, badge appears; no card, no freeze
         shot("23-clock-unlocked-banner", s, moment = true) { it.setClock(clockOpen); it.celebrateClock() }
         // a few seconds on: only the Sign badge stays in the HUD
