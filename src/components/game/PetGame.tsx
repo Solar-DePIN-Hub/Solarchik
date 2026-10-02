@@ -23,6 +23,9 @@ import type { Locale, MsgKey, TFunc } from "@/lib/game/i18n";
 import { play, unlockAudio, speakLocal, stopLocalVoice, isVoiceOn, setVoiceOn, playVoiceB64 } from "@/lib/game/audio";
 import { ReportCard, SecretaryDesk } from "./SecretaryDesk";
 import type { SecretaryReport } from "@/lib/game/secretary";
+import { ACT_TEXT, actLang, linkParts, looksLikeCommand, planAction, readyText, statusText, type ActLang, type ActPlan } from "@/lib/game/sol-act-plan";
+import type { Loaded } from "@/lib/game/sol-act-web";
+import { SolActCard } from "./SolActCard";
 
 type Props = {
   save: SaveData;
@@ -83,6 +86,9 @@ export function PetGame({ save, t, now: nowProp, onBack, onSetup, onChat, onSecr
   const [voiceOn, setVoiceUi] = useState(isVoiceOn);
   const [deskOpen, setDeskOpen] = useState(false);
   const [cardOpen, setCardOpen] = useState(Boolean(save.secretary));
+  /** Sol's pending action: shown as a card; nothing runs until Confirm. */
+  const [act, setAct] = useState<{ plan: ActPlan; loaded: Loaded; lang: ActLang } | null>(null);
+  const [actBusy, setActBusy] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recRef = useRef<MediaRecorder | null>(null);
@@ -179,6 +185,60 @@ export function PetGame({ save, t, now: nowProp, onBack, onSetup, onChat, onSecr
     if (!speakLocal(spoken, save.locale, voiceOf(), done)) done();
   };
 
+  /** Request → ONE proposed action → confirmation card. False = not an action, carry on with plain chat. */
+  const proposeAct = async (clean: string): Promise<boolean> => {
+    const lang = actLang(save.locale);
+    let loaded: Loaded;
+    let ask: Awaited<ReturnType<typeof import("@/lib/game/sol-act-web").askAct>>;
+    try {
+      const web = await import("@/lib/game/sol-act-web");
+      loaded = await web.loadActContext();
+      ask = await web.askAct(clean, lang, loaded.ctx, pet.chat.slice(-6).map((m) => ({ role: m.role === "user" ? "user" : "model", text: m.text })));
+    } catch (e) {
+      console.warn("[sol-act] context", e);
+      return false;
+    }
+    if (!ask.action) return false;
+    if (ask.action.type === "agent_status") {
+      const text = statusText(ask.action.agent ?? "", loaded.ctx, loaded.side, lang);
+      onChat(clean, text);
+      play("collect");
+      void speak(text);
+      return true;
+    }
+    const plan = planAction(ask.action, loaded.ctx, loaded.side, lang);
+    const say = plan.blocked ? readyText(plan, lang) : ask.reply || readyText(plan, lang);
+    onChat(clean, say);
+    play("collect");
+    void speak(say);
+    setAct({ plan, loaded, lang });
+    return true;
+  };
+
+  const confirmAct = async () => {
+    if (!act || actBusy) return;
+    setActBusy(true);
+    play("tick");
+    try {
+      const { executePlan } = await import("@/lib/game/sol-act-web");
+      const r = await executePlan(act.plan, act.loaded, act.lang);
+      const text = r.link ? `${r.text} ${r.link}` : r.text;
+      onChat(ACT_TEXT[act.lang].confirm, text);
+      play(r.ok ? "collect" : "hurt");
+      void speak(r.text);
+    } finally {
+      setActBusy(false);
+      setAct(null);
+    }
+  };
+
+  const cancelAct = () => {
+    if (!act || actBusy) return;
+    onChat(ACT_TEXT[act.lang].cancel, ACT_TEXT[act.lang].cancelled);
+    play("tick");
+    setAct(null);
+  };
+
   const sendText = async (text: string) => {
     const clean = cleanChat(text);
     if (!clean || sendingRef.current) return;
@@ -199,6 +259,7 @@ export function PetGame({ save, t, now: nowProp, onBack, onSetup, onChat, onSecr
     setSending(true);
     setChatNote("");
     try {
+      if (!act && looksLikeCommand(clean) && (await proposeAct(clean))) return;
       const res = await liveAsk({
         name: pet.name,
         vibe: pet.vibe,
@@ -528,7 +589,17 @@ export function PetGame({ save, t, now: nowProp, onBack, onSetup, onChat, onSecr
                 (m.role === "user" ? "ml-auto bg-primary text-primary-fg" : "bg-bg/75 text-fg")
               }
             >
-              {m.text}
+              {m.role === "user"
+                ? m.text
+                : linkParts(m.text).map((part, j) =>
+                    part.href ? (
+                      <a key={j} href={part.href} target="_blank" rel="noreferrer" className="block break-all font-semibold text-primary underline" data-testid="sol-act-explorer">
+                        {ACT_TEXT[actLang(save.locale)].explorer}
+                      </a>
+                    ) : (
+                      <span key={j}>{part.text}</span>
+                    ),
+                  )}
             </p>
           ))}
           {pending && (
@@ -576,6 +647,9 @@ export function PetGame({ save, t, now: nowProp, onBack, onSetup, onChat, onSecr
       )}
 
       <div className="pet-dock relative z-20 px-4 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-2">
+        {act && (
+          <SolActCard plan={act.plan} lang={act.lang} busy={actBusy} onConfirm={() => void confirmAct()} onCancel={cancelAct} />
+        )}
         <p className="mb-2 text-center text-xs font-semibold text-muted">
           {holding ? t("pet.talk.listening") : chatNote || t("pet.talk.tap")}
         </p>
