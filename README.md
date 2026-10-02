@@ -28,6 +28,18 @@ cd artifacts/solarchik-handoff/android
 ```
 A signed release needs your own keystore (`app/solarchik-release.jks` + `keystore.properties`, both gitignored). Without it `assembleRelease` produces an unsigned APK.
 
+### For judges: Strategy NFTs on devnet
+The Agents tab → Strategy NFT market uses the server routes of the web app (devnet only). Real devnet addresses (server collection [`74Tyscw6gL9mDxvNsSSDuj6v4YHqFPCyUULirjLPeuQC`](https://explorer.solana.com/address/74Tyscw6gL9mDxvNsSSDuj6v4YHqFPCyUULirjLPeuQC?cluster=devnet)):
+
+| Strategy NFT | Asset |
+| --- | --- |
+| Calm Hourly BTC | [`sZ4R4sbUtuGc8ygfmwHvG34zqL5LoSBRF5YkHDTDfVH`](https://core.metaplex.com/explorer/sZ4R4sbUtuGc8ygfmwHvG34zqL5LoSBRF5YkHDTDfVH?env=devnet) |
+| Momentum Rider 5m | [`AV8EgTtPaZydbrRDZtFFUfeuDR32jB6oHuRozUhKWEwX`](https://core.metaplex.com/explorer/AV8EgTtPaZydbrRDZtFFUfeuDR32jB6oHuRozUhKWEwX?env=devnet) |
+| Mean Revert Scout | [`2ijiD193pRVfhomaFtXSNuc13ki9XVwhxw7AFXL1dsK7`](https://core.metaplex.com/explorer/2ijiD193pRVfhomaFtXSNuc13ki9XVwhxw7AFXL1dsK7?env=devnet) |
+| Lock Test BTC Windows (strategy changed, transfer refused on chain, server-written APR) | [`BxXZvfVhEbBDqYRYu3pK8pkBfWq6YQ3GL4QevGm1TDip`](https://core.metaplex.com/explorer/BxXZvfVhEbBDqYRYu3pK8pkBfWq6YQ3GL4QevGm1TDip?env=devnet) |
+
+Their 240 h sale lock (it starts at mint and at every strategy change) ends 2026-10-12 16:38 UTC; listing and buying on devnet come after that. Every signature: [docs/devnet-strategy-run.md](docs/devnet-strategy-run.md).
+
 ---
 
 # Solarchik
