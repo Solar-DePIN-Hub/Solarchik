@@ -691,7 +691,8 @@ export function commitBrain(args: {
   /** Model that actually decided ("Grok" or "Gemini"). */
   brain?: string;
 }): StepResult {
-  const who = args.brain || "Grok";
+  // No model name when the call failed (the error text says what happened); never claim a model that did not answer.
+  const who = args.brain || "ШІ";
   const why = args.why.replace(/\s+/g, " ").trim().slice(0, 180);
   const market = args.quote.polymarkets.find((m) => m.id === args.marketId) ?? null;
   const book = market ? quoteToBook(market, market.focus === "btc" ? "edge" : "favorite") : null;
@@ -708,12 +709,14 @@ export function commitBrain(args: {
     fill: null,
     fillPatch: null,
   });
+  // Every model decision line names the model that actually decided (Grok or Gemini), skips included.
+  const said = (text: string) => (!args.brain || text.startsWith(args.brain) ? text : `${args.brain} · ${text}`);
   if (!book || args.action === "skip") {
-    return reset(why || `${who}: ставку не відкриваю`);
+    return reset(why ? said(why) : `${who}: ставку не відкриваю`);
   }
   const confidence = Math.min(1, Math.max(0, args.confidence));
   if (confidence < 0.65) {
-    return reset(why || `${who} не впевнений (${Math.round(confidence * 100)}%). Ставку не відкриваю.`);
+    return reset(why ? said(why) : `${who} не впевнений (${Math.round(confidence * 100)}%). Ставку не відкриваю.`);
   }
   const stake = dynamicSize(capOf(args.nft), confidence, riskOf(args.nft), args.free);
   if (stake < 0.005) return reset(why || `${who} бачить сторону, але вільних SOL замало`);

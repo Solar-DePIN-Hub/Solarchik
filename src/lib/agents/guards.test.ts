@@ -545,3 +545,14 @@ describe("Take and work (live audit, Oct 2026)", () => {
     assert.match(store, /step\.arbFire && !arbFlight && nft\.asset !== LOCAL_DEX_ASSET\)/);
   });
 });
+
+describe("prediction decision lines name the model (live audit, Oct 2026)", () => {
+  it("prefixes skips with the model that answered and never defaults to Grok", () => {
+    const src = readFileSync(new URL("./engine.ts", import.meta.url), "utf8");
+    const fn = src.slice(src.indexOf("export function commitBrain("), src.indexOf("function predictionStep("));
+    assert.match(fn, /const who = args\.brain \|\| "ШІ";/);
+    assert.doesNotMatch(fn, /args\.brain \|\| "Grok"/);
+    assert.match(fn, /const said = \(text: string\) => \(!args\.brain \|\| text\.startsWith\(args\.brain\) \? text : `\$\{args\.brain\} · \$\{text\}`\);/);
+    assert.match(fn, /return reset\(why \? said\(why\) :/);
+  });
+});
