@@ -14,7 +14,7 @@
 # GET /sol/tts (gpt-4o-mini-tts, Cloudflare-cached). Includes the owner's 81e336fa edits (app_seen logs, no-company prompts).
 # Rollback: npx wrangler rollback 81e336fa-670a-4e95-b818-e67a1ce609f2 --name solarchik-screen (the DO binding stays
 # deployed but unused by that code; older: 241bf359, 71b66276).
-# Live 75c667e3-57eb-4529-b923-d8e6479ae999 (3 Oct 2026, native 0.21.8 job, later edits): Sol prompt/TTS tweaks.
+# Live 75c667e3-57eb-4529-b923-d8e6479ae999: the version that was live when the 0.21.9 job started (not logged here before).
 # Live 79f83fac-12cf-499c-87ad-ecc43801f1b1 (3 Oct 2026, ~02:10 Kyiv, native 0.21.9 job): Calls archive support:
 # canonical call ids (rtc_/live_ twins share one CallRoom, session-only deliveries wait for the rtc_ twin), /inbox
 # drops the failed ghost twin, transcripts kept in KV (transcript:<callId>, 60 days) + durationSec, GET /call
