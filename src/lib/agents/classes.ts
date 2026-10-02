@@ -23,7 +23,7 @@ export const CLASS_META: Record<
   },
   2: {
     id: 2,
-    title: "Titan × Backpack",
+    title: "Backpack SOL Desk",
     short: "Арбітраж",
     kind: "dex",
     blurb: "Усі Solana-пари Backpack проти USDC. Стріляє лише коли є край і каса.",

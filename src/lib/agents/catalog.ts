@@ -102,11 +102,12 @@ export function liveCatalog(): LiveSku[] {
     {
       id: "sku-dex-arb",
       priceSol: 0,
-      blurb: "Titan × Backpack. Усі Solana-пари проти USDC. Стріляє лише коли є край і каса.",
+      blurb: "Backpack SOL Desk. Порівнює котирування Titan з ціною Backpack для Solana-пар проти USDC. Стріляє лише коли є чистий край і каса.",
       nft: liveNft({
         asset: "DexArbTpl00000000000000000000000006",
         classId: 2,
-        name: "Titan × Backpack",
+        // Was "Titan × Backpack" (still the name of NFTs minted before 2026-10-02). Same name on Android.
+        name: "Backpack SOL Desk",
         mintedAt: now,
         updatedAt: now,
         strategy: { prediction: pred("btc", "Bitcoin", ["crypto"], 18), dex: DEX },
