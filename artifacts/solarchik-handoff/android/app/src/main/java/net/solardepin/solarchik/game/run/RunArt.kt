@@ -19,7 +19,7 @@ import kotlin.math.sqrt
 /**
  * Painted solarpunk-city art for the run (assets/art):
  *  - three skyline layers (far / mid / near) as alpha masks plus window-light and neon masks,
- *    tinted per time of day by the renderer (Alto's-style atmospheric silhouettes);
+ *    tinted per time of day by the renderer (layered atmospheric silhouettes);
  *  - three tileable building facades (+ lit-window masks) drawn with repeating shaders;
  *  - the parapet strip, rooftop props, solar modules (glass gradient-mapped per skin), the
  *    maintenance-drone boss, crack decal, sun-coin frames and stratus wisps (`city.webp` atlas).

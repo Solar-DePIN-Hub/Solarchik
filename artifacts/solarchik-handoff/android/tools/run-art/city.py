@@ -1,4 +1,4 @@
-"""Solarpunk city skyline layers for the native runner (Alto's-Odyssey-like silhouettes).
+"""Solarpunk city skyline layers for the native runner (layered atmospheric silhouettes).
 Each layer is an alpha mask (white + alpha): the game tints it per time of day, and a
 matching window-light mask fades in at dusk. Horizontally seamless (buildings wrap).
 Units: world units; rendered at 2 px/unit with 3x supersampling."""

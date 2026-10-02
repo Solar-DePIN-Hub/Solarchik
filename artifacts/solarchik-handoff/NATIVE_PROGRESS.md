@@ -383,7 +383,7 @@ Merge of branch `native-run` (0.21.0–0.21.1) into native-full 0.20.6. Both fea
 
 ## 0.21.4 (versionCode 69): solarpunk city + city rules (2026-10-02)
 
-The owner's feedback on 0.21.3 was that it felt childish, too easy and the art was so-so. This round has three parts: hero frames, an art direction change (solarpunk city, Alto's Odyssey mood) and harder "city rules". All of it is native-only. The web builder gets the same rules as a spec/diff (`web-city-rules.diff`, kept on the box next to the APKs).
+The owner's feedback on 0.21.3 was that it felt childish, too easy and the art was so-so. This round has three parts: hero frames, an art direction change (solarpunk city, calm atmospheric skyline mood) and harder "city rules". All of it is native-only. The web builder gets the same rules as a spec/diff (`web-city-rules.diff`, kept on the box next to the APKs).
 
 **Hero frames** (`RunSprites.kt`, `tools/run-art/hero.py`)
 - The project's own painted web frames (`hero-run-1..8`, `hero-jump-1..4`) are upscaled 3x: premultiplied Lanczos, a smoothed alpha edge and an unsharp mask. They ship as WebP in `assets/art/hero/`, plus a slide pose (jump-1 leaned back 55°).
