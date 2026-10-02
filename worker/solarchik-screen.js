@@ -38,7 +38,7 @@ Speak short. Warm. Under 40 words.
 Ask who is calling and why. Never give wallet, address, codes, family.
 Spam: end fast. Real call: ask only name and what they want. Never ask for a company.
 When you have enough, last line exactly:
-SUMMARY_JSON={"caller_name":"...","company":"...","callback":"...","intent":"...","urgency":"low|medium|high","spam_risk":"low|medium|high","action":"callback|ignore|block","notes":"..."}`;
+SUMMARY_JSON={"caller_name":"...","callback":"...","intent":"...","urgency":"low|medium|high","spam_risk":"low|medium|high","action":"callback|ignore|block","notes":"..."}`;
 
 /** Standard Webhooks tolerance (OpenAI signs webhooks this way): reject timestamps older or newer than 5 min. */
 export const WEBHOOK_TOLERANCE_SEC = 300;
@@ -136,7 +136,9 @@ function parseSummary(text) {
   const match = String(text || "").match(/SUMMARY_JSON=(\{[\s\S]*\})/);
   if (!match) return null;
   try {
-    return JSON.parse(match[1]);
+    const o = JSON.parse(match[1]);
+    if (o && typeof o === "object") delete o.company; // the secretary never collects a company
+    return o;
   } catch {
     return null;
   }
@@ -711,7 +713,7 @@ function clip(v, n) {
 
 /** The note as the apps show it: one readable line in `text`, the structured summary alongside. */
 export function noteText(a) {
-  const who = [clip(a.caller_name, 60), clip(a.company, 60)].filter(Boolean).join(", ");
+  const who = clip(a.caller_name, 60);
   const parts = [who && `${who}:`, clip(a.intent, 200), a.callback ? `Callback ${clip(a.callback, 40)}.` : "", clip(a.notes, 240)];
   return parts.filter(Boolean).join(" ").slice(0, 600);
 }
@@ -737,7 +739,6 @@ async function mcp(env, request) {
     const a = msg.params.arguments && typeof msg.params.arguments === "object" ? msg.params.arguments : {};
     const summary = {
       caller_name: clip(a.caller_name, 60),
-      company: clip(a.company, 60),
       callback: clip(a.callback, 40) || (call.caller && call.caller !== "unknown" ? call.caller : ""),
       intent: clip(a.intent, 200),
       urgency: clip(a.urgency, 8),
@@ -745,7 +746,6 @@ async function mcp(env, request) {
       action: clip(a.action, 10),
       notes: clip(a.notes, 400),
     };
-    if (!summary.company) delete summary.company;
     await patchInbox(env, call.userId, callId, { caller: call.caller, text: noteText(summary) || "Call note (empty)", summary, status: "done", source: "tool" });
     return ok({ content: [{ type: "text", text: "Saved. Say goodbye." }] });
   }

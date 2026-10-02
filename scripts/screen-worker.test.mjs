@@ -299,9 +299,10 @@ test("note tool over MCP: wrong token 401, tools/list, tools/call fills the inbo
   assert.equal(inbox.length, 1, "the pending line is updated, not duplicated");
   assert.equal(inbox[0].status, "done");
   assert.equal(inbox[0].text, noteText(args));
-  assert.match(inbox[0].text, /^Dana, Monobank: Card limit question/);
+  assert.match(inbox[0].text, /^Dana: Card limit question/);
+  assert.ok(!/Monobank/.test(inbox[0].text), "a company the model passed anyway is never stored");
   const read = await call(env, "/inbox?userId=" + OWNER, undefined, "GET");
-  assert.equal(read.json.items[0].summary.company, "Monobank");
+  assert.equal(read.json.items[0].summary.company, undefined);
 });
 
 test("no credit: missed-call line and reject; tool accept failure falls back; total failure refunds", async () => {
