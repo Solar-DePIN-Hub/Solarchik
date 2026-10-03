@@ -26,6 +26,10 @@ Review build is **0.22.3** (versionCode 78), submitted 3 Oct 2026. Devnet only.
 - **Tests on this release:** 348 total, 11 skipped, 0 failed.
 - **Timeline:** Started Sep 19, 2026; the Sep 30 bulk commit imports code built in Grok Build in Sep 2026; an older unrelated Solarchik Telegram prototype (Jul 2026) is not part of this submission; also entered MunichTech (Sep 2026). Submitted to CLOCK IN on Oct 3, 2026.
 
+### Mainnet paths, switched off for this build
+
+Paid mainnet mint and the arb desk (Titan × Backpack) were built and run before this submission. They are off in 0.22.3 on purpose, not because they were unfinished. A review APK that can spend mainnet SOL or send exchange orders is a real-money build; judges install it on a device they do not control, so those paths are compiled or flagged off: `MAINNET_PAID_MINT=false`, the app refuses mainnet desk orders, and `LIVE_TRADING_ENABLED` / `ARB_MAINNET_ENABLED` stay unset. The «На касу арбу» top-up is hidden and blocked on the server. Turning them back on is a flag and a production key, not a rewrite. SKR was not added here because SKR is mainnet-only. Devnet SOL in this build has no value.
+
 ### Five tabs
 | Tab | What it does |
 | --- | --- |
