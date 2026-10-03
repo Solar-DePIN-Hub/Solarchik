@@ -731,9 +731,11 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         if (clock.signed) {
             clockBannerTitle.text = ctx.getString(R.string.run_clock_done_title, GameSave.GOAL_M)
             clockBannerSub.text = ctx.getString(R.string.run_clock_done_sub)
+            clockBannerSub.visibility = GONE // one short line: the title already says it all
         } else {
             clockBannerTitle.text = ctx.getString(R.string.run_clock_unlocked)
             clockBannerSub.text = ctx.getString(R.string.run_clock_keep)
+            clockBannerSub.visibility = VISIBLE
         }
         bannerUntil = now + BANNER_MS
         refreshVisibility()

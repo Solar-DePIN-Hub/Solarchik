@@ -31,7 +31,7 @@ import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowLooper
 import java.io.File
 
-/** 0.22.0 review screenshots (Robolectric native graphics, 1080x2400) into build/screens/0.22.0. */
+/** 0.22.0 review screenshots (Robolectric native graphics, the test screen's own size) into build/screens/0.22.0. */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34], qualifiers = "uk-w411dp-h914dp-xxhdpi")
@@ -67,9 +67,10 @@ class Shots0220Test {
     private fun shot(a: Activity, name: String) {
         idle()
         val root = a.window.decorView
-        root.measure(View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(2400, View.MeasureSpec.EXACTLY))
-        root.layout(0, 0, 1080, 2400)
-        val bmp = Bitmap.createBitmap(1080, 2400, Bitmap.Config.ARGB_8888)
+        // the screen's own size (411x914 dp @ xxhdpi): forcing another size would misplace the scene overlay
+        val w = root.width.takeIf { it > 0 } ?: 1233
+        val h = root.height.takeIf { it > 0 } ?: 2742
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         root.draw(Canvas(bmp))
         dir.mkdirs()
         File(dir, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -132,17 +133,36 @@ class Shots0220Test {
         chapter = ChapterId.STORM, announce = "", announceOn = false, clockOpen = true,
     )
 
-    @Test fun runAlreadySigned() {
-        val save = GameSave(app)
-        save.recordRun(1340, 1500)
-        save.stampClock("Addr111", "sig-test-not-a-real-tx", "devnet", "memo")
-        val a = Robolectric.buildActivity(RunActivity::class.java).setup().visible().get()
-        a.onHud(hud(Phase.RUNNING, 1199))
-        a.onEvents(listOf(Ev.CLOCK), hud(Phase.RUNNING, 1200))
-        ShadowLooper.idleMainLooper()
-        shot(a, "11-run-1200m-already-signed-uk")
-        a.onResult(RunResult(hud(Phase.DEAD, 1610)))
+    private fun drawView(v: View, name: String) {
+        // the run is landscape-only
+        v.measure(View.MeasureSpec.makeMeasureSpec(2742, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(1233, View.MeasureSpec.EXACTLY))
+        v.layout(0, 0, 2742, 1233)
+        val bmp = Bitmap.createBitmap(2742, 1233, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.drawColor(0xFF1B2B3A.toInt()) // stands in for the game canvas behind the HUD
+        v.draw(c)
+        dir.mkdirs()
+        File(dir, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    /** The run HUD/cards over a plain backdrop (the game canvas needs the real GL-free loop, not drawn here). */
+    @Test @Config(qualifiers = "uk-w914dp-h411dp-land-xxhdpi")
+    fun runAlreadySigned() {
+        val o = net.solardepin.solarchik.game.RunOverlay(app, object : net.solardepin.solarchik.game.RunOverlay.Actions {
+            override fun pauseToggle() {}; override fun resume() {}; override fun yard() {}; override fun again() {}
+            override fun sign() {}; override fun signBadge() {}; override fun share() {}; override fun yardSign() {}
+            override fun musicToggle() {}; override fun mic() {}; override fun slideDown() {}; override fun slideUp() {}
+        }).also { it.animations = false }
+        val host = Robolectric.buildActivity(Activity::class.java).setup().visible().get()
+        host.setContentView(o)
+        idle()
+        o.setClock(net.solardepin.solarchik.game.RunOverlay.ClockUi(open = true, signed = true, wallet = true, dayLine = "CLOCK IN · 1340 м · серія 1"))
+        o.bind(hud(Phase.RUNNING, 1200))
+        o.celebrateClock()
+        drawView(o, "11-run-1200m-already-signed-uk")
+        o.bind(hud(Phase.DEAD, 1610))
         ShadowLooper.idleMainLooper(3, java.util.concurrent.TimeUnit.SECONDS)
-        shot(a, "12-run-end-already-signed-uk")
+        idle()
+        drawView(o, "12-run-end-already-signed-uk")
     }
 }

@@ -329,6 +329,7 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
         for (t in tags) {
             val showSub = t.alwaysSub || long || (t.obj == RoofObject.ANTENNA && unread > 0) || (t.obj == RoofObject.PANELS && roof.earned)
             t.sub.visibility = if (showSub && t.sub.text.isNotEmpty()) View.VISIBLE else View.GONE
+            t.title.visibility = View.VISIBLE
             t.view.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
             val mw = t.view.measuredWidth.toFloat()
             val mh = t.view.measuredHeight.toFloat()
@@ -344,6 +345,29 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
                 y = hit.bottom + dp(4)
                 if (y + mh > bottomLimit) { y = hit.top - mh - dp(4) }
                 r = RectF(x, y, x + mw, y + mh)
+            }
+            // still on top of something (tight portrait bottom): slide sideways instead
+            if (placed.any { RectF.intersects(it, r) }) {
+                val hit = placed.first { RectF.intersects(it, r) }
+                val y0 = r.top
+                listOf(hit.right + dp(6), hit.left - mw - dp(6)).map { it.clampIn(edge, w - edge - mw) }
+                    .map { RectF(it, y0, it + mw, y0 + mh) }
+                    .firstOrNull { c -> placed.none { RectF.intersects(it, c) } }
+                    ?.let { r = it; x = it.left }
+            }
+            // last resort: icon only (the ☰ list and the tour still name it)
+            if (placed.any { RectF.intersects(it, r) }) {
+                t.sub.visibility = View.GONE
+                t.title.visibility = View.GONE
+                t.view.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+                val iw = t.view.measuredWidth.toFloat()
+                val ih = t.view.measuredHeight.toFloat()
+                val hit = placed.first { RectF.intersects(it, r) }
+                val y0 = r.top
+                listOf(x, hit.left - iw - dp(6), hit.right + dp(6)).map { it.clampIn(edge, w - edge - iw) }
+                    .map { RectF(it, y0, it + iw, y0 + ih) }
+                    .let { c -> c.firstOrNull { k -> placed.none { RectF.intersects(it, k) } } ?: c.first() }
+                    .let { r = it; x = it.left }
             }
             placed += r
             t.view.translationX = x
@@ -378,6 +402,8 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
         bubble.measure(View.MeasureSpec.makeMeasureSpec(maxBw, View.MeasureSpec.AT_MOST), View.MeasureSpec.UNSPECIFIED)
         val bw = bubble.measuredWidth.toFloat()
         val bh = bubble.measuredHeight.toFloat()
+        // pin the laid-out width to the measured one (WRAP_CONTENT let a long line run off the right edge)
+        (bubble.layoutParams as FrameLayout.LayoutParams).let { if (it.width != bubble.measuredWidth) { it.width = bubble.measuredWidth; bubble.layoutParams = it } }
         val tail = bubbleTail
         val down = cam.portrait || bw > cam.x(822f) - edge
         if (tail.down != down) { tail.down = down; tail.invalidate() }
