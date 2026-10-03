@@ -103,3 +103,5 @@ Do not put keys in the APK.
   - Both routes are limited per isolate to 40 requests/min per IP.
   - Live, 3 Oct: chat TTFT 0.43–0.6 s, a full short reply 0.8 s; tts first byte 0.38–1.2 s, a cache hit 0.04 s.
   - The market's Gemini `sol-voice` answered 503 (all four TTS models 429) at the same time. That is why the app fell back to the phone's robotic system voice.
+
+**Call secretary + Sol, update c2fecc69** (3 Oct, ~04:32 Kyiv). Sol's Ukrainian wording for a signed day: ready phrases «День уже підписано, серія N» / «Сьогодні вже зараховано, серія N», never «ти підписано». Two stale expectations in `scripts/screen-worker.test.mjs` were updated to match the current behaviour (`owner` in /balance, canonical `dedup:call:` key). Tests 63/63. Roll back with `npx wrangler rollback cff0aa4f-f97c-471d-9ec5-ac209913fc31 --name solarchik-screen`.

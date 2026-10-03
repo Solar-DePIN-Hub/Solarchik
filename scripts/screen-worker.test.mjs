@@ -430,7 +430,7 @@ test("the same call delivered twice (same second, new webhook-id) is accepted an
   assert.deepEqual(again.json, { ok: true, duplicate: true });
   assert.equal(o.calls.filter((c) => c.url.endsWith("/accept")).length, 1);
   assert.equal(await env.BALANCES.get(OWNER), "0.8");
-  assert.ok(env.BALANCES.m.has("dedup:wh:wh_a") && env.BALANCES.m.has("dedup:call:rtc_dup"));
+  assert.ok(env.BALANCES.m.has("dedup:wh:wh_a") && env.BALANCES.m.has("dedup:call:dup"), "call id is canonical (rtc_/live_ twins share one key)");
 });
 
 test("dedup keys carry a 10 min TTL; a failed accept is forgotten so OpenAI's retry can still answer", async () => {
@@ -486,7 +486,7 @@ test("incoming call instructions follow the player's language; unmapped calls us
 test("starter credit: a new id sees $0.60 (trial: true) without any KV write; 3 sessions, granted once", async () => {
   const env = { BALANCES: kv(), OPENAI_API_KEY: "test" };
   const bal = await call(env, "/balance?userId=" + USER, undefined, "GET");
-  assert.deepEqual(bal.json, { userId: USER, usd: 0.6, paidUsd: 0, trialUsd: 0.6, trial: true, sessionUsd: 0.2 });
+  assert.deepEqual(bal.json, { userId: USER, usd: 0.6, paidUsd: 0, trialUsd: 0.6, trial: true, owner: false, sessionUsd: 0.2 });
   assert.equal(env.BALANCES.m.size, 0, "reading the balance writes nothing");
   globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: "Hi" } }] }), { status: 200 });
   const usd = [];
