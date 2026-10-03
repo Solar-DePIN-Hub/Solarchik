@@ -28,7 +28,7 @@ data class SolState(
     fun line(goal: Int = SolarchikConfig.RUN_GOAL_M): String {
         val days = if (streak == 1) "1 day" else "$streak days"
         val today = when {
-            signedToday -> "today's CLOCK IN is already signed. Do not ask the player to run $goal m or to sign today; the day is done"
+            signedToday -> "today's CLOCK IN is already signed. Do not ask the player to run $goal m or to sign today; the day is done (Ukrainian wording: «День уже підписано» / «Сьогодні вже зараховано», a sentence without «ти»)"
             clockedToday -> "today's run ($todayMeters m) unlocked CLOCK IN but it is not signed yet: the next step is to tap Sign today"
             else -> "today is not signed yet; today's best run is $todayMeters m of $goal m"
         }

@@ -375,9 +375,9 @@
     <string name="run_hint">Тап — стрибок · свайп вниз — слайд</string>
     <string name="run_garden">Тап — лети · хапай сонця</string>
     <string name="run_flight">НЕБО %1$d с</string>
-    <string name="run_hit">Вдарився</string>
-    <string name="run_fell">Упав</string>
-    <string name="run_reached">Дістався: %1$s</string>
+    <string name="run_hit">Зіткнення</string>
+    <string name="run_fell">Падіння</string>
+    <string name="run_reached">Зона: %1$s</string>
     <string name="run_daily">ЩОДЕННИЙ ДАХ</string>
     <string name="run_stats">%1$d м · %2$d очок · %3$d сонця</string>
     <string name="run_stats_heat">%1$d м · %2$d очок · %3$d сонця · %4$dx жар</string>
@@ -604,7 +604,7 @@
     <string name="sol_act_cancel">Скасувати</string>
     <string name="sol_act_cancelled">Скасовано. Нічого не змінено.</string>
     <string name="sol_act_working">Виконую… перевір гаманець.</string>
-    <string name="sol_act_bought">Готово: ти купив %1$s за %2$s SOL.</string>
+    <string name="sol_act_bought">Готово: %1$s куплено за %2$s SOL.</string>
     <string name="sol_act_strategy_done">Готово: %1$s тепер на стратегії v%2$d. Продаж заблоковано на %3$d год.</string>
     <string name="sol_act_minted">Готово: змінтовано %1$s.</string>
     <string name="sol_act_started">Готово: %1$s працює (%2$s).</string>
@@ -703,5 +703,5 @@
     <string name="voice_engine_system">голос телефона (запасний)</string>
     <string name="voice_last">Остання фраза: %1$s · перший звук за %2$s мс</string>
     <string name="voice_last_none">Сол ще не говорив на цьому телефоні.</string>
-    <string name="run_action_later">Зрозумів — після забігу покладу це на вкладку Сола, щоб ти підтвердив.</string>
+    <string name="run_action_later">Зрозумів. Після забігу покладу це на вкладку Сола — там підтвердиш.</string>
 </resources>

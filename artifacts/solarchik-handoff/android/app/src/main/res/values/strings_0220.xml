@@ -55,7 +55,7 @@
 
     <!-- 0.22.0: run, today already signed -->
     <string name="run_clock_done_title">%1$d m ✓ Today is already signed</string>
-    <string name="run_clock_done_sub">keep going for a record</string>
+    <string name="run_clock_done_sub">new day at %1$s</string>
     <plurals name="banter_clock_done">
         <item quantity="one">%1$d m! Today’s already signed, streak %2$d day. Now it’s all about the record.</item>
         <item quantity="other">%1$d m! Today’s already signed, streak %2$d days. Now it’s all about the record.</item>
@@ -67,4 +67,5 @@
     <string name="slice_how_2">What you do here: practise with $1,000 of pretend money. Buy a $50 slice of any stock, watch the price move, sell whenever you like.</string>
     <string name="slice_how_3">Honestly: it’s a simulation. No real money, no wallet, no transactions, not even devnet.</string>
     <string name="slice_start_hint">Pick any stock below and tap “Buy”.</string>
+    <string name="day_new_at">New day at %1$s (your phone\'s time)</string>
 </resources>

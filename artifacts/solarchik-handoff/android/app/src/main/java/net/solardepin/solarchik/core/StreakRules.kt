@@ -52,6 +52,9 @@ sealed class FeeProgress {
 
 /** Pure rules. Port of web stampClock / activateFeeWindow / feeProgress / feeWindowCovers. */
 object StreakRules {
+    /** When the next UTC day (a new CLOCK IN day) starts, epoch ms. Shown in the phone's own time zone. */
+    fun nextDayStart(ms: Long): Long = Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC).toLocalDate().plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+
     fun dayKey(ms: Long): String = Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC).toLocalDate().toString()
     fun prevDay(day: String): String = LocalDate.parse(day).minusDays(1).toString()
 

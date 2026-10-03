@@ -220,8 +220,12 @@ class Roof0220Test {
     @Test fun cameraFitsPortraitAndLandscape() {
         val p = RoofCamera.fit(1080, 2400, 300f)
         assertTrue(p.portrait)
-        assertEquals(0f, p.x(RoofFrame.KEY_X0), 0.5f)
-        assertEquals(1080f, p.x(RoofFrame.KEY_X1), 0.5f)
+        // 0.22.1 cover: the rooftop is big (scale >= 1.3x the old key-range fit), Sol near the middle, the clock on screen
+        assertTrue(p.s >= 1.3f * 1080f / (RoofFrame.KEY_X1 - RoofFrame.KEY_X0))
+        val solX = p.x(RoofFrame.SOL_CX) / 1080f
+        assertTrue("Sol at $solX", solX in 0.34f..0.55f)
+        assertTrue("clock visible", p.x(RoofFrame.CLOCK.right) <= 1080f && p.x(RoofFrame.CLOCK.left) >= 0f)
+        assertTrue("rooftop starts in the top quarter", p.y(0f) <= 2400f * 0.36f)
         assertTrue("floor above the run button", p.y(RoofFrame.H) <= 2400f - 299f)
         val l = RoofCamera.fit(2400, 1080, 0f)
         assertFalse(l.portrait)

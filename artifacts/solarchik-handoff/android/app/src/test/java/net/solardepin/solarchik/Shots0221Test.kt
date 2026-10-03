@@ -31,16 +31,20 @@ import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowLooper
 import java.io.File
 
-/** 0.22.0 review screenshots (Robolectric native graphics, the test screen's own size) into build/screens/0.22.0. */
+/** 0.22.1 review screenshots (Robolectric native graphics, the test screen's own size) into build/screens/0.22.0. */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34], qualifiers = "uk-w411dp-h914dp-xxhdpi")
-class Shots0220Test {
+class Shots0221Test {
     private val app = ApplicationProvider.getApplicationContext<Context>()
     private val realCheck = SolanaWallet.walletAppCheck
-    private val dir = File(System.getProperty("solarchik.shots") ?: "build/screens", "0.22.0")
+    private val dir = File(System.getProperty("solarchik.shots") ?: "build/screens", "0.22.1")
+
+    private val realTz = java.util.TimeZone.getDefault()
 
     @Before fun setUp() {
+        // The owner's phone is in Kyiv: the "new day" line then reads 03:00 (UTC midnight), as on the device.
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Europe/Kiev"))
         MainActivity.tickerEnabled = false
         SolanaWallet.walletAppCheck = { false }
         LocalKey.box = TestBox()
@@ -51,6 +55,7 @@ class Shots0220Test {
     }
 
     @After fun tearDown() {
+        java.util.TimeZone.setDefault(realTz)
         MainActivity.tickerEnabled = true
         SolanaWallet.walletAppCheck = realCheck
         RooftopScreen.forceMute = false
@@ -76,6 +81,9 @@ class Shots0220Test {
         File(dir, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    /** Let transient toasts run out before the next shot. */
+    private fun settle() { ShadowLooper.idleMainLooper(8, java.util.concurrent.TimeUnit.SECONDS); idle() }
+
     private fun open(): MainActivity = Robolectric.buildActivity(MainActivity::class.java).setup().visible().get().also { idle() }
 
     private fun click(a: Activity, tag: String) { requireNotNull(find(a.window.decorView, tag)) { tag }.performClick(); idle() }
@@ -83,12 +91,12 @@ class Shots0220Test {
     @Test fun rooftopTourMenuAndClock() {
         val a = open()
         shot(a, "01-roof-tour-offer-uk")
-        click(a, "tour-offer-later")
+        click(a, "tour-offer-later"); settle()
         shot(a, "02-roof-uk")
         click(a, "roof-help")
         click(a, "tour-next"); click(a, "tour-next")
         shot(a, "03-roof-tour-clock-step-uk")
-        click(a, "tour-skip")
+        click(a, "tour-skip"); settle()
         click(a, "roof-menu")
         shot(a, "04-roof-menu-uk")
         click(a, "roof-row-judges")
@@ -108,14 +116,48 @@ class Shots0220Test {
         save.stampClock("Addr111", "sig-test-not-a-real-tx", "devnet", "memo")
         val c = open()
         shot(c, "07-roof-clock-signed-uk")
+        c.select(MainActivity.Tab.SHIFT, animate = false)
+        shot(c, "07b-clock-in-screen-signed-uk")
     }
 
     @Test @Config(qualifiers = "en-w411dp-h914dp-xxhdpi")
     fun rooftopEnglish() {
         val a = open()
-        click(a, "tour-offer-later")
+        click(a, "tour-offer-later"); settle()
         shot(a, "08-roof-en")
+        click(a, "roof-help"); click(a, "tour-next"); click(a, "tour-next")
+        shot(a, "08b-roof-tour-clock-step-en")
+        click(a, "tour-skip"); settle()
+        click(a, "roof-menu")
+        shot(a, "08c-roof-menu-en")
     }
+
+    private fun tabletSet(prefix: String) {
+        val a = open()
+        click(a, "tour-offer-later"); settle()
+        shot(a, "$prefix-roof")
+        click(a, "roof-help"); click(a, "tour-next"); click(a, "tour-next")
+        shot(a, "$prefix-tour-clock-step")
+        click(a, "tour-skip"); settle()
+        click(a, "roof-menu")
+        shot(a, "$prefix-menu")
+        click(a, "roof-row-judges")
+        var guard = 0
+        while (find(a.window.decorView, "tour-link") == null && guard++ < 8) {
+            val next = find(a.window.decorView, "tour-next") ?: break
+            next.performClick(); idle()
+        }
+        shot(a, "$prefix-judges-step")
+    }
+
+    @Test @Config(qualifiers = "uk-w1280dp-h800dp-land-hdpi")
+    fun tabletLandscapeUk() = tabletSet("20-tablet-land-uk")
+
+    @Test @Config(qualifiers = "en-w1280dp-h800dp-land-hdpi")
+    fun tabletLandscapeEn() = tabletSet("21-tablet-land-en")
+
+    @Test @Config(qualifiers = "uk-w800dp-h1280dp-port-hdpi")
+    fun tabletPortraitUk() = tabletSet("22-tablet-port-uk")
 
     @Test fun sliceAndCalls() {
         val a = open()

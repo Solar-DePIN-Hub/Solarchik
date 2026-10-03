@@ -27,6 +27,7 @@ import net.solardepin.solarchik.core.SolarchikConfig
 import net.solardepin.solarchik.screen.CallInbox
 import net.solardepin.solarchik.screen.CallText
 import net.solardepin.solarchik.ui.AgentsScreen
+import net.solardepin.solarchik.core.StreakRules
 import net.solardepin.solarchik.ui.Fmt
 import net.solardepin.solarchik.ui.Screen
 import net.solardepin.solarchik.ui.SettingsScreen
@@ -255,7 +256,7 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
         streakChip = chip(R.drawable.ic_flame, Color.parseColor("#FF9F3A")).apply { tag = "roof-streak" }
         timeChip = chip(R.drawable.ic_sun, Color.parseColor("#FFD45A"))
         row1.addView(streakChip)
-        row1.addView(Ui.weight(View(ctx)))
+        row1.addView(View(ctx), LinearLayout.LayoutParams(0, 1, 1f)) // spacer (a MATCH_PARENT-high one stretched the HUD to the full screen)
         row1.addView(timeChip)
         row1.addView(roundButton(null, "?", R.string.roof_help_cd, "roof-help") { startTour(RoofTour.Variant.FULL) }, LinearLayout.LayoutParams(dp(42), dp(42)))
         row1.addView(roundButton(R.drawable.ic_menu, null, R.string.roof_menu_cd, "roof-menu") { openSheet() }, LinearLayout.LayoutParams(dp(42), dp(42)))
@@ -330,6 +331,7 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
             val showSub = t.alwaysSub || long || (t.obj == RoofObject.ANTENNA && unread > 0) || (t.obj == RoofObject.PANELS && roof.earned)
             t.sub.visibility = if (showSub && t.sub.text.isNotEmpty()) View.VISIBLE else View.GONE
             t.title.visibility = View.VISIBLE
+            if (t.view.visibility == View.INVISIBLE) t.view.visibility = View.VISIBLE
             t.view.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
             val mw = t.view.measuredWidth.toFloat()
             val mh = t.view.measuredHeight.toFloat()
@@ -354,6 +356,11 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
                     .map { RectF(it, y0, it + mw, y0 + mh) }
                     .firstOrNull { c -> placed.none { RectF.intersects(it, c) } }
                     ?.let { r = it; x = it.left }
+            }
+            // Sol himself is the big tap target: when his label has no room (portrait), leave it out
+            if (t.obj == RoofObject.SOL && placed.any { RectF.intersects(it, r) }) {
+                t.view.visibility = View.INVISIBLE
+                continue
             }
             // last resort: icon only (the ☰ list and the tour still name it)
             if (placed.any { RectF.intersects(it, r) }) {
@@ -472,6 +479,7 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
         earnChip.text = ctx.getString(R.string.roof_earned_chip, Fmt.sol(earnedSol, 3))
         // HUD
         streakChip.text = if (st > 0) ctx.resources.getQuantityString(R.plurals.roof_streak, st, st) else ctx.getString(R.string.roof_streak_zero)
+        Ui.setIcon(streakChip, R.drawable.ic_flame, if (st > 0) Color.parseColor("#FF9F3A") else Color.argb(170, 232, 240, 247)) // the icon lives in the text span
         val net = ctx.getString(if (host.wallet.mainnet) R.string.network_mainnet else R.string.network_devnet)
         timeChip.text = ctx.getString(R.string.roof_time_net, Fmt.clock(System.currentTimeMillis()), net)
         Ui.setIcon(timeChip, if (roof.mood == RoofMood.NIGHT) R.drawable.ic_moon else R.drawable.ic_sun, if (roof.mood == RoofMood.NIGHT) Color.parseColor("#C9D6FF") else Color.parseColor("#FFD45A"))
@@ -486,7 +494,7 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
         clock.sub.text = when (punch) {
             PunchState.NEED_RUN -> ctx.getString(R.string.roof_clock_need, SolarchikConfig.RUN_GOAL_M)
             PunchState.READY -> ctx.getString(R.string.roof_clock_ready)
-            PunchState.DONE -> ctx.getString(R.string.roof_clock_done, st)
+            PunchState.DONE -> ctx.getString(R.string.roof_clock_done, st, Fmt.clock(StreakRules.nextDayStart(System.currentTimeMillis())))
         }
         clock.sub.setTextColor(when (punch) { PunchState.DONE -> Color.parseColor("#7DFFB8"); PunchState.READY -> Color.parseColor("#FFD36A"); else -> Color.parseColor("#FFB3D6") })
         renderTicker(lang)
@@ -785,7 +793,7 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
             setPadding(0, dp(12), 0, dp(4))
             isClickable = true
             tag = "tour-offer-later"
-            setOnClickListener { removeCard(); tour.finish(false); setWorldUi(true); host.toast(ctx.getString(R.string.tour_replay_hint)) }
+            setOnClickListener { removeCard(); roof.spotlight = null; tour.finish(false); setWorldUi(true); host.toast(ctx.getString(R.string.tour_replay_hint)) }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         roof.spotlight = RoofObject.SOL
         placeCard(c.view, RoofObject.SOL)

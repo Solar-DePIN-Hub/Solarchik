@@ -67,6 +67,12 @@ data class RoofCamera(val s: Float, val tx: Float, val ty: Float, val portrait: 
     fun rect(r: RectF, out: RectF = RectF()): RectF = out.apply { set(x(r.left), y(r.top), x(r.right), y(r.bottom)) }
 
     companion object {
+        private const val PORT_TOP_FRAC = 0.22f
+        /** Frame x the portrait view must still show on the right (the CLOCK IN clock ends at 1550). */
+        const val PORT_RIGHT_KEEP = 1566f
+        /** Narrowest frame span in portrait: Sol (x 960) at >= 35 % while [PORT_RIGHT_KEEP] stays visible. */
+        const val PORT_MIN_SPAN = 930f
+
         /**
          * Landscape (tablets, phones on their side): the frame fills the height and the plate extends sideways,
          * as in the approved mockup. Portrait: the key range x 210…1770 fills the width; the extra sky sits above
@@ -80,8 +86,15 @@ data class RoofCamera(val s: Float, val tx: Float, val ty: Float, val portrait: 
                 val s = max(sH, w / RoofFrame.LAND_W)
                 return RoofCamera(s, w / 2f - 960f * s, (h - RoofFrame.H * s) / 2f, false)
             }
-            val s = sW
-            val tx = w / 2f - (RoofFrame.KEY_X0 + RoofFrame.KEY_X1) / 2f * s
+            // 0.22.1 portrait "cover": the rooftop fills the screen (frame top at ~22 % of the height), limited so
+            // Sol stays near the middle (>= 35 % from the left) while the CLOCK IN clock is still fully on screen.
+            val sFill = (h * (1f - PORT_TOP_FRAC) - bottomReservePx) / RoofFrame.H
+            val sMax = w / PORT_MIN_SPAN
+            val s = sFill.coerceAtMost(sMax).coerceAtLeast(sW)
+            var tx = w / 2f - RoofFrame.SOL_CX * s
+            if (PORT_RIGHT_KEEP * s + tx > w) tx = w - PORT_RIGHT_KEEP * s
+            tx = tx.coerceAtMost(-RoofFrame.PORT_X0 * s) // never past the plate's left edge
+            tx = tx.coerceAtLeast(w - (RoofFrame.PORT_X0 + RoofFrame.PORT_W) * s)
             var ty = h - bottomReservePx - RoofFrame.H * s
             val top = RoofFrame.PORT_Y0 * s // frame y of the plate top must stay at or above the screen top
             val bottom = (RoofFrame.PORT_Y0 + RoofFrame.PORT_H) * s

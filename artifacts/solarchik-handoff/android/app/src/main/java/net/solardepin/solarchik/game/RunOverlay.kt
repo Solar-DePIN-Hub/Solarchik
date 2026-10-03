@@ -730,8 +730,9 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
         // 0.22.0: today already signed (the player keeps running for fun / a record): no "sign the day" offer
         if (clock.signed) {
             clockBannerTitle.text = ctx.getString(R.string.run_clock_done_title, GameSave.GOAL_M)
-            clockBannerSub.text = ctx.getString(R.string.run_clock_done_sub)
-            clockBannerSub.visibility = GONE // one short line: the title already says it all
+            // 0.22.1: the CLOCK IN day is the UTC day; say when the next one opens, in the phone's own time
+            clockBannerSub.text = ctx.getString(R.string.run_clock_done_sub, net.solardepin.solarchik.ui.Fmt.clock(net.solardepin.solarchik.core.StreakRules.nextDayStart(System.currentTimeMillis())))
+            clockBannerSub.visibility = VISIBLE
         } else {
             clockBannerTitle.text = ctx.getString(R.string.run_clock_unlocked)
             clockBannerSub.text = ctx.getString(R.string.run_clock_keep)

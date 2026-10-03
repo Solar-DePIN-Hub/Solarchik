@@ -55,7 +55,7 @@
     <string name="strat_say_other">трохи підкрутити ліміти</string>
 
     <string name="run_clock_done_title">%1$d м ✓ Сьогодні вже підписано</string>
-    <string name="run_clock_done_sub">біжи далі по рекорд</string>
+    <string name="run_clock_done_sub">новий день о %1$s</string>
     <plurals name="banter_clock_done">
         <item quantity="one">%1$d м! Сьогодні вже підписано, серія — %2$d день. Тепер женемо по рекорд.</item>
         <item quantity="few">%1$d м! Сьогодні вже підписано, серія — %2$d дні. Тепер женемо по рекорд.</item>
@@ -68,4 +68,5 @@
     <string name="slice_how_2">Що ти тут робиш: тренуєшся на уявних $1 000. Купуєш шматочок будь-якої акції за $50, стежиш за ціною й продаєш, коли захочеш.</string>
     <string name="slice_how_3">Чесно: це симуляція. Жодних справжніх грошей, гаманця чи транзакцій, навіть devnet.</string>
     <string name="slice_start_hint">Обери будь-яку акцію нижче й натисни «Купити».</string>
+    <string name="day_new_at">Новий день — о %1$s (за часом телефона)</string>
 </resources>

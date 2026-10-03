@@ -646,3 +646,11 @@ Owner feedback from the 0.21.7 phone test (9 items) plus the secretary's duplica
 - **Note on "today".** "Today" is the UTC day (web parity, on-chain memo). In Kyiv a signature before 03:00 (summer) belongs to the previous UTC day, so after 03:00 the app correctly offers the new day.
 - **Checks.** `testDebugUnitTest`: 337 tests, 10 skipped (opt-in live/devnet), 0 failures. New: Roof0220Test 12, Fixes0220Test 11, Shots0220Test 4. Screens (Robolectric native graphics): `/workspace/apk-test/shots-0.22.0/`. Live evidence: `shots-0.22.0/evidence/`.
 - **Not verified on a device/emulator.** The box's KVM is broken (kernel BUG in `kvm_arch_vcpu_create`), so the emulator cannot boot. Untested: rooftop frame rate/jank, landscape roof, the tour voice by ear, and the real-device look of the plates.
+
+## 0.22.1 (versionCode 76): final polish
+- Portrait rooftop fills the screen (cover camera in `RoofCamera.fit`; Sol near centre, CLOCK IN clock kept on screen). Fixed a HUD bug: a weight spacer stretched the HUD, so the header sat mid-screen.
+- Tablet landscape/portrait renders checked against the mockup.
+- "New day at HH:MM" (UTC midnight in phone time; Kyiv shows 03:00) appears on the CLOCK IN clock label, the CLOCK IN screen and the run's signed banner. The UTC day logic is unchanged.
+- Sol's UK wording for a signed day is «День уже підписано» / «Сьогодні вже зараховано» (worker c2fecc69 + app state line). Gendered player copy removed (run end card, sol_act_bought, run_action_later, judge_honest_b).
+- Fixes: streak chip flame icon; "Пізніше" clears the tour spotlight; Sol's tag hides instead of overlapping other tags; check-in status for every signed kind.
+- Tests: 346 tests, 11 skipped (opt-in live), 0 failures. New: Audit0221Test (every roof object, calls detail call-back/remind, language switch, delete data, new-day line), E2EDevnet0221IT (live devnet: wallet, free mint, CLOCK IN tx, Pro buy), Shots0221Test. Screens: `/workspace/apk-test/shots-0.22.1/`.

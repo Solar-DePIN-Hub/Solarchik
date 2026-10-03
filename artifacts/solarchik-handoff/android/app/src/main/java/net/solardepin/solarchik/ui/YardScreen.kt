@@ -47,6 +47,7 @@ class YardScreen(host: MainActivity) : Screen(host) {
     private lateinit var runLine: TextView
     private lateinit var bestLine: TextView
     private lateinit var status: TextView
+    private lateinit var dayReset: TextView
     private lateinit var action: TextView
     private lateinit var proofRow: LinearLayout
     private lateinit var proof: TextView
@@ -246,6 +247,8 @@ class YardScreen(host: MainActivity) : Screen(host) {
         addView(Ui.top(runBar, 10))
         status = Ui.body(ctx).apply { setTextColor(Ui.MUTED) }
         addView(Ui.top(status, 12))
+        dayReset = Ui.text(ctx, "", 12.5f, Ui.MUTED, 600).apply { tag = "yard-day-reset" }
+        addView(Ui.top(dayReset, 6))
         action = Ui.button(ctx, "", Ui.Btn.PRIMARY) { onAction() }
         addView(Ui.top(action, 14))
         proofRow = Ui.row(ctx, gap = 10)
@@ -348,12 +351,13 @@ class YardScreen(host: MainActivity) : Screen(host) {
         bestLine.text = ctx.getString(R.string.yard_best, save.bestDistance)
         runBar.fraction = dist / goal.toFloat()
         status.text = when {
-            signed && save.clockKind == "tx" -> ctx.getString(R.string.yard_status_tx, save.clockCluster)
-            signed && save.clockKind == "message" -> ctx.getString(R.string.yard_status_msg, save.clockCluster)
+            signed && save.clockKind == "message" -> ctx.getString(R.string.yard_status_msg, save.clockCluster.ifBlank { "devnet" })
+            signed -> ctx.getString(R.string.yard_status_tx, save.clockCluster.ifBlank { "devnet" }) // never "sign the day" once it is signed
             clocked -> ctx.getString(R.string.yard_status_ready)
             dist in 1..399 -> ctx.getString(R.string.yard_status_first_roof)
             else -> ctx.getString(R.string.yard_status_need_run, goal)
         }
+        dayReset.text = ctx.getString(R.string.day_new_at, Fmt.clock(net.solardepin.solarchik.core.StreakRules.nextDayStart(System.currentTimeMillis())))
         when {
             signing -> {
                 action.text = ctx.getString(R.string.yard_signing)

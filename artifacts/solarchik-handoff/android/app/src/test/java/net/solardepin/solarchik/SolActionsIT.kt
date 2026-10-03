@@ -122,7 +122,8 @@ class SolActionsIT {
 
         if (owned.isBlank()) {
             val list = market(signer.address)
-            val wanted = list.firstOrNull { it.name == target }
+            println("MARKET " + list.joinToString(" | ") { "${it.name} ${it.priceLamports / 1e9} SOL" })
+            val wanted = list.firstOrNull { it.name == target } ?: if (System.getenv("SOLARCHIK_IT_BUY") == null) list.minByOrNull { it.priceLamports } else null
             assumeTrue("listing '$target' is not on the market", wanted != null)
             fund(signer, wanted!!.priceLamports + 30_000_000L)
             val ctx1 = ActContext(emptyList(), list, canMintFree = false)

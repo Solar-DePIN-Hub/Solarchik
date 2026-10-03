@@ -20,7 +20,7 @@
     <string name="roof_tag_clock">CLOCK IN</string>
     <string name="roof_clock_need">Спершу пробіжи %d м</string>
     <string name="roof_clock_ready">Підпиши день</string>
-    <string name="roof_clock_done">Відмічено · серія %d</string>
+    <string name="roof_clock_done">Серія %1$d · новий день о %2$s</string>
     <string name="roof_run">Забіг дахами</string>
     <string name="roof_hint">Торкнись будь-чого на даху · ☰ — усе списком</string>
     <string name="roof_earned_chip">+%s SOL · папір</string>
@@ -104,7 +104,7 @@
     <string name="judge_sol_t">Сол виконує дії</string>
     <string name="judge_sol_b">Скажи «запусти Weather Station», і Сол перевірить, а тоді покаже картку з ціною в SOL. Нічого не відправиться, доки ти не тапнеш.</string>
     <string name="judge_honest_t">Чесні позначки</string>
-    <string name="judge_honest_b">Ціни Slice живі (Jupiter), але портфель паперовий. Паперові угоди агентів — симуляція, і так і позначені. У блокчейн іде тільки те, що ти підтвердив.</string>
+    <string name="judge_honest_b">Ціни Slice живі (Jupiter), але портфель паперовий. Паперові угоди агентів — симуляція, і так і позначені. У блокчейн іде тільки те, що підтверджено тобою в гаманці.</string>
     <string name="judge_proof_t">Докази в Solana Explorer</string>
     <string name="judge_proof_b">Реальні транзакції devnet з нашого тестового прогону 3 жовтня 2026 (вбудований гаманець C9pV…GuWnz), а також твої власні, щойно вони з’являться:</string>
     <string name="judge_link_mint">Безкоштовний мінт агента</string>
