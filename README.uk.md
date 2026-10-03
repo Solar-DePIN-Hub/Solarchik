@@ -2,7 +2,7 @@
 
 Сонячний робот на телефоні. Один проєкт, три речі: забіг по даху, щоденний підпис **CLOCK IN** на Solana Mobile, і стіл **Work**, де агент сам читає ринок.
 
-English version: [README.md](README.md). Нижче — опис веб-застосунку (гілка `web-fees`); нативний застосунок описано в англійському README.
+English version: [README.md](README.md). Нижче — опис веб-застосунку (гілка `web-fees`); нативний застосунок для рев’ю — 0.22.3, див. англійський README.
 
 ## Що це
 
@@ -42,7 +42,13 @@ English version: [README.md](README.md). Нижче — опис веб-заст
 
 ## APK
 
-Старий файл `public/Solarchik-CLOCK-IN-0.19.51.apk` — збірка 0.19.51, не для рев’ю. Релізу на GitHub немає. Актуальне джерело — ця гілка (0.21.6); збірки до коміту `22a84a3` ходять на старий сервер без `/api/native/*`, тож ринок у них не працює. Хеші: NATIVE_PROGRESS.md.
+Збірка для рев’ю — **0.22.3** (versionCode 78), реліз [v0.22.3](https://github.com/Solar-DePIN-Hub/Solarchik/releases/tag/v0.22.3):
+
+https://github.com/Solar-DePIN-Hub/Solarchik/releases/download/v0.22.3/solarchik.apk
+
+Підпис тестовим ключем бокса, не продовим. sha256 `6555740371aa24b7e519194db56fef0b2da3e55427a881a3d45b1ccb3ac216ee`. Тести релізу: 348, 11 skipped, 0 failed.
+
+Старий файл `public/Solarchik-CLOCK-IN-0.19.51.apk` — збірка 0.19.51, не ставити. Збірки до коміту `22a84a3` ходять на старий сервер без `/api/native/*`, тож ринок у них не працює.
 
 Нативний проєкт: `artifacts/solarchik-handoff/android`.
 
@@ -51,7 +57,7 @@ cd artifacts/solarchik-handoff/android
 bash ./gradlew :app:assembleRelease
 ```
 
-`keystore.properties` і `.jks` у git не лежать. Без них release не збереться. Debug-збірка для здачі не годиться.
+`keystore.properties` і `.jks` у git не лежать. Без них release не збереться. Для судді ставити APK з релізу вище, не локальний debug.
 
 ## Сайт
 
@@ -111,12 +117,12 @@ ETH, DOGE, XRP та інші без Solana-виводу не входять. І�
 
 ## Для суддів
 
+- APK 0.22.3: https://github.com/Solar-DePIN-Hub/Solarchik/releases/download/v0.22.3/solarchik.apk
+- Демо: https://www.youtube.com/watch?v=oAxoliLwUXo
 - Живий сайт: https://solarchik-market.vercel.app (лише devnet). APK з цієї гілки ходить на той самий сервер.
 - Симульовано: арбітраж (СИМУЛЯЦІЯ на живих спредах), прогнози — paper / devnet на справжніх цінах; живі гроші вимкнено. Рішення ШІ — Grok або, якщо його немає, Gemini (на поточному деплої — Gemini, і це підписано).
-- Хронологія: почато 19 вересня 2026; великий коміт 30 вересня імпортує код, зроблений у Grok Build у вересні 2026; старий окремий прототип Solarchik для Telegram (липень 2026) не є частиною цієї заявки; проєкт також подано на MunichTech (вересень 2026).
+- Хронологія: почато 19 вересня 2026; великий коміт 30 вересня імпортує код, зроблений у Grok Build у вересні 2026; старий окремий прототип Solarchik для Telegram (липень 2026) не є частиною цієї заявки; проєкт також подано на MunichTech (вересень 2026). Заявку на CLOCK IN здано 3 жовтня 2026.
 
-## Що ще не здано на Solana Mobile
+## Статус сабміту
 
-Дедлайн сабміту 8 жовтня 2026. Результати 10 листопада.
-
-Треба окремо: APK, цей GitHub, демо-відео з живого телефона, pitch. Старі скрінкасти за відео сабміту не рахуються.
+Заявку здано 3 жовтня 2026: APK 0.22.3, цей GitHub, демо з телефона, pitch. Дедлайн форми 8 жовтня 2026. Результати 10 листопада. `docs/CLOCKIN_COMPLIANCE.md` — старий чекліст на 0.20.5, не збірка для рев’ю.
