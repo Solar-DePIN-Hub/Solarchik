@@ -60,6 +60,8 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
     private lateinit var bubbleText: TextView
     private lateinit var bubbleTail: TailView
     private lateinit var cta: LinearLayout
+    private lateinit var ctaSub: TextView
+    private var ctaPulse: android.animation.ObjectAnimator? = null
     private lateinit var hint: TextView
     private lateinit var earnChip: TextView
     private lateinit var callChip: TextView
@@ -145,18 +147,19 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
             }
             frame.addView(badge, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(20)).apply { leftMargin = dp(20) })
             frame.isClickable = true
+            pressable(frame)
             frame.setOnClickListener { it.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK); onRoofObject(obj) }
             frame.tag = "roof-tag-" + obj.name.lowercase()
             overlay.addView(frame, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             return Tag(obj, frame, t1, t2, badge, land, port, lead, leftPort, alwaysSub).also { tags += it }
         }
         val blue = intArrayOf(Color.parseColor("#4C8DFF"), Color.parseColor("#2F5FE0"))
-        tag(RoofObject.ANTENNA, R.drawable.ic_call, blue, R.string.roof_tag_calls, PointF(250f, 944f), PointF(282f, 640f), lead = 826f, leftPort = true)
-        tag(RoofObject.PANELS, R.drawable.ic_nav_agents, intArrayOf(Color.parseColor("#FFC94A"), Color.parseColor("#F08A1E")), R.string.roof_tag_agents, PointF(650f, 940f), PointF(640f, 930f), lead = 866f)
+        tag(RoofObject.ANTENNA, R.drawable.ic_call, blue, R.string.roof_tag_calls, PointF(262f, 600f), PointF(282f, 640f), lead = 826f, leftPort = true)
+        tag(RoofObject.PANELS, R.drawable.ic_nav_agents, intArrayOf(Color.parseColor("#FFC94A"), Color.parseColor("#F08A1E")), R.string.roof_tag_agents, PointF(665f, 716f), PointF(640f, 930f), lead = 866f)
         tag(RoofObject.TICKER, R.drawable.ic_slice, intArrayOf(Color.parseColor("#34D3B4"), Color.parseColor("#169C8C")), R.string.roof_tag_slice, PointF(1241f, 958f), PointF(1241f, 600f), lead = 870f)
-        tag(RoofObject.TOOLBOX, R.drawable.ic_nav_settings, intArrayOf(Color.parseColor("#8A9AB0"), Color.parseColor("#55657C")), R.string.roof_tag_settings, PointF(385f, 1104f), PointF(385f, 1104f))
-        tag(RoofObject.SOL, R.drawable.ic_nav_sol, intArrayOf(Color.parseColor("#FFB443"), Color.parseColor("#E9781C")), R.string.roof_tag_sol, PointF(960f, 1046f), PointF(960f, 1158f), alwaysSub = true)
-        tag(RoofObject.CLOCK, R.drawable.ic_timer, intArrayOf(Color.parseColor("#FF5FA8"), Color.parseColor("#B8327A")), R.string.roof_tag_clock, PointF(1490f, 934f), PointF(1560f, 1004f), alwaysSub = true)
+        tag(RoofObject.TOOLBOX, R.drawable.ic_nav_settings, intArrayOf(Color.parseColor("#8A9AB0"), Color.parseColor("#55657C")), R.string.roof_tag_settings, PointF(432f, 1000f), PointF(385f, 1104f))
+        tag(RoofObject.SOL, R.drawable.ic_nav_sol, intArrayOf(Color.parseColor("#FFB443"), Color.parseColor("#E9781C")), R.string.roof_tag_sol, PointF(960f, 1024f), PointF(960f, 1158f), alwaysSub = true)
+        tag(RoofObject.CLOCK, R.drawable.ic_timer, intArrayOf(Color.parseColor("#FF5FA8"), Color.parseColor("#B8327A")), R.string.roof_tag_clock, PointF(RoofFrame.SIGN.centerX(), RoofFrame.SIGN.bottom + 6f), PointF(1490f, 936f), alwaysSub = true)
         for (i in 0 until 3) {
             val v = View(ctx).apply {
                 background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(Color.argb(140, 255, 255, 255), Color.argb(30, 255, 255, 255)))
@@ -164,6 +167,17 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
             }
             overlay.addView(v, 0, FrameLayout.LayoutParams(dp(2), 10))
             leads += v
+        }
+    }
+
+    /** Pressed feedback: the label dips a little under the finger, so it reads as a button. */
+    private fun pressable(v: View) {
+        v.setOnTouchListener { view, e ->
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.93f).scaleY(0.93f).setDuration(70).start()
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> view.animate().scaleX(1f).scaleY(1f).setDuration(140).start()
+            }
+            false
         }
     }
 
@@ -208,8 +222,8 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
         cta = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = Ui.gradient(intArrayOf(Color.parseColor("#FFE07A"), Color.parseColor("#F8C23E"), Color.parseColor("#EE9A22")), dp(26).toFloat(), GradientDrawable.Orientation.TOP_BOTTOM)
-            setPadding(dp(7), dp(7), dp(22), dp(7))
+            background = Ui.gradient(intArrayOf(Color.parseColor("#FFE07A"), Color.parseColor("#F8C23E"), Color.parseColor("#EE9A22")), dp(31).toFloat(), GradientDrawable.Orientation.TOP_BOTTOM)
+            setPadding(dp(8), dp(8), dp(26), dp(8))
             elevation = dp(10).toFloat()
             isClickable = true
             foreground = Ui.ripple(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT), dp(26).toFloat(), 0x33FFFFFF)
@@ -221,8 +235,20 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Ui.INK) }
             addView(ImageView(ctx).apply { setImageResource(R.drawable.ic_run_play); setColorFilter(Color.parseColor("#F8C23E")) }, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
         }
-        cta.addView(play, LinearLayout.LayoutParams(dp(36), dp(36)))
-        cta.addView(Ui.text(ctx, ctx.getString(R.string.roof_run), 16.5f, Ui.INK, 800).apply { setPadding(dp(10), 0, 0, 0) })
+        cta.addView(play, LinearLayout.LayoutParams(dp(46), dp(46)))
+        val ctaCol = Ui.column(ctx).apply { setPadding(dp(10), 0, 0, 0) }
+        ctaCol.addView(Ui.text(ctx, ctx.getString(R.string.roof_run), 19f, Ui.INK, 900))
+        ctaSub = Ui.text(ctx, "", 11.5f, Color.argb(200, 30, 24, 10), 700).apply { maxLines = 1; visibility = View.GONE }
+        ctaCol.addView(ctaSub)
+        cta.addView(ctaCol)
+        if (android.os.Build.VERSION.SDK_INT >= 28) { cta.outlineSpotShadowColor = Color.parseColor("#FFC23E"); cta.outlineAmbientShadowColor = Color.parseColor("#FFC23E") }
+        pressable(cta)
+        ctaPulse = android.animation.ObjectAnimator.ofPropertyValuesHolder(cta,
+            android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.045f),
+            android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.045f)).apply {
+            duration = 900; repeatCount = android.animation.ValueAnimator.INFINITE; repeatMode = android.animation.ValueAnimator.REVERSE
+            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+        }
         overlay.addView(cta, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         hint = Ui.text(ctx, ctx.getString(R.string.roof_hint), 12f, Color.argb(220, 255, 255, 255), 700).apply {
             gravity = Gravity.CENTER
@@ -315,8 +341,9 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
             ctaX = (w - cta.measuredWidth) / 2f
             ctaY = bottomLimit - hint.measuredHeight - dp(10) - cta.measuredHeight
         } else {
-            ctaX = (cam.x(1653f) - cta.measuredWidth / 2f).clampIn(edge, w - edge - cta.measuredWidth)
-            ctaY = min(cam.y(1016f), bottomLimit - hint.measuredHeight - dp(8) - cta.measuredHeight)
+            // one dominant PLAY button, bottom-right, like a game hub (the door behind it is the run's way in too)
+            ctaX = w - dp(24) - cta.measuredWidth
+            ctaY = bottomLimit - dp(14) - cta.measuredHeight
         }
         cta.translationX = ctaX; cta.translationY = ctaY
         hint.translationY = -(host.bottomInset + dp(6)).toFloat()
@@ -330,7 +357,7 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
         for (t in tags) {
             val showSub = t.alwaysSub || long || (t.obj == RoofObject.ANTENNA && unread > 0) || (t.obj == RoofObject.PANELS && roof.earned)
             t.sub.visibility = if (showSub && t.sub.text.isNotEmpty()) View.VISIBLE else View.GONE
-            t.title.visibility = View.VISIBLE
+            t.title.visibility = if (t.obj == RoofObject.CLOCK && !cam.portrait && t.sub.visibility == View.VISIBLE) View.GONE else View.VISIBLE
             if (t.view.visibility == View.INVISIBLE) t.view.visibility = View.VISIBLE
             t.view.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
             val mw = t.view.measuredWidth.toFloat()
@@ -437,6 +464,7 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
         val offer = tour.onRoofVisit(isNewPlayer())
         longLabels = tour.longLabels()
         render()
+        if (android.animation.ValueAnimator.areAnimatorsEnabled()) ctaPulse?.start()
         refreshPrices()
         roof.start()
         if (offer && card == null) overlay.post { showOffer() }
@@ -446,6 +474,7 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
 
     override fun onHide() {
         shown = false
+        ctaPulse?.cancel(); cta.scaleX = 1f; cta.scaleY = 1f
         roof.stop()
         main.removeCallbacksAndMessages(null)
         voice?.stop()
@@ -465,6 +494,8 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
         roof.lang = lang
         roof.mood = forcedMood ?: RoofSky.mood(System.currentTimeMillis())
         roof.bestMeters = save.bestDistance
+        ctaSub.text = if (save.bestDistance > 0) ctx.getString(R.string.roof_menu_best, RoofText.meters(save.bestDistance, host.lang)) else ""
+        ctaSub.visibility = if (save.bestDistance > 0) View.VISIBLE else View.GONE
         val st = save.liveStreak().streak
         roof.streak = st
         val punch = PunchState.of(save.clockedToday(), save.signedToday())

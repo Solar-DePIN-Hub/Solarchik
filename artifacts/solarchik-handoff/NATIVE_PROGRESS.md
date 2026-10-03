@@ -654,3 +654,9 @@ Owner feedback from the 0.21.7 phone test (9 items) plus the secretary's duplica
 - Sol's UK wording for a signed day is «День уже підписано» / «Сьогодні вже зараховано» (worker c2fecc69 + app state line). Gendered player copy removed (run end card, sol_act_bought, run_action_later, judge_honest_b).
 - Fixes: streak chip flame icon; "Пізніше" clears the tour spotlight; Sol's tag hides instead of overlapping other tags; check-in status for every signed kind.
 - Tests: 346 tests, 11 skipped (opt-in live), 0 failures. New: Audit0221Test (every roof object, calls detail call-back/remind, language switch, delete data, new-day line), E2EDevnet0221IT (live devnet: wallet, free mint, CLOCK IN tx, Pro buy), Shots0221Test. Screens: `/workspace/apk-test/shots-0.22.1/`.
+
+## 0.22.2 (versionCode 77): rooftop hub redesign from the owner's tablet video
+- Labels now sit on their objects in scene coordinates (the same camera as the plate), for every aspect ratio. Secretary is on the antenna, Agents on the solar panels, Settings on the toolbox, Sol at his feet, Slice under the ticker.
+- CLOCK IN: the neon sign is the button (new `RoofFrame.SIGN` hit area). The status pill under the sign shows the state (run first / sign / streak · new day at HH:MM). In portrait the pill sits right under the clock.
+- One dominant PLAY button ("Забіг дахами"): bigger, bottom-right in landscape and bottom-centre in portrait, with a gentle idle pulse (respects the system "remove animations" setting), a gold glow and a "Рекорд N м" sub-line. Every label dips on press.
+- The real emulator still can't boot here (host kernel BUG in kvm x86.c:702 at vCPU creation), so screens are Robolectric renders at 1280×800 dp (owner's 16:10 tablet), 800×1280 dp and 411×914 dp.

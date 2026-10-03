@@ -38,7 +38,7 @@ import java.io.File
 class Shots0221Test {
     private val app = ApplicationProvider.getApplicationContext<Context>()
     private val realCheck = SolanaWallet.walletAppCheck
-    private val dir = File(System.getProperty("solarchik.shots") ?: "build/screens", "0.22.1")
+    private val dir = File(System.getProperty("solarchik.shots") ?: "build/screens", "0.22.2")
 
     private val realTz = java.util.TimeZone.getDefault()
 

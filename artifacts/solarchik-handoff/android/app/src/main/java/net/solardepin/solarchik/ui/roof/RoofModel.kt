@@ -51,6 +51,8 @@ object RoofFrame {
     val DOOR = RectF(1560f, 640f, 1748f, 984f)
     val PLATE = RectF(1424f, 690f, 1556f, 774f)
     val CLOCK = RectF(1430f, 788f, 1550f, 930f)
+    /** The neon "CLOCK IN" sign on the stair hut: tapping it opens CLOCK IN too. */
+    val SIGN = RectF(1474f, 552f, 1758f, 612f)
     val SOL = RectF(836f, 572f, 1084f, 1016f)
     val TOOLBOX = RectF(292f, 960f, 572f, 1096f)
     val INVERTER_LEDS = floatArrayOf(847f, 880f, 865f, 880f)
@@ -122,6 +124,8 @@ object RoofHit {
     /** Object under a screen point; every target is grown to at least [minPx] (48 dp) around its centre. */
     fun at(cam: RoofCamera, x: Float, y: Float, minPx: Float): RoofObject? {
         val r = RectF()
+        cam.rect(RoofFrame.SIGN, r)
+        if (r.contains(x, y)) return RoofObject.CLOCK
         for (o in order) {
             cam.rect(rectOf(o), r)
             if (r.width() < minPx) r.inset(-(minPx - r.width()) / 2f, 0f)
