@@ -1,12 +1,25 @@
-/** Phone builds have no API key. They call the desk host, which holds the key. */
+/** Phone builds have no API key. They call the desk host, which holds the key.
+ *  The desk gate token is not committed. Set DESK_TOKEN (or VITE_DESK_TOKEN)
+ *  where a build needs it. The review APK already carries its own copy, and
+ *  the worker secret is unchanged, so that APK keeps working.
+ */
 
 export const DESK_ORIGIN = "https://solarchik-desk.davidbell1603.workers.dev";
-export const DESK_TOKEN = "e78f97fe9bbfe357a98365b1104dd31a";
+
+function deskToken(): string {
+  const fromVite = import.meta.env?.VITE_DESK_TOKEN;
+  if (typeof fromVite === "string" && fromVite.trim()) return fromVite.trim();
+  if (typeof process !== "undefined") {
+    const fromEnv = process.env.DESK_TOKEN;
+    if (typeof fromEnv === "string" && fromEnv.trim()) return fromEnv.trim();
+  }
+  return "";
+}
 
 export function deskHeaders(): Record<string, string> {
   return {
     "content-type": "application/json",
-    "x-desk-token": DESK_TOKEN,
+    "x-desk-token": deskToken(),
   };
 }
 
