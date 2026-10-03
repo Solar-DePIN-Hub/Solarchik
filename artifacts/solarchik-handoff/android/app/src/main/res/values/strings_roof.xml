@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.22.0 rooftop home, CLOCK IN punch clock, guided tour -->
+<resources>
+    <plurals name="roof_streak"><item quantity="one">%d-day streak</item><item quantity="other">%d-day streak</item></plurals>
+    <string name="roof_streak_zero">Start a streak</string>
+    <string name="roof_time_net">%1$s · %2$s</string>
+    <string name="roof_menu_cd">Menu: everything on the roof as a list</string>
+    <string name="roof_help_cd">Rooftop tour</string>
+
+    <string name="roof_tag_calls">Secretary</string>
+    <string name="roof_tag_calls_sub">Taking your calls</string>
+    <plurals name="roof_tag_calls_new"><item quantity="one">%d new call</item><item quantity="other">%d new calls</item></plurals>
+    <string name="roof_tag_agents">Agents</string>
+    <string name="roof_tag_agents_sub">NFT agents &amp; wallet</string>
+    <string name="roof_tag_slice">Slice</string>
+    <string name="roof_tag_slice_sub">Paper portfolio</string>
+    <string name="roof_tag_settings">Settings</string>
+    <string name="roof_tag_settings_sub">Wallet, language, sound</string>
+    <string name="roof_tag_sol">Sol</string>
+    <string name="roof_tag_sol_sub">tap to talk</string>
+    <string name="roof_tag_clock">CLOCK IN</string>
+    <string name="roof_clock_need">Run %d m first</string>
+    <string name="roof_clock_ready">Sign today</string>
+    <string name="roof_clock_done">Clocked in · streak %d</string>
+    <string name="roof_run">Rooftop run</string>
+    <string name="roof_hint">Tap anything on the roof · ☰ for the full list</string>
+    <string name="roof_earned_chip">+%s SOL · paper</string>
+    <string name="roof_call_chip">New call</string>
+    <string name="roof_ticker_paper">PAPER %s</string>
+
+    <string name="roof_say_call">%1$s called at %2$s. I took notes, want a look?</string>
+    <string name="roof_say_call_anon">Someone called while you were away. I took notes, want a look?</string>
+    <string name="roof_say_run">No clock-in yet today. Run %d m and the CLOCK IN clock opens today’s signature.</string>
+    <string name="roof_say_sign">Run counted! Tap the CLOCK IN clock and we’ll sign the day on Solana.</string>
+    <string name="roof_say_earned">While you were away, your agents made +%s SOL on paper.</string>
+    <string name="roof_say_day">Sun’s up and the panels are charged. Fancy a rooftop run?</string>
+    <string name="roof_say_sunset">What a sunset! One more run before dark?</string>
+    <string name="roof_say_night">The city’s lit up. Your record is waiting.</string>
+    <string name="roof_say_done">Today’s clocked in, streak %d. Now you can run just for fun.</string>
+
+    <string name="roof_menu_title">Menu</string>
+    <string name="roof_menu_sub">Everything on the roof, as a short list</string>
+    <string name="roof_menu_best">Best %s</string>
+    <string name="roof_menu_clock">CLOCK IN · today’s shift</string>
+    <string name="roof_menu_calls">Calls</string>
+    <string name="roof_menu_calls_none">No calls yet</string>
+    <string name="roof_menu_secretary">Secretary settings</string>
+    <string name="roof_menu_sol">Sol</string>
+    <string name="roof_menu_sol_sub">Talk by voice or chat</string>
+    <string name="roof_menu_agents">Agents &amp; wallet</string>
+    <string name="roof_menu_agents_sub">NFT agents, desk, mint</string>
+    <string name="roof_menu_strategies">Strategies &amp; market</string>
+    <string name="roof_menu_strategies_sub">Pick a strategy, buy or sell agents</string>
+    <string name="roof_menu_slice">Slice</string>
+    <string name="roof_menu_slice_sub">Paper stocks · %s</string>
+    <string name="roof_menu_garage">Garage &amp; quests</string>
+    <string name="roof_menu_garage_sub">Robots, skins, daily quests</string>
+    <string name="roof_menu_settings">Settings</string>
+    <string name="roof_menu_settings_sub">Wallet, language, Sol’s voice, alerts</string>
+    <string name="roof_menu_tour">Rooftop tour</string>
+    <string name="roof_menu_tour_sub">Sol shows you around in a minute</string>
+    <string name="roof_menu_judges">For judges · 60 s</string>
+    <string name="roof_menu_judges_sub">Key features + devnet proof links</string>
+    <string name="roof_close">Close</string>
+
+    <string name="tour_offer_title">Hi, I’m Sol!</string>
+    <string name="tour_offer_body">This is our roof, and everything starts here. Want me to show you around? It takes about a minute.</string>
+    <string name="tour_offer_go">Show me</string>
+    <string name="tour_offer_judges">For judges · 60 s</string>
+    <string name="tour_offer_later">Later</string>
+    <string name="tour_skip">Skip</string>
+    <string name="tour_next">Next</string>
+    <string name="tour_back">Back</string>
+    <string name="tour_done">Done</string>
+    <string name="tour_step">%1$d/%2$d</string>
+    <string name="tour_replay_hint">You can replay the tour any time from the ? at the top.</string>
+    <string name="tour_voice_on">Sol’s voice on</string>
+    <string name="tour_voice_off">Sol’s voice off</string>
+
+    <string name="tour_sol_t">I’m Sol</string>
+    <string name="tour_sol_b">Your sidekick. Talk to me or type: I’ll tip you off, remind you, and even do wallet actions, but only after you confirm.</string>
+    <string name="tour_door_t">The door to the run</string>
+    <string name="tour_door_b">Open it and we’re off across the city roofs: jump the gaps, grab the coins, dodge the drones. Your best run hangs right here on the blue plate.</string>
+    <string name="tour_clock_t">CLOCK IN</string>
+    <string name="tour_clock_b">Run %d m and this clock opens today’s signature on Solana. Every signed day grows your streak, and streaks earn fee-free days. Until today is in, the sign keeps glowing.</string>
+    <string name="tour_calls_t">Secretary &amp; calls</string>
+    <string name="tour_calls_b">The antenna is my phone line. When you’re busy, I pick up, note what the caller wanted and show it here. A new call sends red waves over the mast.</string>
+    <string name="tour_panels_t">Wallet &amp; NFT agents</string>
+    <string name="tour_panels_b">Each panel is an agent, an NFT in your wallet (Metaplex Core, devnet). The first one is free. Its strategy, meaning which markets it trades and how boldly, you change with one confirm. No wallet app? I’ll set up a built-in devnet wallet for you.</string>
+    <string name="tour_ticker_t">Slice: stocks on Solana</string>
+    <string name="tour_ticker_b">This board shows live prices of tokenized stocks (xStocks) from Jupiter. Tap it to buy slices of Apple or NVIDIA with $1,000 of pretend money. It’s practice: no real money, no wallet, no transactions.</string>
+    <string name="tour_tools_t">Settings</string>
+    <string name="tour_tools_b">The toolbox: wallet, language, my voice, the secretary. Lost? Tap ☰ for the full list, or ? to replay this tour.</string>
+
+    <string name="judge_intro_t">Solarchik in 60 seconds</string>
+    <string name="judge_intro_b">A daily game for Solana phones: run the roofs, sign your day on-chain, and let AI agents and a phone secretary work while you’re busy. Everything here runs on devnet.</string>
+    <string name="judge_clock_t">Run → CLOCK IN</string>
+    <string name="judge_clock_b">%d m of running unlocks the day’s signature: a devnet memo transaction through Mobile Wallet Adapter or the built-in wallet. A streak of signed days earns fee-free windows.</string>
+    <string name="judge_nft_t">Agents are NFTs</string>
+    <string name="judge_nft_b">Every agent is a Metaplex Core NFT. A free mint and a 0.1 SOL Pro purchase, both real devnet transactions:</string>
+    <string name="judge_wallet_t">No wallet app? Still works</string>
+    <string name="judge_wallet_b">For judges without Phantom or Solflare: a built-in devnet wallet. The key is sealed in Android Keystore and topped up from a faucet:</string>
+    <string name="judge_sec_t">AI phone secretary</string>
+    <string name="judge_sec_b">Sol answers calls for you and saves the gist as a short note. Unread calls light up the antenna.</string>
+    <string name="judge_sol_t">Sol takes actions</string>
+    <string name="judge_sol_b">Say “start Weather Station” and Sol checks it, then shows a card with the SOL price. Nothing is sent until you tap.</string>
+    <string name="judge_honest_t">Honest labels</string>
+    <string name="judge_honest_b">Slice prices are live (Jupiter), but the portfolio is paper. Agents’ paper trades are simulated and marked that way. Only what you confirm goes on-chain.</string>
+    <string name="judge_proof_t">Proof on Solana Explorer</string>
+    <string name="judge_proof_b">Real devnet transactions from our test run on 3 Oct 2026 (built-in wallet C9pV…GuWnz), plus your own as soon as you have them:</string>
+    <string name="judge_link_mint">Free agent mint</string>
+    <string name="judge_link_pro">Pro agent purchase, 0.1 SOL</string>
+    <string name="judge_link_faucet">Built-in wallet top-up</string>
+    <string name="judge_link_my_clock">Your CLOCK IN</string>
+    <string name="judge_link_my_mint">Your agent mint</string>
+    <string name="judge_auto">Auto-play · %d s</string>
+</resources>

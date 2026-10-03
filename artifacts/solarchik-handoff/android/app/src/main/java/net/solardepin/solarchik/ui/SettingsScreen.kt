@@ -396,13 +396,15 @@ class SettingsScreen(host: MainActivity) : Screen(host) {
         val bal = secBal ?: Secretary.lastBalance(ctx)
         val creditRow = Ui.row(ctx, gap = 8).apply { gravity = android.view.Gravity.CENTER_VERTICAL }
         creditRow.addView(Ui.weight(Ui.label(ctx, ctx.getString(R.string.sec_credit))))
-        if (bal != null && bal.trial) creditRow.addView(Ui.pill(ctx, ctx.getString(R.string.sec_trial), Ui.CYAN))
+        if (bal != null && bal.owner) creditRow.addView(Ui.pill(ctx, ctx.getString(R.string.sec_owner), Ui.GREEN).apply { tag = "sec-owner" })
+        else if (bal != null && bal.trial) creditRow.addView(Ui.pill(ctx, ctx.getString(R.string.sec_trial), Ui.CYAN))
         creditRow.addView(Ui.text(ctx, if (secLoading && bal == null) "…" else bal?.let { "$" + Fmt.sol(it.usd, 2) } ?: "—", 20f, Ui.TEXT, 900).apply {
             tag = "sec-credit"
             setOnClickListener { refreshSecretary() }
         })
         box.addView(Ui.top(creditRow, 12))
-        if (bal != null) box.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sec_credit_parts, "$" + Fmt.sol(bal.paidUsd, 2), "$" + Fmt.sol(bal.trialUsd, 2)), 12f), 2))
+        if (bal != null && bal.owner) box.addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.sec_owner_body), 12f, Ui.GREEN, 700), 2))
+        else if (bal != null) box.addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sec_credit_parts, "$" + Fmt.sol(bal.paidUsd, 2), "$" + Fmt.sol(bal.trialUsd, 2)), 12f), 2))
         val refresh = Ui.button(ctx, ctx.getString(if (secLoading) R.string.sec_refreshing else R.string.sec_refresh), Ui.Btn.GHOST) { refreshSecretary() }
         Ui.setEnabled(refresh, !secLoading)
         box.addView(Ui.top(refresh, 8))

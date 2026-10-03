@@ -142,7 +142,7 @@ class ScreensBTest {
         shot(a, "B04-sol-chat$suffix", scrollToText = chatTitle, full = false)
         a.select(MainActivity.Tab.SETTINGS)
         shot(a, "B05-settings-notifications$suffix", scrollToText = notes, full = false)
-        a.select(MainActivity.Tab.YARD)
+        a.select(MainActivity.Tab.SHIFT)
         shot(a, "B06-yard$suffix", full = false)
     }
 

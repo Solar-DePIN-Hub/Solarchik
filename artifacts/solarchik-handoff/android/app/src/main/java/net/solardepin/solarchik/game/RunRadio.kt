@@ -187,6 +187,12 @@ class RunRadio(
     private fun scripted(line: ScriptLine, hud: RunHud, at: Long) {
         if (!live || listening || inPlayerChat()) return
         lastBanter = at
+        // 0.22.0: today is already signed: the 1200 m moment is a "day done" line, never "you can sign the day"
+        if (line == ScriptLine.CLOCK_READY && freshState()?.signedToday == true) {
+            val st = freshState()?.streak ?: 0
+            speak(context.resources.getQuantityString(R.plurals.banter_clock_done, st, GameSave.GOAL_M, st))
+            return
+        }
         if (!Policy.aiForScript(line)) {
             if (!Policy.stale(at, System.currentTimeMillis(), Policy.HINT_MAX_AGE_MS, over, false)) speak(scriptText(line))
             return
@@ -239,14 +245,18 @@ class RunRadio(
     }
 
     private suspend fun ask(message: String, hud: RunHud?): SolBrain.Reply =
-        brain.ask(message, lang, "run", runActContext(), store.turns().takeLast(6), hud?.let { runContext(it) }.orEmpty())
+        brain.ask(message, lang, "run", runActContext(), store.turns().takeLast(6), hud?.let { runContext(it) }.orEmpty(), freshState())
+
+    /** 0.22.0: the streak / today's CLOCK IN as it is now (Sol must not ask for 1200 m after the signature). */
+    private fun freshState(): net.solardepin.solarchik.sol.SolState? =
+        runCatching { net.solardepin.solarchik.sol.SolState.of(net.solardepin.solarchik.game.GameSave(context)) }.getOrNull()
 
     /** What Sol may refer to mid-run: the paper agents and whether I own them (no chain calls in a run). */
     private fun runActContext(): ActContext {
         val records = runCatching { AgentStore(context).agents() }.getOrDefault(emptyList())
         val agents = Catalog.skus.map { sku ->
             ActAgent(
-                id = "paper:${sku.id}", name = sku.name, running = false, skuId = sku.id, tier = sku.tierFor(AgentTier.FREE),
+                id = "paper:${sku.id}", name = if (lang == "uk") net.solardepin.solarchik.ui.AgentNames.uk(sku.name) else sku.name, running = false, skuId = sku.id, tier = sku.tierFor(AgentTier.FREE),
                 track = Track.PAPER, owned = Ownership.ownsSku(records, sku.id),
             )
         }
@@ -308,7 +318,7 @@ class RunRadio(
                 var streamed = ""
                 net.solardepin.solarchik.sol.SolLatency.request(0)
                 val r = runCatching {
-                    brain.ask(text, lang, "run", runActContext(), store.turns().takeLast(6), last?.let { runContext(it) }.orEmpty()) { soFar ->
+                    brain.ask(text, lang, "run", runActContext(), store.turns().takeLast(6), last?.let { runContext(it) }.orEmpty(), freshState()) { soFar ->
                         if (streamed.isEmpty()) net.solardepin.solarchik.sol.SolLatency.firstToken()
                         if (!SolChat.fitsLanguage(soFar, if (lang == "uk") "uk" else "en")) return@ask
                         streamed = soFar

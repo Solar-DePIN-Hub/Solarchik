@@ -219,6 +219,8 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
     // ---- CLOCK IN reward moment (non-blocking) ----
     private val clockBadge: TextView
     private val clockBanner: LinearLayout
+    private lateinit var clockBannerTitle: TextView
+    private lateinit var clockBannerSub: TextView
     private val questToast: TextView
 
     // ---- cards ----
@@ -448,12 +450,14 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
             isClickable = false
             tag = "clock-banner"
         }
-        clockBanner.addView(label(ctx.getString(R.string.run_clock_unlocked), 17f, PRIMARY, track = 0.02f).apply {
-            maxLines = 1; ellipsize = TextUtils.TruncateAt.END; setHorizontallyScrolling(false)
-        })
-        clockBanner.addView(label(ctx.getString(R.string.run_clock_keep), 13f, FG, body).apply {
-            maxLines = 1; ellipsize = TextUtils.TruncateAt.END
-        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(10) })
+        clockBannerTitle = label(ctx.getString(R.string.run_clock_unlocked), 17f, PRIMARY, track = 0.02f).apply {
+            maxLines = 1; ellipsize = TextUtils.TruncateAt.END; setHorizontallyScrolling(false); tag = "clock-banner-title"
+        }
+        clockBanner.addView(clockBannerTitle)
+        clockBannerSub = label(ctx.getString(R.string.run_clock_keep), 13f, FG, body).apply {
+            maxLines = 1; ellipsize = TextUtils.TruncateAt.END; tag = "clock-banner-sub"
+        }
+        clockBanner.addView(clockBannerSub, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(10) })
         hud.addView(clockBanner, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(108) })
 
         // distance milestone: a glass chip that drops in under the top bar, then lifts away
@@ -723,6 +727,14 @@ class RunOverlay(private val ctx: Context, private val actions: Actions) : Frame
 
     /** The CLOCK IN moment at the goal: banner for a few seconds, then the badge stays. */
     fun celebrateClock(now: Long = android.os.SystemClock.uptimeMillis()) {
+        // 0.22.0: today already signed (the player keeps running for fun / a record): no "sign the day" offer
+        if (clock.signed) {
+            clockBannerTitle.text = ctx.getString(R.string.run_clock_done_title, GameSave.GOAL_M)
+            clockBannerSub.text = ctx.getString(R.string.run_clock_done_sub)
+        } else {
+            clockBannerTitle.text = ctx.getString(R.string.run_clock_unlocked)
+            clockBannerSub.text = ctx.getString(R.string.run_clock_keep)
+        }
         bannerUntil = now + BANNER_MS
         refreshVisibility()
         popIn(clockBanner)

@@ -51,7 +51,8 @@ object DailyReport {
             is FeeProgress.Ready -> ctx.getString(R.string.report_window_ready)
             is FeeProgress.Wait -> ctx.getString(R.string.report_window_wait, progress.days48)
         }
-        val running = desk.runs.filter { it.running }.map { it.name }
+        // 0.22.0: one name per agent, in the app language (the same NFT showed as "Weather Station" and "Метеостанція")
+        val running = desk.runs.filter { it.running }.map { net.solardepin.solarchik.ui.AgentNames.display(ctx, it.name) }.distinct()
         lines += if (running.isEmpty()) ctx.getString(R.string.report_desk_idle)
         else ctx.getString(R.string.report_desk, running.take(3).joinToString(", "))
         return Report(lines, lines.joinToString(" "))

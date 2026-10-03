@@ -16,15 +16,27 @@ object SolRules {
     private val fee = Regex("(profit|performance) fee|\\bfees?\\b.*\\?|комісі\\w*.*\\?|\\bpro\\b.*(cost|price|коштує|ціна|вартість)|royalt|роялті", RegexOption.IGNORE_CASE)
     private val risk = Regex("risk limits?|(daily|day) (loss|spend)|loss limit|ліміт\\w* (ризику|збитк|втрат)|денн\\w* ліміт", RegexOption.IGNORE_CASE)
 
-    fun answer(ctx: Context, message: String): String? {
+    fun answer(ctx: Context, message: String, state: SolState? = null): String? {
         if (message.length > 160) return null
         val c = SolarchikConfig
         return when {
             window.containsMatchIn(message) -> ctx.getString(R.string.rule_window, c.STREAK_SHORT_DAYS, c.WINDOW_SHORT_HOURS.toInt(), c.STREAK_LONG_DAYS, c.WINDOW_LONG_DAYS.toInt())
-            streak.containsMatchIn(message) -> ctx.getString(R.string.rule_streak, c.RUN_GOAL_M)
+            streak.containsMatchIn(message) -> streakLine(ctx, state)
             fee.containsMatchIn(message) -> ctx.getString(R.string.rule_fee, (c.FREE_FEE_RATE * 100).toInt(), c.PRO_PRICE_SOL.toString(), c.ROYALTY_BPS / 100)
             risk.containsMatchIn(message) -> ctx.getString(R.string.rule_risk, c.HARD_MAX_TRADE_SOL.toString(), c.HARD_DAY_CAP_SOL.toString(), c.HARD_MAX_LOSSES, c.HARD_DAY_LOSS_SOL.toString())
             else -> null
+        }
+    }
+
+    /** 0.22.0: the streak answer starts from the player's real state (signed today = no "run 1200 m"). */
+    fun streakLine(ctx: Context, state: SolState?): String {
+        val goal = SolarchikConfig.RUN_GOAL_M
+        if (state == null) return ctx.getString(R.string.rule_streak, goal)
+        val days = ctx.resources.getQuantityString(R.plurals.sol_streak_days, state.streak, state.streak)
+        return when {
+            state.signedToday -> ctx.getString(R.string.rule_streak_signed, days, goal)
+            state.clockedToday -> ctx.getString(R.string.rule_streak_ready, days)
+            else -> ctx.getString(R.string.rule_streak_now, days) + " " + ctx.getString(R.string.rule_streak, goal)
         }
     }
 

@@ -134,7 +134,7 @@ class Screens0219Test {
 
         val a = Robolectric.buildActivity(MainActivity::class.java).setup().visible().get()
         // Home: the Calls card with the unread badge
-        a.select(MainActivity.Tab.YARD)
+        a.select(MainActivity.Tab.SHIFT)
         idle()
         assertNotNull(findTag(a.window.decorView, "home-calls"))
         shotRoot(a.window.decorView, "01-home-calls$sfx", a.getString(R.string.home_calls_title))

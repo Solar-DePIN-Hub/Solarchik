@@ -38,7 +38,7 @@ class SolScreen(host: MainActivity) : Screen(host) {
     private var sending = false
     private var listening = false
     /** Sol's retelling of today's note, accepted only if it adds no number. */
-    private var retold: Pair<String, String>? = null // day to text
+    private var retold: Pair<String, String>? = null // note script (changes with the streak / signature) to text
     private var plainWhy: Int = 0
     private var retelling = false
     /** Sol's action desk (0.21.7): context, plans, confirmed execution. */
@@ -192,7 +192,7 @@ class SolScreen(host: MainActivity) : Screen(host) {
         head.addView(Ui.weight(Ui.label(ctx, ctx.getString(R.string.report_title), Ui.CYAN)))
         report.addView(head)
         rep.lines.forEach { report.addView(Ui.top(Ui.body(ctx, "• $it"), 8)) }
-        val told = retold?.takeIf { it.first == today }?.second
+        val told = retold?.takeIf { it.first == rep.script }?.second
         if (told != null) {
             report.addView(Ui.top(Ui.label(ctx, ctx.getString(R.string.report_retold), Ui.GOLD), 12))
             report.addView(Ui.top(Ui.text(ctx, told, 14f, Ui.TEXT, 600), 4))
@@ -243,7 +243,7 @@ class SolScreen(host: MainActivity) : Screen(host) {
         val history = store.turns()
         store.add(ChatTurn("user", msg, System.currentTimeMillis()))
         input.setText("")
-        net.solardepin.solarchik.sol.SolRules.answer(ctx, msg)?.let { rule ->
+        net.solardepin.solarchik.sol.SolRules.answer(ctx, msg, net.solardepin.solarchik.sol.SolState.of(host.save))?.let { rule ->
             store.add(ChatTurn("assistant", rule, System.currentTimeMillis(), local = true))
             render()
             speak(rule, auto = true)
@@ -282,7 +282,9 @@ class SolScreen(host: MainActivity) : Screen(host) {
             try {
                 val c = actions.context()
                 net.solardepin.solarchik.sol.SolLatency.request(actions.lastBuildMs)
-                val r = brain.ask(msg, host.lang, "yard", c, history, currentReport().script.take(500)) { soFar ->
+                // 0.22.0: fresh state on every message; chat lines from before today's signature are not resent
+                val st = net.solardepin.solarchik.sol.SolState.of(host.save)
+                val r = brain.ask(msg, host.lang, "yard", c, net.solardepin.solarchik.sol.SolState.freshHistory(history, st), currentReport().script.take(500), st) { soFar ->
                     if (streamed.isEmpty()) net.solardepin.solarchik.sol.SolLatency.firstToken()
                     streamed = soFar
                     status.text = soFar
@@ -320,7 +322,9 @@ class SolScreen(host: MainActivity) : Screen(host) {
                             v?.enqueue(why, host.lang)
                         } else {
                             pending = plan
-                            answer(r.reply.takeIf { it.isNotBlank() && !plan.acquire && r.source == net.solardepin.solarchik.sol.SolBrain.Source.WORKER }
+                            // 0.22.0: a strategy change is always explained by the phone in plain words
+                            val strategyLine = if (action.type == net.solardepin.solarchik.sol.ActType.SET_STRATEGY) StrategyWords.say(ctx, plan.agent?.name.orEmpty(), plan.changes) else null
+                            answer(strategyLine ?: r.reply.takeIf { it.isNotBlank() && !plan.acquire && r.source == net.solardepin.solarchik.sol.SolBrain.Source.WORKER }
                                 ?: if (plan.acquire) ctx.getString(R.string.sol_act_ready_acquire, plan.agent?.name.orEmpty()) else ctx.getString(R.string.sol_act_ready, planTitle(plan)))
                         }
                     }
@@ -389,7 +393,21 @@ class SolScreen(host: MainActivity) : Screen(host) {
         p.listing?.takeIf { p.action.type == net.solardepin.solarchik.sol.ActType.SET_STRATEGY }?.let {
             addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.sol_act_template, it.name), 12f), 4))
         }
-        p.changes.forEach { (k, from, to) ->
+        if (p.action.type == net.solardepin.solarchik.sol.ActType.SET_STRATEGY && p.nextSpec != null) {
+            // 0.22.0: now vs after in plain words, then exactly what changes (no "windows 15/60" jargon)
+            fun block(title: Int, spec: kotlinx.serialization.json.JsonObject?, tagName: String, accent: Int) = Ui.column(ctx).apply {
+                tag = tagName
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                background = Ui.rounded(Ui.withAlpha(accent, 0x16), dp(14).toFloat(), Ui.withAlpha(accent, 0x55), dp(1))
+                addView(Ui.label(ctx, ctx.getString(title), accent))
+                StrategyWords.describe(ctx, spec).forEach { addView(Ui.top(Ui.text(ctx, it, 13f, Ui.TEXT, 600).apply { setLineSpacing(0f, 1.2f) }, 4)) }
+            }
+            addView(Ui.top(block(R.string.strat_now, p.agent?.spec, "sol-act-strategy-now", Ui.MUTED), 8))
+            addView(Ui.top(block(R.string.strat_after, p.nextSpec, "sol-act-strategy-after", Ui.GOLD), 8))
+            addView(Ui.top(Ui.label(ctx, ctx.getString(R.string.strat_changes), Ui.CYAN), 10))
+            p.changes.forEach { (k, from, to) -> addView(Ui.top(Ui.body(ctx, "• " + StrategyWords.change(ctx, k, from, to)), 4)) }
+            addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.strat_guard), 12f).apply { setLineSpacing(0f, 1.2f) }, 6))
+        } else p.changes.forEach { (k, from, to) ->
             val f = if (k == "risk") actions.riskLabel(from) else from
             val t = if (k == "risk") actions.riskLabel(to) else to
             addView(Ui.top(Ui.body(ctx, "• ${changeLabel(k)}: $f → $t"), 4))
@@ -459,7 +477,8 @@ class SolScreen(host: MainActivity) : Screen(host) {
     /** Once per day: ask Sol to retell the note; keep it only if every number is from the note. */
     private fun retellOnce() {
         val today = host.save.today()
-        if (retelling || retold?.first == today) return
+        val script = currentReport().script
+        if (retelling || retold?.first == script) return
         retelling = true
         val rep = currentReport()
         host.scope.launch {
@@ -473,7 +492,7 @@ class SolScreen(host: MainActivity) : Screen(host) {
                 !SolChat.onlyKnownNumbers(r.text, rep.script) -> R.string.report_plain
                 else -> 0
             }
-            if (plainWhy == 0) retold = today to r.text
+            if (plainWhy == 0) retold = rep.script to r.text
             render()
         }
     }

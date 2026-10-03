@@ -13,18 +13,19 @@ object SolGreeting {
     /** Robolectric renders the yard in tests: no live calls there. */
     var enabled: Boolean = Build.FINGERPRINT != "robolectric"
 
-    fun cached(ctx: Context, day: String, lang: String): String? =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("greet.$lang.$day", null)
+    /** 0.22.0: keyed by the player state too, so a greeting written before today's signature is never shown after it. */
+    fun cached(ctx: Context, day: String, lang: String, stateKey: String = ""): String? =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("greet.$lang.$day.$stateKey", null)
 
-    suspend fun fetch(ctx: Context, day: String, lang: String, cue: String, chat: SolChat = SolChat()): String? {
+    suspend fun fetch(ctx: Context, day: String, lang: String, cue: String, state: SolState? = null, chat: SolChat = SolChat()): String? {
         if (!enabled) return null
-        val key = "$lang.$day"
+        val key = "$lang.$day.${state?.key.orEmpty()}"
         if (inFlight == key) return null
-        cached(ctx, day, lang)?.let { return it }
+        cached(ctx, day, lang, state?.key.orEmpty())?.let { return it }
         inFlight = key
         try {
             val store = SolChatStore(ctx)
-            val r = chat.ask(cue, lang, store.playerId(), store.conversationId(day), emptyList(), "yard")
+            val r = chat.ask(cue, lang, store.playerId(), store.conversationId(day), emptyList(), "yard", state?.line().orEmpty())
             if (r.fallback || r.text.isBlank()) return null
             val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val edit = prefs.edit()

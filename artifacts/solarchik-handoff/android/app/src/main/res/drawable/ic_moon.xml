@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 0.22.0 rooftop HUD: night sky. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M14.5,2.5a8.5,8.5 0,1 0,7 13.4a7,7 0,0 1,-7 -13.4z"/>
+</vector>

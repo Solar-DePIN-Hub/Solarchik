@@ -232,6 +232,14 @@ class CallsActivity : ComponentActivity() {
             CallInbox.linked(this@CallsActivity).forEach { addView(Ui.top(idRow(it, mine = false), 6)) }
             addView(Ui.top(Ui.button(this@CallsActivity, getString(R.string.calls_link_btn), Ui.Btn.GHOST) { askLink() }.apply { tag = "calls-link" }, 10))
         }, 8))
+        // 0.22.0: credit / voice / language are one tap away from here (the Home card now opens this list)
+        column.addView(Ui.top(Ui.button(this, getString(R.string.calls_sec_settings), Ui.Btn.SECONDARY, R.drawable.ic_nav_settings) {
+            startActivity(android.content.Intent(this, net.solardepin.solarchik.MainActivity::class.java)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(net.solardepin.solarchik.MainActivity.EXTRA_TAB, net.solardepin.solarchik.MainActivity.Tab.SETTINGS.name)
+                .putExtra(net.solardepin.solarchik.MainActivity.EXTRA_FOCUS, "secretary"))
+            finish()
+        }.apply { tag = "calls-sec-settings" }, 4))
     }
 
     private fun idRow(id: String, mine: Boolean): View = Ui.row(this, gap = 8).apply {

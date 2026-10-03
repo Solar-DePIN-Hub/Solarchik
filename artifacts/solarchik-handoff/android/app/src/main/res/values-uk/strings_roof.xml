@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="roof_streak"><item quantity="one">%d день поспіль</item><item quantity="few">%d дні поспіль</item><item quantity="many">%d днів поспіль</item><item quantity="other">%d дня поспіль</item></plurals>
+    <string name="roof_streak_zero">Почни серію</string>
+    <string name="roof_time_net">%1$s · %2$s</string>
+    <string name="roof_menu_cd">Меню: усе з даху списком</string>
+    <string name="roof_help_cd">Екскурсія дахом</string>
+
+    <string name="roof_tag_calls">Секретар</string>
+    <string name="roof_tag_calls_sub">Приймає дзвінки</string>
+    <plurals name="roof_tag_calls_new"><item quantity="one">%d новий дзвінок</item><item quantity="few">%d нові дзвінки</item><item quantity="many">%d нових дзвінків</item><item quantity="other">%d нового дзвінка</item></plurals>
+    <string name="roof_tag_agents">Агенти</string>
+    <string name="roof_tag_agents_sub">NFT-агенти й гаманець</string>
+    <string name="roof_tag_slice">Slice</string>
+    <string name="roof_tag_slice_sub">Паперовий портфель</string>
+    <string name="roof_tag_settings">Налаштування</string>
+    <string name="roof_tag_settings_sub">Гаманець, мова, звук</string>
+    <string name="roof_tag_sol">Сол</string>
+    <string name="roof_tag_sol_sub">торкнись — поговоримо</string>
+    <string name="roof_tag_clock">CLOCK IN</string>
+    <string name="roof_clock_need">Спершу пробіжи %d м</string>
+    <string name="roof_clock_ready">Підпиши день</string>
+    <string name="roof_clock_done">Відмічено · серія %d</string>
+    <string name="roof_run">Забіг дахами</string>
+    <string name="roof_hint">Торкнись будь-чого на даху · ☰ — усе списком</string>
+    <string name="roof_earned_chip">+%s SOL · папір</string>
+    <string name="roof_call_chip">Новий дзвінок</string>
+    <string name="roof_ticker_paper">ПАПІР %s</string>
+
+    <string name="roof_say_call">О %2$s дзвонили, це %1$s. Я все записав, глянеш?</string>
+    <string name="roof_say_call_anon">Поки тебе не було, хтось дзвонив. Я все записав, глянеш?</string>
+    <string name="roof_say_run">Сьогодні ще без відмітки. Пробіжи %d м, і годинник CLOCK IN відкриє підпис дня.</string>
+    <string name="roof_say_sign">Забіг зараховано! Торкнись годинника CLOCK IN, і підпишемо день у Solana.</string>
+    <string name="roof_say_earned">Поки тебе не було, агенти заробили +%s SOL на папері.</string>
+    <string name="roof_say_day">Сонце в зеніті, панелі заряджені. Пробіжимось дахами?</string>
+    <string name="roof_say_sunset">Який захід! Встигнемо ще один забіг до темряви?</string>
+    <string name="roof_say_night">Місто вже світиться. Твій рекорд чекає.</string>
+    <string name="roof_say_done">День відмічено, серія — %d. Тепер можна бігати просто для душі.</string>
+
+    <string name="roof_menu_title">Меню</string>
+    <string name="roof_menu_sub">Усе, що є на даху, — коротким списком</string>
+    <string name="roof_menu_best">Рекорд %s</string>
+    <string name="roof_menu_clock">CLOCK IN · зміна дня</string>
+    <string name="roof_menu_calls">Дзвінки</string>
+    <string name="roof_menu_calls_none">Дзвінків ще не було</string>
+    <string name="roof_menu_secretary">Налаштування секретаря</string>
+    <string name="roof_menu_sol">Сол</string>
+    <string name="roof_menu_sol_sub">Поговорити голосом або в чаті</string>
+    <string name="roof_menu_agents">Агенти й гаманець</string>
+    <string name="roof_menu_agents_sub">NFT-агенти, пульт, мінт</string>
+    <string name="roof_menu_strategies">Стратегії й ринок</string>
+    <string name="roof_menu_strategies_sub">Обери стратегію, купи чи продай агента</string>
+    <string name="roof_menu_slice">Slice</string>
+    <string name="roof_menu_slice_sub">Акції на папері · %s</string>
+    <string name="roof_menu_garage">Гараж і квести</string>
+    <string name="roof_menu_garage_sub">Роботи, скіни, щоденні квести</string>
+    <string name="roof_menu_settings">Налаштування</string>
+    <string name="roof_menu_settings_sub">Гаманець, мова, голос Сола, сповіщення</string>
+    <string name="roof_menu_tour">Екскурсія дахом</string>
+    <string name="roof_menu_tour_sub">Сол покаже все за хвилину</string>
+    <string name="roof_menu_judges">Для журі · 60 с</string>
+    <string name="roof_menu_judges_sub">Ключові фічі й докази в devnet</string>
+    <string name="roof_close">Закрити</string>
+
+    <string name="tour_offer_title">Привіт, я Сол!</string>
+    <string name="tour_offer_body">Це наш дах, звідси все й починається. Показати, що тут до чого? Хвилинка, не більше.</string>
+    <string name="tour_offer_go">Покажи</string>
+    <string name="tour_offer_judges">Для журі · 60 с</string>
+    <string name="tour_offer_later">Пізніше</string>
+    <string name="tour_skip">Пропустити</string>
+    <string name="tour_next">Далі</string>
+    <string name="tour_back">Назад</string>
+    <string name="tour_done">Готово</string>
+    <string name="tour_step">%1$d/%2$d</string>
+    <string name="tour_replay_hint">Екскурсію можна повторити будь-коли: знак «?» вгорі.</string>
+    <string name="tour_voice_on">Голос Сола увімкнено</string>
+    <string name="tour_voice_off">Голос Сола вимкнено</string>
+
+    <string name="tour_sol_t">Я — Сол</string>
+    <string name="tour_sol_b">Твій напарник. Говори зі мною голосом або пиши: я підкажу, нагадаю й навіть зроблю дію в гаманці, але тільки після твого підтвердження.</string>
+    <string name="tour_door_t">Двері на забіг</string>
+    <string name="tour_door_b">Відчиняй, і гайда дахами міста: перестрибуй прольоти, збирай монети, тікай від дронів. Твій рекорд висить отут, на синій табличці.</string>
+    <string name="tour_clock_t">CLOCK IN</string>
+    <string name="tour_clock_b">Пробіжи %d м, і цей годинник відкриє підпис дня в Solana. Кожен підписаний день подовжує серію, а за серію даються дні без комісії. Поки день не відмічено, вивіска світиться.</string>
+    <string name="tour_calls_t">Секретар і дзвінки</string>
+    <string name="tour_calls_b">Антена — це моя телефонна лінія. Коли тобі не до розмов, я беру слухавку, записую, чого хотіли, і показую тут. Новий дзвінок пускає червоні хвилі над щоглою.</string>
+    <string name="tour_panels_t">Гаманець і NFT-агенти</string>
+    <string name="tour_panels_b">Кожна панель — агент, NFT у твоєму гаманці (Metaplex Core, devnet). Перший — безкоштовно. Його стратегію, тобто на яких ринках і наскільки сміливо він торгує, змінюєш одним підтвердженням. Немає гаманця? Я сам налаштую вбудований devnet-гаманець.</string>
+    <string name="tour_ticker_t">Slice: акції на Solana</string>
+    <string name="tour_ticker_b">Це табло показує живі ціни токенізованих акцій (xStocks) з Jupiter. Тапни його й купуй шматочки Apple чи NVIDIA за уявні $1 000. Це тренування: без справжніх грошей, гаманця й транзакцій.</string>
+    <string name="tour_tools_t">Налаштування</string>
+    <string name="tour_tools_b">Ящик з інструментами: гаманець, мова, мій голос, секретар. Не знаєш, куди далі? Тисни «☰», там усе списком, або «?», щоб повторити екскурсію.</string>
+
+    <string name="judge_intro_t">Solarchik за 60 секунд</string>
+    <string name="judge_intro_b">Щоденна гра для телефонів Solana: біжиш дахами, підписуєш день у блокчейні, а AI-агенти й телефонний секретар працюють, поки ти в справах. Усе тут працює на devnet.</string>
+    <string name="judge_clock_t">Забіг → CLOCK IN</string>
+    <string name="judge_clock_b">%d м забігу відкривають підпис дня: memo-транзакцію в devnet через Mobile Wallet Adapter або вбудований гаманець. Серія підписаних днів дає вікна без комісії.</string>
+    <string name="judge_nft_t">Агенти — це NFT</string>
+    <string name="judge_nft_b">Кожен агент — Metaplex Core NFT. Безкоштовний мінт і купівля Pro за 0,1 SOL — обидві реальні транзакції devnet:</string>
+    <string name="judge_wallet_t">Немає гаманця? Не біда</string>
+    <string name="judge_wallet_b">Для журі без Phantom чи Solflare є вбудований devnet-гаманець. Ключ запечатаний в Android Keystore, поповнення — з крана:</string>
+    <string name="judge_sec_t">AI-секретар для телефону</string>
+    <string name="judge_sec_b">Сол відповідає на дзвінки замість тебе й зберігає суть короткою нотаткою. Непрочитані дзвінки підсвічують антену.</string>
+    <string name="judge_sol_t">Сол виконує дії</string>
+    <string name="judge_sol_b">Скажи «запусти Weather Station», і Сол перевірить, а тоді покаже картку з ціною в SOL. Нічого не відправиться, доки ти не тапнеш.</string>
+    <string name="judge_honest_t">Чесні позначки</string>
+    <string name="judge_honest_b">Ціни Slice живі (Jupiter), але портфель паперовий. Паперові угоди агентів — симуляція, і так і позначені. У блокчейн іде тільки те, що ти підтвердив.</string>
+    <string name="judge_proof_t">Докази в Solana Explorer</string>
+    <string name="judge_proof_b">Реальні транзакції devnet з нашого тестового прогону 3 жовтня 2026 (вбудований гаманець C9pV…GuWnz), а також твої власні, щойно вони з’являться:</string>
+    <string name="judge_link_mint">Безкоштовний мінт агента</string>
+    <string name="judge_link_pro">Купівля Pro-агента, 0,1 SOL</string>
+    <string name="judge_link_faucet">Поповнення вбудованого гаманця</string>
+    <string name="judge_link_my_clock">Твій CLOCK IN</string>
+    <string name="judge_link_my_mint">Твій мінт агента</string>
+    <string name="judge_auto">Автопоказ · %d с</string>
+</resources>

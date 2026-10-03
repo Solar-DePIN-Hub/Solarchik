@@ -349,6 +349,8 @@ class RunActivity : ComponentActivity(), RunView.Listener, RunOverlay.Actions {
 
     override fun onResume() {
         super.onResume()
+        // 0.22.0: the day may have been signed elsewhere (Yard, wallet app, another screen) while away: re-read it
+        refreshClock()
         if (!paused && !ended) audio.startMusic()
     }
 

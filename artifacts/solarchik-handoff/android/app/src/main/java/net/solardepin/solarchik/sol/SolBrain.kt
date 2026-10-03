@@ -47,12 +47,15 @@ class SolBrain(
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun body(message: String, language: String, scene: String, ctx: ActContext, history: List<ChatTurn>, context: String = ""): String = buildJsonObject {
+    fun body(message: String, language: String, scene: String, ctx: ActContext, history: List<ChatTurn>, context: String = "", state: SolState? = null): String = buildJsonObject {
         put("message", message.take(600))
         put("language", if (language == "uk") "uk" else "en")
         put("scene", scene)
         put("stream", true)
-        if (context.isNotBlank()) put("context", context.take(500))
+        // 0.22.0: the fresh player state goes first (never cut by the length cap) and as JSON for the worker
+        val full = listOfNotNull(state?.line(), context.takeIf { it.isNotBlank() }).joinToString("\n")
+        if (full.isNotBlank()) put("context", full.take(800))
+        state?.let { put("state", it.toJson()) }
         val c = ctx.toJson()
         c["agents"]?.let { put("agents", it) }
         c["market"]?.let { put("market", it) }
@@ -68,14 +71,14 @@ class SolBrain(
      */
     suspend fun ask(
         message: String, language: String, scene: String, ctx: ActContext, history: List<ChatTurn>,
-        context: String = "", onDelta: (String) -> Unit = {},
+        context: String = "", state: SolState? = null, onDelta: (String) -> Unit = {},
     ): Reply {
         val t0 = System.currentTimeMillis()
         var text = StringBuilder()
         var done: JsonObject? = null
         var first: Long? = null
         val ok = try {
-            stream(url, body(message, language, scene, ctx, history, context)) { line ->
+            stream(url, body(message, language, scene, ctx, history, context, state)) { line ->
                 val o = runCatching { json.parseToJsonElement(line) as? JsonObject }.getOrNull() ?: return@stream
                 val d = (o["d"] as? JsonPrimitive)?.content
                 if (d != null) {

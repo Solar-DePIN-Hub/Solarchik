@@ -661,8 +661,8 @@
     <string name="slice_loading">Loading live prices…</string>
     <string name="slice_source">Live prices: Jupiter price API (Solana mainnet). Paper trades only: no wallet, no transaction.</string>
     <string name="slice_held">You hold %1$s · now %2$s · paid %3$s</string>
-    <string name="slice_buy">Buy $%1$d (paper)</string>
-    <string name="slice_sell">Sell all (paper)</string>
+    <string name="slice_buy">Buy $%1$d · pretend money</string>
+    <string name="slice_sell">Sell all · pretend money</string>
     <string name="slice_no_cash">Not enough virtual cash.</string>
     <string name="slice_bought">Paper buy: %1$s</string>
     <string name="slice_sold">Paper sale: %1$s</string>

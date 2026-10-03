@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 0.22.0: secretary owner exemption + honest missed-call reasons -->
+    <string name="sec_owner">Owner · no limits</string>
+    <string name="sec_owner_body">This is the owner account: the secretary always answers and calls are never billed.</string>
+    <string name="calls_missed_caller_cap">Missed: this number already used today’s free trial calls. Top up the credit so the secretary keeps answering.</string>
+    <string name="calls_missed_daily_cap">Missed: today’s free trial calls ran out for everyone. Top up the credit so the secretary keeps answering.</string>
+    <string name="calls_sec_settings">Secretary settings: credit, voice, language</string>
+
+    <!-- 0.22.0: Sol reads the fresh streak -->
+    <plurals name="sol_streak_days">
+        <item quantity="one">%1$d day</item>
+        <item quantity="other">%1$d days</item>
+    </plurals>
+    <string name="rule_streak_signed">Today is already signed, your streak is %1$s. Nothing else to do for CLOCK IN today; tomorrow it’s %2$d m and one tap again.</string>
+    <string name="rule_streak_ready">Today’s run already counts, just tap Sign today to CLOCK IN. Streak right now: %1$s.</string>
+    <string name="rule_streak_now">Your streak right now: %1$s.</string>
+    <string name="sol_greet_cue_signed">Greet me in one short warm line. Today is already signed and my clock-in streak is %1$d days, so don’t ask me to run for it.</string>
+    <string name="sol_agent_practice">practice</string>
+
+    <!-- 0.22.0: a strategy change in plain words -->
+    <plurals name="strat_hours">
+        <item quantity="one">%1$d hour</item>
+        <item quantity="other">%1$d hours</item>
+    </plurals>
+    <string name="strat_minutes">%1$d min</string>
+    <string name="strat_and">and</string>
+    <string name="strat_lane_crypto">bets on short “will the crypto price go up or down” markets that settle in %1$s</string>
+    <string name="strat_lane_events">bets on news and event markets</string>
+    <string name="strat_lane_weather">bets on weather markets</string>
+    <string name="strat_what">What it does: %1$s.</string>
+    <string name="strat_pace_calm">How boldly: calm. Small bets, it only steps in when the edge is clear and skips most of the noise.</string>
+    <string name="strat_pace_balanced">How boldly: balanced. Medium bets, it steps in when the edge is decent.</string>
+    <string name="strat_pace_risky">How boldly: bold. Bigger bets and more trades, so both wins and losses swing harder.</string>
+    <string name="strat_pace_calm_short">calm</string>
+    <string name="strat_pace_balanced_short">balanced</string>
+    <string name="strat_pace_risky_short">bold</string>
+    <string name="strat_limits">Limits: up to %1$s SOL per trade; it exits at −%2$d%% or +%3$d%%.</string>
+    <string name="strat_now">Now</string>
+    <string name="strat_after">After you confirm</string>
+    <string name="strat_changes">What changes</string>
+    <string name="strat_chg_windows">Market length: %1$s → %2$s</string>
+    <string name="strat_chg_risk">Boldness: %1$s → %2$s</string>
+    <string name="strat_chg_stake">Max bet: %1$s → %2$s SOL</string>
+    <string name="strat_chg_stop">Cuts a loss at: −%1$s%% → −%2$s%%</string>
+    <string name="strat_chg_take">Takes profit at: +%1$s%% → +%2$s%%</string>
+    <string name="strat_chg_band">Which prices it is willing to buy at</string>
+    <string name="strat_chg_edge">How big an edge it needs before buying</string>
+    <string name="strat_chg_rules">Its custom rules</string>
+    <string name="strat_guard">Safety rails stay on: at most 0.3 SOL a day and it stops after 2 losses in a row. It all runs on devnet with test SOL, not real money.</string>
+    <string name="strat_say">For “%1$s” I suggest %2$s. The card below has the details, and nothing changes until you tap Confirm.</string>
+    <string name="strat_say_windows">betting on markets that last %2$s instead of %1$s</string>
+    <string name="strat_say_risk">a %2$s style instead of %1$s</string>
+    <string name="strat_say_other">fine-tuning a few limits</string>
+
+    <!-- 0.22.0: run, today already signed -->
+    <string name="run_clock_done_title">%1$d m ✓ Today is already signed</string>
+    <string name="run_clock_done_sub">keep going for a record</string>
+    <plurals name="banter_clock_done">
+        <item quantity="one">%1$d m! Today’s already signed, streak %2$d day. Now it’s all about the record.</item>
+        <item quantity="other">%1$d m! Today’s already signed, streak %2$d days. Now it’s all about the record.</item>
+    </plurals>
+
+    <!-- 0.22.0: Slice explained -->
+    <string name="slice_how_title">How Slice works</string>
+    <string name="slice_how_1">What it is: real tokenized stocks (xStocks) that trade on Solana. Prices are live from Jupiter.</string>
+    <string name="slice_how_2">What you do here: practise with $1,000 of pretend money. Buy a $50 slice of any stock, watch the price move, sell whenever you like.</string>
+    <string name="slice_how_3">Honestly: it’s a simulation. No real money, no wallet, no transactions, not even devnet.</string>
+    <string name="slice_start_hint">Pick any stock below and tap “Buy”.</string>
+</resources>

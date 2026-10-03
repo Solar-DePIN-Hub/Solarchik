@@ -28,6 +28,8 @@ object AppData {
         "seeker-wallet",
         // 0.21.9
         "solarchik.calls",
+        // 0.22.0 rooftop (tour seen / last visit)
+        "solarchik-roof",
         "solarchik.calls.remind",
         "solarchik-local-wallet",
     )

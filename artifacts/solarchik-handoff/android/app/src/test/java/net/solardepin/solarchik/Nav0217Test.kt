@@ -65,6 +65,7 @@ class Nav0217Test {
     @Test fun floatingNavHomeCardsAndEveryTab() {
         val a = open()
         val d = a.window.decorView
+        a.select(MainActivity.Tab.SHIFT, animate = false) // 0.22.0: the old Home cards moved behind the rooftop punch clock
         assertNotNull(find(d, "nav-bar"))
         assertNotNull(find(d, "nav-pill"))
         assertEquals(listOf("Home", "Agents", "Play", "Sol", "More"), listOf("nav-yard", "nav-agents", "nav-run", "nav-sol", "nav-settings").map { find(d, it)!!.contentDescription.toString() })
@@ -79,15 +80,19 @@ class Nav0217Test {
         assertEquals(1f, find(d, "nav-pill")!!.alpha)
     }
 
-    @Test fun homeSecretaryCardOpensTheSecretarySection() {
+    @Test fun homeSecretaryCardOpensTheCallsListDirectly() {
+        // 0.22.0 (owner): no intermediate Settings screen on the way to the calls
         val a = open()
+        a.select(MainActivity.Tab.SHIFT, animate = false)
         find(a.window.decorView, "home-secretary")!!.performClick()
         ShadowLooper.idleMainLooper()
-        assertEquals(MainActivity.Tab.SETTINGS, a.current)
+        val next = org.robolectric.Shadows.shadowOf(a).nextStartedActivity
+        assertEquals(net.solardepin.solarchik.ui.CallsActivity::class.java.name, next?.component?.className)
     }
 
     @Test fun homeSliceCardOpensSliceUnderAgents() {
         val a = open()
+        a.select(MainActivity.Tab.SHIFT, animate = false)
         find(a.window.decorView, "home-slice")!!.performClick()
         ShadowLooper.idleMainLooper()
         assertEquals(MainActivity.Tab.AGENTS, a.current)

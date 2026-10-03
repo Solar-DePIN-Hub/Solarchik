@@ -96,8 +96,8 @@ object Notes {
         if (!allowed(ctx)) return false
         val (title, tab) = when (kind) {
             NoteKind.STREAK -> R.string.note_streak_title to MainActivity.Tab.RUN
-            NoteKind.REWARD -> R.string.note_reward_title to MainActivity.Tab.YARD
-            NoteKind.WINDOW -> R.string.note_window_title to MainActivity.Tab.YARD
+            NoteKind.REWARD -> R.string.note_reward_title to MainActivity.Tab.SHIFT
+            NoteKind.WINDOW -> R.string.note_window_title to MainActivity.Tab.SHIFT
             NoteKind.REPORT -> R.string.note_report_title to MainActivity.Tab.SOL
             NoteKind.DESK -> R.string.note_desk_title to MainActivity.Tab.AGENTS
         }

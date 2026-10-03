@@ -53,11 +53,13 @@ object Secretary {
         val usd = p.getString("usd", null)?.toDoubleOrNull() ?: return null
         val trial = p.getString("trialUsd", null)?.toDoubleOrNull() ?: 0.0
         val paid = p.getString("paidUsd", null)?.toDoubleOrNull() ?: (usd - trial).coerceAtLeast(0.0)
-        return ScreenApi.Balance(usd, paid, trial, trial > 0)
+        return ScreenApi.Balance(usd, paid, trial, trial > 0, p.getBoolean("owner", false))
     }
     fun setLastBalance(ctx: Context, b: ScreenApi.Balance) {
-        prefs(ctx).edit().putString("paidUsd", b.paidUsd.toString()).putString("trialUsd", b.trialUsd.toString()).apply()
+        prefs(ctx).edit().putString("paidUsd", b.paidUsd.toString()).putString("trialUsd", b.trialUsd.toString()).putBoolean("owner", b.owner).apply()
         setLastUsd(ctx, b.usd)
+        // 0.22.0: the owner's ids are never blocked by credit (server-side exemption), so no top-up warning
+        if (b.owner) prefs(ctx).edit().putBoolean("needTopup", false).apply()
     }
 
     /** Secretary voice language as last saved/read ("auto", "uk", "en"). */

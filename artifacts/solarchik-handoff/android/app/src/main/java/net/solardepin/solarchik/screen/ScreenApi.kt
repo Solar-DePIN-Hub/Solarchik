@@ -30,7 +30,7 @@ object ScreenApi {
     data class Voicemail(val caller: String, val text: String, val at: Long)
 
     /** GET /balance: total credit, the paid part and the free trial part (0.21.8). */
-    data class Balance(val usd: Double, val paidUsd: Double, val trialUsd: Double, val trial: Boolean)
+    data class Balance(val usd: Double, val paidUsd: Double, val trialUsd: Double, val trial: Boolean, val owner: Boolean = false)
 
     /** Secretary voice languages the worker accepts (GET/POST /secretary-lang). */
     val LANGS = listOf("auto", "uk", "en")
@@ -57,7 +57,7 @@ object ScreenApi {
         if (!usd.isFinite()) return null
         val trialUsd = o.optDouble("trialUsd", 0.0).takeIf { it.isFinite() } ?: 0.0
         val paid = o.optDouble("paidUsd", Double.NaN).takeIf { it.isFinite() } ?: (usd - trialUsd).coerceAtLeast(0.0)
-        return Balance(usd, paid, trialUsd, o.optBoolean("trial", trialUsd > 0))
+        return Balance(usd, paid, trialUsd, o.optBoolean("trial", trialUsd > 0), o.optBoolean("owner", false))
     }
 
     fun parseLang(code: Int, body: String): String? {

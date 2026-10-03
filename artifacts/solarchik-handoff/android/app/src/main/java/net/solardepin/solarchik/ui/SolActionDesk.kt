@@ -112,11 +112,11 @@ class SolActionDesk(
         lastBuildMs = System.currentTimeMillis() - t0
         val w = host.wallet
         val desk = host.desk.state()
-        val agents = mutableListOf<ActAgent>()
+        val devnet = mutableListOf<ActAgent>()
         for (a in devnetAssets()) {
             val card = n.cards[a.asset]
             val run = desk.run(a.asset)
-            agents += ActAgent(
+            devnet += ActAgent(
                 id = a.asset, name = card?.name?.ifBlank { null } ?: a.name, running = run?.running == true,
                 strategyNft = card?.hasChain == true && card.spec != null, spec = card?.spec, listed = card?.listed == true,
                 unlockSec = card?.unlockSec ?: 0, trades = run?.let { it.wins + it.losses } ?: card?.perf?.trades,
@@ -125,19 +125,21 @@ class SolActionDesk(
             )
         }
         val records = host.store.agents()
+        val paper = mutableListOf<ActAgent>()
         for (sku in Catalog.skus) {
             val key = "paper:${sku.id}"
             val run = desk.run(key)
             // 0.21.8: a paper agent is only "mine" when I own its sku (free or Pro NFT); Sol offers the rest
             val ownedRec = records.filter { it.status != OwnedAgent.STATUS_MISSING && Catalog.baseOf(it.skuId)?.id == sku.id }
             val tier = if (ownedRec.any { it.tier == AgentTier.PRO }) AgentTier.PRO else sku.tierFor(AgentTier.FREE)
-            agents += ActAgent(
-                id = key, name = AgentNames.display(ctx, sku.name), running = run?.running == true, trades = run?.let { it.wins + it.losses },
+            paper += ActAgent(
+                id = key, name = sku.name, running = run?.running == true, trades = run?.let { it.wins + it.losses },
                 pnlSol = run?.pnl, skuId = sku.id, tier = tier, track = Track.PAPER,
                 owned = net.solardepin.solarchik.agents.Ownership.ownsSku(records, sku.id),
             )
         }
-        val mine = agents.map { it.id }.toSet()
+        val agents = net.solardepin.solarchik.sol.SolActions.mergeAgents(devnet, paper, ctx.getString(R.string.sol_agent_practice)) { if (host.lang == "uk") AgentNames.uk(it) else it }
+        val mine = (devnet + paper).map { it.id }.toSet()
         val market = n.market.filter { it.id !in mine }
         val freeSku = Catalog.skus.firstOrNull { !it.paidOnly }
         val canMint = freeSku != null && !w.mainnet && host.minter.canMint(freeSku, AgentTier.FREE) == null

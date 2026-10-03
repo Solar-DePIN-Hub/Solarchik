@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sec_owner">Власник · без лімітів</string>
+    <string name="sec_owner_body">Це акаунт власника: секретар відповідає завжди, а дзвінки не списують кредит.</string>
+    <string name="calls_missed_caller_cap">Пропущено: цей номер уже використав безкоштовні пробні дзвінки на сьогодні. Поповни кредит, і секретар відповідатиме далі.</string>
+    <string name="calls_missed_daily_cap">Пропущено: безкоштовні пробні дзвінки на сьогодні закінчилися для всіх. Поповни кредит, і секретар відповідатиме далі.</string>
+    <string name="calls_sec_settings">Налаштування секретаря: кредит, голос, мова</string>
+
+    <plurals name="sol_streak_days">
+        <item quantity="one">%1$d день</item>
+        <item quantity="few">%1$d дні</item>
+        <item quantity="many">%1$d днів</item>
+        <item quantity="other">%1$d дня</item>
+    </plurals>
+    <string name="rule_streak_signed">Сьогодні вже підписано, серія — %1$s. Для CLOCK IN на сьогодні більше нічого не треба, а завтра знову %2$d м і один дотик.</string>
+    <string name="rule_streak_ready">Сьогоднішній забіг уже зараховано, лишилось натиснути «Підписати сьогодні». Серія зараз: %1$s.</string>
+    <string name="rule_streak_now">Серія зараз: %1$s.</string>
+    <string name="sol_greet_cue_signed">Привітай мене одним коротким теплим реченням. Сьогодні вже підписано, моя серія підписів: %1$d дн., тож не проси мене бігти заради підпису.</string>
+    <string name="sol_agent_practice">практика</string>
+
+    <plurals name="strat_hours">
+        <item quantity="one">%1$d год</item>
+        <item quantity="few">%1$d год</item>
+        <item quantity="many">%1$d год</item>
+        <item quantity="other">%1$d год</item>
+    </plurals>
+    <string name="strat_minutes">%1$d хв</string>
+    <string name="strat_and">і</string>
+    <string name="strat_lane_crypto">ставить на короткі ринки «ціна криптовалюти піде вгору чи вниз», які закриваються за %1$s</string>
+    <string name="strat_lane_events">ставить на ринки новин і подій</string>
+    <string name="strat_lane_weather">ставить на ринки погоди</string>
+    <string name="strat_what">Що робить: %1$s.</string>
+    <string name="strat_pace_calm">Наскільки сміливо: спокійно. Малі ставки, заходить лише за чіткої переваги й пропускає більшість шуму.</string>
+    <string name="strat_pace_balanced">Наскільки сміливо: зважено. Середні ставки, заходить, коли перевага помітна.</string>
+    <string name="strat_pace_risky">Наскільки сміливо: сміливо. Більші ставки й більше угод, тож і виграші, і втрати різкіші.</string>
+    <string name="strat_pace_calm_short">спокійно</string>
+    <string name="strat_pace_balanced_short">зважено</string>
+    <string name="strat_pace_risky_short">сміливо</string>
+    <string name="strat_limits">Ліміти: до %1$s SOL за угоду; виходить при −%2$d%% або +%3$d%%.</string>
+    <string name="strat_now">Зараз</string>
+    <string name="strat_after">Після підтвердження</string>
+    <string name="strat_changes">Що зміниться</string>
+    <string name="strat_chg_windows">Тривалість ринків: %1$s → %2$s</string>
+    <string name="strat_chg_risk">Сміливість: %1$s → %2$s</string>
+    <string name="strat_chg_stake">Найбільша ставка: %1$s → %2$s SOL</string>
+    <string name="strat_chg_stop">Фіксує збиток при: −%1$s%% → −%2$s%%</string>
+    <string name="strat_chg_take">Фіксує прибуток при: +%1$s%% → +%2$s%%</string>
+    <string name="strat_chg_band">За якими цінами агент готовий купувати</string>
+    <string name="strat_chg_edge">Яка перевага потрібна агенту, щоб купити</string>
+    <string name="strat_chg_rules">Його власні правила</string>
+    <string name="strat_guard">Запобіжники лишаються: не більше 0,3 SOL на день і зупинка після 2 збитків поспіль. Усе працює на devnet з тестовими SOL, це не справжні гроші.</string>
+    <string name="strat_say">Для «%1$s» пропоную %2$s. Деталі — в картці нижче, і нічого не зміниться, доки ти не натиснеш «Підтвердити».</string>
+    <string name="strat_say_windows">ставити на ринки по %2$s замість %1$s</string>
+    <string name="strat_say_risk">торгувати %2$s, а не %1$s</string>
+    <string name="strat_say_other">трохи підкрутити ліміти</string>
+
+    <string name="run_clock_done_title">%1$d м ✓ Сьогодні вже підписано</string>
+    <string name="run_clock_done_sub">біжи далі по рекорд</string>
+    <plurals name="banter_clock_done">
+        <item quantity="one">%1$d м! Сьогодні вже підписано, серія — %2$d день. Тепер женемо по рекорд.</item>
+        <item quantity="few">%1$d м! Сьогодні вже підписано, серія — %2$d дні. Тепер женемо по рекорд.</item>
+        <item quantity="many">%1$d м! Сьогодні вже підписано, серія — %2$d днів. Тепер женемо по рекорд.</item>
+        <item quantity="other">%1$d м! Сьогодні вже підписано, серія — %2$d дня. Тепер женемо по рекорд.</item>
+    </plurals>
+
+    <string name="slice_how_title">Як працює Slice</string>
+    <string name="slice_how_1">Що це: справжні токенізовані акції (xStocks), якими торгують у Solana. Ціни — наживо з Jupiter.</string>
+    <string name="slice_how_2">Що ти тут робиш: тренуєшся на уявних $1 000. Купуєш шматочок будь-якої акції за $50, стежиш за ціною й продаєш, коли захочеш.</string>
+    <string name="slice_how_3">Чесно: це симуляція. Жодних справжніх грошей, гаманця чи транзакцій, навіть devnet.</string>
+    <string name="slice_start_hint">Обери будь-яку акцію нижче й натисни «Купити».</string>
+</resources>

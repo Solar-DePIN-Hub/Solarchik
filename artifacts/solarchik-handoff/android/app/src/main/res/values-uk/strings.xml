@@ -650,8 +650,8 @@
     <string name="slice_loading">Завантажуємо живі ціни…</string>
     <string name="slice_source">Живі ціни: Jupiter price API (Solana mainnet). Лише паперові угоди: без гаманця і без транзакцій.</string>
     <string name="slice_held">У тебе %1$s · зараз %2$s · сплачено %3$s</string>
-    <string name="slice_buy">Купити $%1$d (папір)</string>
-    <string name="slice_sell">Продати все (папір)</string>
+    <string name="slice_buy">Купити за $%1$d · уявні гроші</string>
+    <string name="slice_sell">Продати все · уявні гроші</string>
     <string name="slice_no_cash">Не вистачає віртуальних грошей.</string>
     <string name="slice_bought">Паперова купівля: %1$s</string>
     <string name="slice_sold">Паперовий продаж: %1$s</string>

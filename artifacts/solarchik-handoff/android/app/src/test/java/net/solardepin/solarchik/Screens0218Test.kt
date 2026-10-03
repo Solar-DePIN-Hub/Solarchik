@@ -103,7 +103,7 @@ class Screens0218Test {
         seed()
         val a = Robolectric.buildActivity(MainActivity::class.java).setup().visible().get()
         // Home: secretary card with credit
-        a.select(MainActivity.Tab.YARD)
+        a.select(MainActivity.Tab.SHIFT)
         shot(a, "01-home$sfx", a.getString(R.string.home_sec_title).takeIf { it.isNotBlank() })
         // Settings: secretary (balance, trial, language, player id) and Sol's voice
         a.select(MainActivity.Tab.SETTINGS)

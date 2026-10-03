@@ -47,6 +47,22 @@ class SlicePanel(private val host: MainActivity, private val onChange: () -> Uni
             addView(Ui.top(Ui.text(ctx, ctx.getString(R.string.slice_title), 18f, Ui.TEXT, 800), 4))
             addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.slice_body), 12f), 4))
             addView(Ui.top(Ui.pill(ctx, ctx.getString(R.string.slice_paper_pill), Ui.AMBER, filled = true), 10))
+            // 0.22.0 (owner: "not clear what happens here"): what it is, what you do, what is simulated
+            addView(Ui.top(Ui.column(ctx).apply {
+                tag = "slice-how"
+                setPadding(dp(12), dp(10), dp(12), dp(12))
+                background = Ui.rounded(Ui.withAlpha(Ui.CYAN, 0x14), dp(14).toFloat(), Ui.withAlpha(Ui.CYAN, 0x44), dp(1))
+                addView(Ui.label(ctx, ctx.getString(R.string.slice_how_title), Ui.CYAN))
+                listOf(R.string.slice_how_1 to Ui.TEXT, R.string.slice_how_2 to Ui.TEXT, R.string.slice_how_3 to Ui.AMBER).forEachIndexed { i, (res, color) ->
+                    val line = Ui.row(ctx, gap = 8).apply { gravity = Gravity.TOP }
+                    line.addView(Ui.text(ctx, (i + 1).toString(), 12f, Ui.INK, 900).apply {
+                        gravity = Gravity.CENTER
+                        background = Ui.rounded(color, dp(10).toFloat())
+                    }, LinearLayout.LayoutParams(dp(20), dp(20)))
+                    line.addView(Ui.weight(Ui.text(ctx, ctx.getString(res), 13f, color, 600).apply { setLineSpacing(0f, 1.2f) }))
+                    addView(Ui.top(line, 8))
+                }
+            }, 12))
             val row = Ui.row(ctx, gap = 12)
             row.addView(Ui.weight(Ui.column(ctx).apply {
                 addView(Ui.muted(ctx, ctx.getString(R.string.slice_value), 11f))
@@ -69,6 +85,7 @@ class SlicePanel(private val host: MainActivity, private val onChange: () -> Uni
             prices.isEmpty() -> box.addView(Ui.muted(ctx, ctx.getString(R.string.slice_loading), 12f))
             else -> box.addView(Ui.muted(ctx, ctx.getString(R.string.slice_source), 11f))
         }
+        if (book.lots.isEmpty()) box.addView(Ui.text(ctx, ctx.getString(R.string.slice_start_hint), 13f, Ui.CYAN, 800).apply { tag = "slice-start-hint" })
         SliceStocks.all.forEach { box.addView(row(it, book)) }
         box.addView(Ui.button(ctx, ctx.getString(R.string.slice_reset), Ui.Btn.GHOST) { store.reset(); onChange() })
     }
@@ -96,7 +113,7 @@ class SlicePanel(private val host: MainActivity, private val onChange: () -> Uni
             addView(Ui.top(Ui.muted(ctx, ctx.getString(R.string.slice_held, String.format(Locale.US, "%.4f", l.qty), usd(now), usd(l.costUsd)), 11f), 6))
         }
         val btns = Ui.row(ctx, gap = 8)
-        val buy = Ui.button(ctx, ctx.getString(R.string.slice_buy, SliceBook.TICKET_USD.toInt()), Ui.Btn.SECONDARY) {
+        val buy = Ui.button(ctx, ctx.getString(R.string.slice_buy, SliceBook.TICKET_USD.toInt()), if (book.lots.containsKey(s.mint)) Ui.Btn.SECONDARY else Ui.Btn.PRIMARY) {
             val price = prices[s.mint]?.usd ?: return@button
             val next = store.book().buy(s.mint, SliceBook.TICKET_USD, price)
             if (next == null) host.toast(ctx.getString(R.string.slice_no_cash)) else { store.save(next); host.toast(ctx.getString(R.string.slice_bought, s.name)) }

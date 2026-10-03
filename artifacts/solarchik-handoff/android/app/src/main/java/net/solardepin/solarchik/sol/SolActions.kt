@@ -113,6 +113,23 @@ data class ActionPlan(
 )
 
 object SolActions {
+    /**
+     * 0.22.0: what Sol is told about "my agents". One NFT used to show up twice ("Weather Station" from the chain
+     * card and "Метеостанція" from the paper desk of the same strategy). Now: devnet NFTs once per asset id; a
+     * paper entry of a strategy I already hold as a devnet NFT is dropped (kept only while its practice run is
+     * running, then marked with [practiceTag]); every name goes through [localize] (current app language).
+     */
+    fun mergeAgents(devnet: List<ActAgent>, paper: List<ActAgent>, practiceTag: String, localize: (String) -> String): List<ActAgent> {
+        val nft = devnet.distinctBy { it.id }.map { it.copy(name = localize(it.name)) }
+        val held = nft.mapNotNull { net.solardepin.solarchik.core.Catalog.baseOf(it.skuId)?.id ?: it.skuId.removeSuffix("-pro").ifBlank { null } }.toSet()
+        // a practice (paper) run of a strategy also held as an NFT stays startable, but never under the same name
+        val rest = paper.distinctBy { it.id }.map { p ->
+            val base = net.solardepin.solarchik.core.Catalog.baseOf(p.skuId)?.id ?: p.skuId
+            if (base !in held) p.copy(name = localize(p.name)) else p.copy(name = localize(p.name) + " · " + practiceTag)
+        }
+        return nft + rest
+    }
+
     val RISKS = listOf("calm", "balanced", "risky")
     val WINDOWS = listOf(5, 15, 60, 240)
 

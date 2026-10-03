@@ -27,6 +27,8 @@ data class CallItem(
     val durationSec: Int?,
     val chargedUsd: Double?,
     val trial: Boolean,
+    /** Why a missed call was not answered (worker: NEED_TOPUP, TRIAL_CALLER_CAP, TRIAL_DAILY_CAP). */
+    val reason: String = "",
 ) {
     /** Stable key across ids and old voicemail lines without a call id. */
     val key: String get() = owner + "|" + callId.ifBlank { "vm:$at" }
@@ -87,6 +89,7 @@ object CallInbox {
             durationSec = if (o.has("durationSec") && !o.isNull("durationSec")) o.optInt("durationSec").takeIf { it > 0 } else null,
             chargedUsd = if (o.has("chargedUsd")) o.optDouble("chargedUsd").takeIf { it.isFinite() } else null,
             trial = o.optBoolean("trial", false),
+            reason = o.optString("reason").trim().take(40),
         )
     }
 
@@ -163,7 +166,7 @@ object CallInbox {
 
     fun toJson(it: CallItem): JSONObject = JSONObject()
         .put("owner", it.owner).put("callId", it.callId).put("caller", it.caller).put("text", it.text).put("at", it.at)
-        .put("status", it.status).put("source", it.source).put("lang", it.lang).put("trial", it.trial)
+        .put("status", it.status).put("source", it.source).put("lang", it.lang).put("trial", it.trial).put("reason", it.reason)
         .apply { it.durationSec?.let { d -> put("durationSec", d) }; it.chargedUsd?.let { c -> put("chargedUsd", c) } }
         .put("summary", JSONObject().put("caller_name", it.callerName).put("intent", it.intent).put("urgency", it.urgency).put("notes", it.notes).put("callback", it.callback))
 

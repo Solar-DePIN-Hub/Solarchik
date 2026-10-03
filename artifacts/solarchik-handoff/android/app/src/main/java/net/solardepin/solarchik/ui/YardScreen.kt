@@ -59,7 +59,7 @@ class YardScreen(host: MainActivity) : Screen(host) {
     override fun build(): View = page {
         addView(hero())
         addView(homeCards())
-        addView(todayCard())
+        addView(todayCard().also { todayView = it })
         addView(feeCard())
         addView(weekCard())
         addView(crewCard())
@@ -151,10 +151,8 @@ class YardScreen(host: MainActivity) : Screen(host) {
     }
 
     private fun homeCards(): View = Ui.column(ctx, gap = 10).apply {
-        val sec = bold(intArrayOf(android.graphics.Color.parseColor("#2C6BFF"), android.graphics.Color.parseColor("#7A4DFF")), "home-secretary") {
-            host.select(MainActivity.Tab.SETTINGS, animate = true)
-            (host.screen(MainActivity.Tab.SETTINGS) as? SettingsScreen)?.focusSecretary()
-        }
+        // 0.22.0 (owner: an extra screen before the calls): the secretary card opens the Calls list directly
+        val sec = bold(intArrayOf(android.graphics.Color.parseColor("#2C6BFF"), android.graphics.Color.parseColor("#7A4DFF")), "home-secretary") { host.openCalls() }
         val top = Ui.row(ctx, gap = 12).apply { gravity = Gravity.CENTER_VERTICAL }
         top.addView(Ui.iconBadge(ctx, R.drawable.ic_call, android.graphics.Color.WHITE, 40))
         top.addView(Ui.weight(Ui.column(ctx).apply {
@@ -402,11 +400,13 @@ class YardScreen(host: MainActivity) : Screen(host) {
     private fun renderSolLine(streak: Int) {
         val day = save.today()
         val lang = host.lang
-        val greet = net.solardepin.solarchik.sol.SolGreeting.cached(ctx, day, lang)
+        val st = net.solardepin.solarchik.sol.SolState.of(save)
+        val greet = net.solardepin.solarchik.sol.SolGreeting.cached(ctx, day, lang, st.key)
         solLine.text = greet ?: SolScreen.tipOfDay(ctx, day)
         if (greet != null) return
         host.scope.launch {
-            val g = net.solardepin.solarchik.sol.SolGreeting.fetch(ctx, day, lang, ctx.getString(R.string.sol_greet_cue, streak))
+            val cue = if (st.signedToday) ctx.getString(R.string.sol_greet_cue_signed, streak) else ctx.getString(R.string.sol_greet_cue, streak)
+            val g = net.solardepin.solarchik.sol.SolGreeting.fetch(ctx, day, lang, cue, st)
             if (g != null) solLine.text = g
         }
     }
@@ -505,6 +505,14 @@ class YardScreen(host: MainActivity) : Screen(host) {
             save.clockedToday() -> clockIn()
             else -> host.startRun()
         }
+    }
+
+    private var todayView: View? = null
+
+    /** 0.22.0: the rooftop punch clock opens this screen on today's CLOCK IN card. */
+    fun focusToday() {
+        val v = todayView ?: return
+        v.post { scrollToView(v) }
     }
 
     /** The run's CLOCK IN card asked to sign right away (web onClock). */
