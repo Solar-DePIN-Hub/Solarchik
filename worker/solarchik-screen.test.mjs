@@ -6,6 +6,8 @@ import worker, {
   RPCS, rpcUrls, handleIncoming, finishNote, transcriptLine, CallRoom, AUTO_NOTE_EMPTY, NOTE_FIRST, voiceFor,
   solAction, solCtxLines, solSystem, readChatStream, resetDedupMemory, SOL_DEFAULT_VOICE, solRateOk,
   canonCallId, cleanInbox, isBlocked, saveTranscript, speakable,
+  solState, solStateLine,
+  chargeSession, takeTrialSlot, releaseTrialSlot, refundShortCall, isAdmin, ADMIN_USER_IDS, SHORT_CALL_SEC,
 } from "./solarchik-screen.js";
 
 const realFetch = globalThis.fetch;
@@ -579,4 +581,125 @@ test("phone secretary speaks to callers with one consistent polite form in Ukrai
   const v = voiceFor("uk", true);
   assert.match(v, /polite «ви» every time/);
   assert.match(v, /Never switch to «ти»/);
+});
+
+// ---- 0.22.0: owner exemption + trial counters that no longer leak on failed / empty calls ----
+
+const ADMIN_PHONE_ID = "06e76c23-f2f9-447c-8a9c-b70d14b1eadd";
+const ADMIN_ACCOUNT = "d61556d7-b92a-4a54-aa84-95897565439d";
+const today = () => new Date().toISOString().slice(0, 10);
+
+async function exhaust(env, caller = "+380638500117") {
+  for (let i = 0; i < 3; i++) await takeTrialSlot(env, caller);
+  await env.BALANCES.put("trial_day:" + today(), "30");
+}
+
+test("owner ids are admins; env ADMIN_USER_IDS adds more; strangers are not", () => {
+  assert.ok(ADMIN_USER_IDS.includes(ADMIN_ACCOUNT) && ADMIN_USER_IDS.includes(ADMIN_PHONE_ID));
+  assert.equal(isAdmin({}, ADMIN_PHONE_ID), true);
+  assert.equal(isAdmin({}, USER), false);
+  assert.equal(isAdmin({ ADMIN_USER_IDS: "x1, " + USER }, USER), true);
+  assert.equal(isAdmin({ OWNER_USER_ID: USER }, USER), false, "the demo line's fallback account is not exempt by itself");
+});
+
+test("live 3 Oct: the owner's phone id is answered after the caller cap, the daily cap and the trial are all used up", async () => {
+  const env = { BALANCES: kv(), OPENAI_API_KEY: "sk", OWNER_USER_ID: ADMIN_ACCOUNT };
+  roomsEnv(env);
+  await env.BALANCES.put("trial_granted:" + ADMIN_PHONE_ID, "1");
+  await env.BALANCES.put("trial:" + ADMIN_PHONE_ID, "0");
+  await exhaust(env);
+  await call(env, "/call-claim", { userId: ADMIN_PHONE_ID });
+  openai();
+  const r = await handleIncoming(env, "https://w", "rtc_owner1", ZADARMA);
+  assert.equal(r.body.accepted, true);
+  assert.equal(r.body.source, "owner");
+  assert.equal(r.body.trial, false);
+  const line = JSON.parse(await env.BALANCES.get("inbox:" + ADMIN_PHONE_ID))[0];
+  assert.equal(line.chargedUsd, 0);
+  assert.notEqual(line.status, "need_topup");
+  assert.equal(await env.BALANCES.get("trial_caller:" + today() + ":82287c3d48dc6c6d"), "3", "no shared slot used");
+  // remembered caller, no claim: still the owner's phone id, still answered
+  const r2 = await handleIncoming(env, "https://w", "rtc_owner2", ZADARMA);
+  assert.equal(r2.body.accepted, true);
+  assert.equal(r2.body.source, "owner");
+  const bal = await call(env, "/balance?userId=" + ADMIN_PHONE_ID, undefined, "GET");
+  assert.equal(bal.json.owner, true);
+  assert.equal((await call(env, "/balance?userId=" + USER, undefined, "GET")).json.owner, false);
+});
+
+test("a stranger reaching the owner account only as the demo line fallback keeps the caps (no free unlimited line)", async () => {
+  const env = { BALANCES: kv(), OPENAI_API_KEY: "sk", OWNER_USER_ID: ADMIN_ACCOUNT };
+  await env.BALANCES.put("trial_granted:" + ADMIN_ACCOUNT, "1");
+  await env.BALANCES.put("trial:" + ADMIN_ACCOUNT, "0");
+  await exhaust(env);
+  openai();
+  const r = await handleIncoming(env, "https://w", "rtc_stranger", ZADARMA);
+  assert.equal(r.body.accepted, false);
+  assert.ok(["TRIAL_CALLER_CAP", "TRIAL_DAILY_CAP"].includes(r.body.reason));
+  // the owner's own app session (/screen path, no caller) is never blocked
+  const c = await chargeSession(env, ADMIN_ACCOUNT, null);
+  assert.equal(c.ok, true);
+  assert.equal(c.source, "owner");
+});
+
+test("live 2 Oct miscount: failed accepts give the trial slot back, so 2 failures + 1 call use 1 slot, not 3", async () => {
+  const env = { BALANCES: kv(), OPENAI_API_KEY: "sk", OWNER_USER_ID: OWNER };
+  // each failed call tries accept twice (with the note tool, then without it)
+  openai({ acceptStatus: (n) => (n <= 4 ? 500 : 200) });
+  await handleIncoming(env, "https://w", "rtc_f1", ZADARMA);
+  await handleIncoming(env, "https://w", "rtc_f2", ZADARMA);
+  const ok = await handleIncoming(env, "https://w", "rtc_f3", ZADARMA);
+  assert.equal(ok.body.accepted, true);
+  assert.equal(ok.body.source, "trial");
+  assert.equal(await env.BALANCES.get("trial:" + OWNER), "0.4", "exactly one session of the 3 used");
+  assert.equal(await env.BALANCES.get("trial_caller:" + today() + ":82287c3d48dc6c6d"), "1");
+  assert.equal(await env.BALANCES.get("trial_day:" + today()), "1");
+  // the judge trial still runs out after 3 real calls (then the demo budget's caller cap applies)
+  await handleIncoming(env, "https://w", "rtc_f4", ZADARMA);
+  await handleIncoming(env, "https://w", "rtc_f5", ZADARMA);
+  assert.equal(await env.BALANCES.get("trial:" + OWNER), "0");
+  const over = await handleIncoming(env, "https://w", "rtc_f6", ZADARMA);
+  assert.equal(over.body.accepted, false);
+  assert.equal(over.body.reason, "TRIAL_CALLER_CAP");
+});
+
+test("an answered call that ends within 15 s with no word from the caller is not billed; a real one is", async () => {
+  const env = { BALANCES: kv() };
+  const caller = "+380501112233";
+  await takeTrialSlot(env, caller);
+  await env.BALANCES.put("trial:" + USER, "0.4");
+  await env.BALANCES.put("inbox:" + USER, JSON.stringify([{ callId: "rtc_s", status: "done", chargedUsd: 0.2 }]));
+  const base = { userId: USER, callId: "rtc_s", caller, source: "trial", chargedAt: Date.now() };
+  assert.equal(await refundShortCall(env, { ...base, durationSec: 40, heard: false }), false);
+  assert.equal(await refundShortCall(env, { ...base, durationSec: 5, heard: true }), false);
+  assert.equal(await refundShortCall(env, { ...base, durationSec: SHORT_CALL_SEC, heard: false }), true);
+  assert.equal(await env.BALANCES.get("trial:" + USER), "0.6");
+  assert.equal(await env.BALANCES.get("trial_day:" + today()), "0");
+  const line = JSON.parse(await env.BALANCES.get("inbox:" + USER))[0];
+  assert.equal(line.chargedUsd, 0);
+  assert.equal(line.refunded, true);
+  await env.BALANCES.put(USER, "1");
+  assert.equal(await refundShortCall(env, { ...base, source: "paid", durationSec: 3, heard: false }), true);
+  assert.equal(await env.BALANCES.get(USER), "1.2");
+  assert.equal(await refundShortCall(env, { ...base, source: "owner", durationSec: 3, heard: false }), false);
+  await releaseTrialSlot(env, caller); // never below zero
+  assert.equal(await env.BALANCES.get("trial_day:" + today()), "0");
+});
+
+test("0.22.0 stale streak: the fresh player state comes right after the persona and says not to ask for 1200 m once signed", () => {
+  const st = solState({ streak: 1, signedToday: true, clockedToday: true, todayMeters: 1340 });
+  assert.deepEqual(st, { streak: 1, signedToday: true, clockedToday: true, todayMeters: 1340 });
+  assert.equal(solState({ streak: "x" }), null);
+  assert.equal(solState(null), null);
+  const sys = solSystem("uk", "yard", { agents: [], market: [], canMintFree: false }, "Серія: 1 день. Сьогодні підписано.", st);
+  const iState = sys.indexOf("PLAYER STATE NOW");
+  assert.ok(iState > 0 && iState < sys.indexOf("Game facts"), "state before the facts");
+  assert.match(sys, /streak 1 day; today's CLOCK IN is already signed\. Do not ask the player to run 1200 m/);
+  assert.match(sys, /Нагадуй лише тоді, коли сьогодні ще не підписано/);
+  // the app already sends the line in its context: not repeated
+  const line = solStateLine(st);
+  const sys2 = solSystem("en", "yard", { agents: [], market: [], canMintFree: false }, line + "\nnote", st);
+  assert.equal(sys2.split("PLAYER STATE NOW (fresh").length - 1, 1);
+  assert.match(solStateLine({ streak: 0, signedToday: false, clockedToday: false, todayMeters: 300 }), /not signed yet; today's best run is 300 m of 1200 m/);
+  assert.match(sys2, /never "windows 15\/60"/);
 });

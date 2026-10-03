@@ -439,17 +439,25 @@ export function callParties(sipHeaders, env = {}) {
 
 /** KV phone:<number> -> userId (set with POST /phone); the secretary's own number -> OWNER_USER_ID. */
 export async function playerFor(env, parties) {
+  return (await playerRoute(env, parties)).userId;
+}
+
+/**
+ * playerFor plus how the player was found: "phone" (KV phone map), "claim" (an armed claim or a caller the
+ * demo line remembers), "fallback" (nobody claimed the demo line: its OWNER_USER_ID account), "" (none).
+ */
+export async function playerRoute(env, parties) {
   const nums = parties.candidates?.length ? parties.candidates : [parties.forwardedFrom, parties.to].filter(Boolean);
   for (const n of nums) {
     const mapped = await env.BALANCES.get("phone:" + n);
-    if (mapped) return mapped;
+    if (mapped) return { userId: mapped, via: "phone" };
   }
   if (isOwnLine(env, parties)) {
     const claimed = await claimedPlayer(env, parties.caller);
-    if (claimed) return claimed;
-    if (env.OWNER_USER_ID) return String(env.OWNER_USER_ID);
+    if (claimed) return { userId: claimed, via: "claim" };
+    if (env.OWNER_USER_ID) return { userId: String(env.OWNER_USER_ID), via: "fallback" };
   }
-  return "";
+  return { userId: "", via: "" };
 }
 
 /**
@@ -530,6 +538,25 @@ export const TRIAL_DAILY_CAP = 30;
 export const TRIAL_CALLER_CAP = 3;
 const COUNTER_TTL = 2 * 86400;
 
+/**
+ * Owner / admin player ids: never blocked by the starter credit or the shared trial caps, and their own calls
+ * are not billed (source "owner"). d61556d7… is the owner's account; 06e76c23… is the player id of the owner's
+ * phone (the app armed the demo line for it and the line remembers its caller number). env ADMIN_USER_IDS
+ * (comma-separated) adds more. Calls that only reach an admin id as the demo line's unclaimed fallback
+ * (strangers dialling +380914810885) are NOT exempt: they keep the demo budget and its caps.
+ */
+export const ADMIN_USER_IDS = ["d61556d7-b92a-4a54-aa84-95897565439d", "06e76c23-f2f9-447c-8a9c-b70d14b1eadd"];
+
+export function isAdmin(env, userId) {
+  if (!validUserId(userId)) return false;
+  if (ADMIN_USER_IDS.includes(userId)) return true;
+  return String(env?.ADMIN_USER_IDS || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .includes(userId);
+}
+
 function capOf(v, d) {
   if (v === undefined || v === null || v === "") return d;
   const n = Number(v);
@@ -585,16 +612,37 @@ export async function takeTrialSlot(env, caller = null, now = Date.now()) {
 }
 
 /**
+ * Gives back a slot taken by takeTrialSlot (same day [now]) when the session never really happened: the
+ * accept failed, or the call ended in seconds with no word from the caller. Before 0.22.0 only the credit was
+ * refunded and the counters kept the slot, so two failed accepts plus one call used up a caller's whole day
+ * (live 2 Oct: trial_caller = 3 for +…0117 while its credit was back to $0.60).
+ */
+export async function releaseTrialSlot(env, caller = null, now = Date.now()) {
+  const day = dayKey(now);
+  const dec = async (key) => {
+    const n = Number((await env.BALANCES.get(key)) || 0);
+    if (n > 0) await env.BALANCES.put(key, String(n - 1), { expirationTtl: COUNTER_TTL });
+  };
+  await dec("trial_day:" + day);
+  if (caller !== null) await dec("trial_caller:" + day + ":" + (await sha16(caller || "unknown")));
+}
+
+/**
  * One session for userId: starter credit first (within the caps), then paid credit.
  * -> { ok, source: "trial" | "paid", usd (total left), refund() } or { ok: false, reason, usd }.
  * caller = the caller number for phone calls (per-caller cap), null for /screen.
  */
-export async function chargeSession(env, userId, caller = null) {
+export async function chargeSession(env, userId, caller = null, { fallback = false } = {}) {
   const paid = await getUsd(env, userId);
   const t = await trialOf(env, userId);
+  if (isAdmin(env, userId) && !fallback) {
+    // The owner's own account and phone: never blocked, never billed, and no shared trial slot is used.
+    return { ok: true, source: "owner", usd: cents(paid + t.usd), trialUsd: t.usd, refund: async () => {} };
+  }
   let reason = "";
   if (t.usd >= SESSION_USD - 1e-9) {
-    reason = await takeTrialSlot(env, caller);
+    const takenAt = Date.now();
+    reason = await takeTrialSlot(env, caller, takenAt);
     if (!reason) {
       if (!t.granted) await env.BALANCES.put("trial_granted:" + userId, String(Date.now()));
       const left = cents(t.usd - SESSION_USD);
@@ -607,6 +655,7 @@ export async function chargeSession(env, userId, caller = null) {
         refund: async () => {
           const cur = Number((await env.BALANCES.get("trial:" + userId)) || 0);
           await env.BALANCES.put("trial:" + userId, String(cents(cur + SESSION_USD)));
+          await releaseTrialSlot(env, caller, takenAt);
         },
       };
     }
@@ -901,7 +950,8 @@ export async function handleIncoming(env, origin, callId, sipHeaders, dedupKeys 
     return { body: { ok: true, duplicate: true }, meta: null };
   };
   if (await callMark(env, callId)) return dup();
-  const userId = await playerFor(env, parties);
+  const route = await playerRoute(env, parties);
+  const userId = route.userId;
   const own = isOwnLine(env, parties);
   const lang = await langOf(env, userId);
   const base = { type: "realtime", model: "gpt-realtime", instructions: voiceFor(lang, false) };
@@ -913,7 +963,8 @@ export async function handleIncoming(env, origin, callId, sipHeaders, dedupKeys 
     }).catch(() => null);
 
   if (!userId) {
-    const reason = await takeTrialSlot(env, parties.caller);
+    const takenAt = Date.now();
+    const reason = await takeTrialSlot(env, parties.caller, takenAt);
     console.log(
       JSON.stringify({
         event: "sip_unmapped",
@@ -929,7 +980,10 @@ export async function handleIncoming(env, origin, callId, sipHeaders, dedupKeys 
       return { body: { accepted: false, rejected: Boolean(rej?.ok), error: "NEED_TOPUP", reason, player: false }, meta: null };
     }
     const accept = await acceptCall(env, callId, base);
-    if (!accept.ok) await forgetDelivery(env, dedupKeys);
+    if (!accept.ok) {
+      await releaseTrialSlot(env, parties.caller, takenAt);
+      await forgetDelivery(env, dedupKeys);
+    }
     return { body: { accepted: accept.ok, status: accept.status, player: false, trial: true, source: "demo", lang }, meta: null };
   }
 
@@ -944,11 +998,12 @@ export async function handleIncoming(env, origin, callId, sipHeaders, dedupKeys 
     return { body: { accepted: false, rejected: Boolean(rej?.ok), blocked: true }, meta: null };
   }
   await putMark(env, callId, { userId, caller: parties.caller, at, state: "accepting" });
-  let charge = await chargeSession(env, userId, parties.caller);
+  let charge = await chargeSession(env, userId, parties.caller, { fallback: route.via === "fallback" });
   if (!charge.ok && own) {
     // The demo line: its owner pays when they can; otherwise the shared demo budget answers.
-    const reason = await takeTrialSlot(env, parties.caller);
-    charge = reason ? { ...charge, reason } : { ok: true, source: "demo", usd: charge.usd, refund: async () => {} };
+    const takenAt = Date.now();
+    const reason = await takeTrialSlot(env, parties.caller, takenAt);
+    charge = reason ? { ...charge, reason } : { ok: true, source: "demo", usd: charge.usd, refund: async () => releaseTrialSlot(env, parties.caller, takenAt) };
   }
   if (!charge.ok) {
     await putMark(env, callId, { userId, caller: parties.caller, at, state: "rejected" });
@@ -956,8 +1011,8 @@ export async function handleIncoming(env, origin, callId, sipHeaders, dedupKeys 
     const rej = await reject();
     return { body: { accepted: false, rejected: Boolean(rej?.ok), error: "NEED_TOPUP", reason: charge.reason }, meta: null };
   }
-  const trial = charge.source !== "paid";
-  const chargedUsd = charge.source === "demo" ? 0 : SESSION_USD;
+  const trial = charge.source === "trial" || charge.source === "demo";
+  const chargedUsd = charge.source === "demo" || charge.source === "owner" ? 0 : SESSION_USD;
   await addInbox(env, userId, { callId, caller: parties.caller, text: "Call answered by the secretary. Note follows.", at, status: "pending", chargedUsd, trial, source: charge.source, lang });
   const tool = {
     type: "mcp",
@@ -995,11 +1050,35 @@ export async function handleIncoming(env, origin, callId, sipHeaders, dedupKeys 
   await putMark(env, callId, { userId, caller: parties.caller, at, state: "accepted", lang });
   return {
     body: { accepted: true, status: accept.status, player: true, noteTool: withTool, usd: charge.usd, trial, source: charge.source, lang },
-    meta: { userId, caller: parties.caller, lang, noteTool: withTool },
+    meta: { userId, caller: parties.caller, lang, noteTool: withTool, source: charge.source, chargedAt: at },
   };
 }
 
 // ---- After the call: a note even when the model never called the tool ----
+
+/** A call that ends within this many seconds without one word from the caller is not billed. */
+export const SHORT_CALL_SEC = 15;
+
+/**
+ * Refunds a session that never really happened: answered, but the caller hung up within SHORT_CALL_SEC
+ * seconds without saying anything (pocket dial, instant hang-up). Trial: credit back and the shared slot
+ * released; demo budget: slot released; paid: credit back; owner: nothing was charged. Returns true when refunded.
+ */
+export async function refundShortCall(env, { userId, callId, caller, source, chargedAt, durationSec, heard }) {
+  if (heard || !userId || !Number.isFinite(durationSec) || durationSec > SHORT_CALL_SEC) return false;
+  if (source === "owner" || !source) return false;
+  if (source === "trial") {
+    const cur = Number((await env.BALANCES.get("trial:" + userId)) || 0);
+    await env.BALANCES.put("trial:" + userId, String(cents(cur + SESSION_USD)));
+    await releaseTrialSlot(env, caller, chargedAt || Date.now());
+  } else if (source === "demo") {
+    await releaseTrialSlot(env, caller, chargedAt || Date.now());
+  } else if (source === "paid") {
+    await setUsd(env, userId, (await getUsd(env, userId)) + SESSION_USD);
+  } else return false;
+  await patchInbox(env, userId, callId, { chargedUsd: 0, refunded: true }, { create: false });
+  return true;
+}
 
 export const AUTO_NOTE_EMPTY = "Call answered; the caller left no details.";
 
@@ -1115,7 +1194,15 @@ export class CallRoom {
       this.taken = false;
     }
     else if (out.meta?.userId) {
-      await this.state.storage.put({ state: "accepted", callId: b.callId, userId: out.meta.userId, caller: out.meta.caller, startedAt: Date.now() });
+      await this.state.storage.put({
+        state: "accepted",
+        callId: b.callId,
+        userId: out.meta.userId,
+        caller: out.meta.caller,
+        startedAt: Date.now(),
+        source: out.meta.source || "",
+        chargedAt: out.meta.chargedAt || Date.now(),
+      });
       await this.state.storage.setAlarm(Date.now() + 16 * 60 * 1000);
       this.watch(b.callId, out.meta.userId, out.meta.caller).catch((e) =>
         console.log(JSON.stringify({ event: "sideband_error", callId: String(b.callId).slice(-8), detail: String(e?.message || e).slice(0, 120) })),
@@ -1165,6 +1252,12 @@ export class CallRoom {
     try {
       await saveTranscript(this.env, callId, lines, durationSec);
       await patchInbox(this.env, userId, callId, { durationSec, transcriptLines: lines.length }, { create: false });
+      const heard = lines.some((l) => l && l.who === "caller" && l.text);
+      const source = await this.state.storage.get("source");
+      const chargedAt = await this.state.storage.get("chargedAt");
+      if (await refundShortCall(this.env, { userId, callId, caller, source, chargedAt, durationSec, heard })) {
+        console.log(JSON.stringify({ event: "short_call_refunded", callId: String(callId).slice(-8), source, durationSec }));
+      }
     } catch (e) {
       console.log(JSON.stringify({ event: "transcript_save_failed", callId: String(callId).slice(-8), detail: String(e?.message || e).slice(0, 80) }));
     }
@@ -1233,17 +1326,18 @@ const SOL_UK = `Ти — Сол (Sol), маленький теплий соня�
 Пиши грамотною живою українською: правильні відмінки й узгодження, природний порядок слів, звертання на «ти». Без кальок з англійської, без русизмів, без канцеляриту. Англійські слова лише як назви: Solana, SOL, devnet, NFT, Pro, CLOCK IN.
 Підмет — «ти», а не «твій» (помилка: «Твій сьогодні пробіг…»). Стать гравця невідома, тож уникай дієслів минулого часу про гравця (пробіг/пробігла): кажи «Сьогодні в тебе вже понад кілометр», «тобі вдалося», теперішній час.
 Агенти — це «агент» (чоловічий рід): «Агент „Метеостанція“ ще не твій», ніколи не узгоджуй прикметник з назвою агента («Метеостанція ще не ваш» — помилка). Ніколи не кажи «ви», «ваш», «натисніть» — лише «ти», «твій», «натисни».
-CLOCK IN — це щоденний підпис дня гаманцем після 1200 м забігу. Нагадуючи, кажи конкретно: «Пробіжи 1200 м і натисни „Підписати сьогодні“ — це CLOCK IN на сьогодні». Ніколи не кажи «підписати гаманець».
+CLOCK IN — це щоденний підпис дня гаманцем після 1200 м забігу. Серію й те, чи підписано сьогодні, бери ЛИШЕ з PLAYER STATE NOW (воно свіже й важливіше за все, що казалося раніше в чаті). Нагадуй лише тоді, коли сьогодні ще не підписано, і кажи конкретно: «Пробіжи 1200 м і натисни „Підписати сьогодні“ — це CLOCK IN на сьогодні». Якщо сьогодні вже підписано — не проси бігти 1200 м, скажи безособово «День уже підписано» / «сьогодні зараховано» (не «ти підписав») і назви серію. Ніколи не кажи «підписати гаманець».
 Відповідай саме на питання, 1–2 короткі речення (до 180 символів). Без markdown, списків, емодзі й символів на кшталт #, *, /: назви агентів пиши як у CONTEXT, а номер — «номер 11».
 Попросили жарт — розкажи один короткий добрий жарт українською (можна про сонце, роботів чи дахи), без пояснень.`;
 const SOL_EN = `You are Sol, a small warm solar robot companion in the game Solarchik and the player's real friend.
 Reply in natural, casual English. Answer exactly what was asked in 1-2 short sentences (under 180 characters). No markdown, lists, emoji or symbols like #, * or /: write an agent's number as "number 11".
-CLOCK IN is the daily signature of the day with the wallet after a 1200 m run. When you remind the player, say exactly what to do: "Run 1200 m, then tap Sign today to CLOCK IN." Never say "sign your wallet".
+CLOCK IN is the daily signature of the day with the wallet after a 1200 m run. Take the streak and whether today is signed ONLY from PLAYER STATE NOW (it is fresh and beats anything said earlier in the chat). Remind only when today is not signed, and say exactly what to do: "Run 1200 m, then tap Sign today to CLOCK IN." If today is already signed, never ask for the 1200 m run: say the day counts and name the streak. Never say "sign your wallet".
 If asked for a joke, tell one short, clean, original joke (sun, robots or rooftops are fine), no explanation.`;
 
 const SOL_ACT_RULES = `You CAN act on the player's agents through the app, and you must never say you can only watch or that agents cannot be controlled.
 Actions: start_agent, stop_agent (pause), agent_status, set_strategy (risk calm/balanced/risky and/or windows in minutes 5/15/60/240, or copy a market listing as a template), buy_strategy (a market listing), mint_free (the free agent).
-When the player asks for one of these, call propose_action with ids from CONTEXT only, and say in one short sentence what will happen and that a confirmation card will appear. Nothing happens until the player taps Confirm, so never claim it is already done.
+When the player asks for one of these, call propose_action with ids from CONTEXT only, and say in one short sentence what will happen and that a confirmation card will appear.
+For set_strategy speak in plain words, no jargon: windows are how long each crypto "price up or down" market lasts (say "15-minute and 1-hour markets", never "windows 15/60"); risk is how big the bets are and how picky the agent is (calm = smaller bets, enters rarely; risky = bigger bets, enters more often). Everything runs on devnet with test money. Nothing happens until the player taps Confirm, so never claim it is already done.
 If the player names an agent or listing that is not in CONTEXT, do NOT pick another one: say you cannot find it and name what they have.
 For agents that are not owned yet (owned=false), start_agent is still allowed: the card will offer to mint or buy it first.`;
 
@@ -1329,15 +1423,41 @@ export function solAction(raw, ctx) {
   return agent ? { type, agent: agent.id } : null;
 }
 
-export function solSystem(lang, scene, ctx, context) {
+/**
+ * 0.22.0: the player's streak / today's CLOCK IN as the app read it for THIS message ({streak, signedToday,
+ * clockedToday, todayMeters}); null when absent or malformed (older apps).
+ */
+export function solState(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const streak = Number(raw.streak);
+  if (!Number.isFinite(streak) || streak < 0 || streak > 100000) return null;
+  const m = Number(raw.todayMeters);
+  return { streak: Math.floor(streak), signedToday: raw.signedToday === true, clockedToday: raw.clockedToday === true, todayMeters: Number.isFinite(m) && m > 0 ? Math.floor(m) : 0 };
+}
+
+export function solStateLine(st) {
+  if (!st) return "";
+  const days = st.streak === 1 ? "1 day" : st.streak + " days";
+  const today = st.signedToday
+    ? "today's CLOCK IN is already signed. Do not ask the player to run 1200 m or to sign today; the day is done"
+    : st.clockedToday
+      ? "today's run (" + st.todayMeters + " m) unlocked CLOCK IN but it is not signed yet: the next step is to tap Sign today"
+      : "today is not signed yet; today's best run is " + st.todayMeters + " m of 1200 m";
+  return "PLAYER STATE NOW (fresh from the phone, overrides anything said earlier): CLOCK IN streak " + days + "; " + today + ".";
+}
+
+export function solSystem(lang, scene, ctx, context, state = null) {
   const uk = lang === "uk";
+  // the app (0.22.0) already puts the same line first in its context; older apps send no state at all
+  const stateLine = state && !String(context || "").includes("PLAYER STATE NOW") ? solStateLine(state) : "";
   return [
     uk ? SOL_UK : SOL_EN,
+    stateLine,
+    context ? "What is happening now: " + context : "",
     scene === "run" ? (uk ? SOL_RUN_UK : SOL_RUN_EN) : "",
     SOL_FACTS,
     uk ? "Факти англійською лише для тебе; гравцеві відповідай українською." : "",
     SOL_ACT_RULES,
-    context ? "What is happening now: " + context : "",
     "CONTEXT\n" + solCtxLines(ctx),
   ].filter(Boolean).join("\n\n");
 }
@@ -1419,7 +1539,7 @@ async function solChatRoute(env, request) {
   const lang = solLangOf(input.language ?? input.lang);
   const scene = clip(input.scene, 12).toLowerCase() === "run" ? "run" : "yard";
   const ctx = solCtx(input);
-  const system = solSystem(lang, scene, ctx, clip(input.context, 500));
+  const system = solSystem(lang, scene, ctx, clip(input.context, 800), solState(input.state));
   const messages = solMessages(system, input.history, message);
   const stream = input.stream === true;
   const tried = [];
@@ -1744,7 +1864,7 @@ export default {
       console.log(JSON.stringify({ event: "app_seen", route: "balance", userId: userId.slice(0, 80) }));
       const paidUsd = await getUsd(env, userId);
       const t = await trialOf(env, userId);
-      return json({ userId, usd: cents(paidUsd + t.usd), paidUsd, trialUsd: t.usd, trial: t.usd > 0, sessionUsd: SESSION_USD });
+      return json({ userId, usd: cents(paidUsd + t.usd), paidUsd, trialUsd: t.usd, trial: t.usd > 0, sessionUsd: SESSION_USD, owner: isAdmin(env, userId) });
     }
 
     if (url.pathname === "/secretary-lang" && (request.method === "GET" || request.method === "POST")) {
