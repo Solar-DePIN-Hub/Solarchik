@@ -1341,8 +1341,10 @@ For set_strategy speak in plain words, no jargon: windows are how long each cryp
 If the player names an agent or listing that is not in CONTEXT, do NOT pick another one: say you cannot find it and name what they have.
 For agents that are not owned yet (owned=false), start_agent is still allowed: the card will offer to mint or buy it first.`;
 
-const SOL_RUN_UK = "Зараз гравець біжить дахами. На подію забігу відповідай ОДНИМ коротким живим реченням до 70 символів.";
-const SOL_RUN_EN = "The player is running across the roofs right now. React to a run event with ONE short lively sentence under 70 characters.";
+const SOL_RUN_UK = "ЗАРАЗ ТИ В ГРІ: гравець біжить дахами (раннер Solarchik). Говори ПРО ГРУ: забіг, метри, рекорд, сонця, серця, комбо, розділи, 1200 м для CLOCK IN, гараж і скіни, щоденні квести, поради як бігти далі. Про агентів, стратегії, гаманець чи налаштування НЕ говори, якщо гравець прямо про них не спитав. На запитання гравця відповідай прямо, одним-двома короткими реченнями до 120 символів; на подію забігу — одним живим реченням до 70 символів. Без минулого часу з родом про гравця: «у тебе 412 м», а не «ти пробіг».";
+const SOL_RUN_EN = "YOU ARE IN THE GAME NOW: the player is running across the roofs (the Solarchik runner). Talk ABOUT THE GAME: the run, metres, record, suns, hearts, combo, chapters, 1200 m for CLOCK IN, garage and skins, daily quests, tips to run further. Do NOT talk about agents, strategies, wallet or settings unless the player asks about them directly. Answer the player's question directly in one or two short sentences under 120 characters; react to a run event with one lively sentence under 70 characters.";
+/** In a run, the agent tools and agent context are only offered when the player names them. */
+export const RUN_AGENT_WORDS = /агент|стратег|гаман|мінт|nft|ринок|купи|продай|agent|strateg|wallet|mint|market|buy|sell/i;
 
 const PROPOSE_TOOL = {
   type: "function",
@@ -1446,19 +1448,21 @@ export function solStateLine(st) {
   return "PLAYER STATE NOW (fresh from the phone, overrides anything said earlier): CLOCK IN streak " + days + "; " + today + ".";
 }
 
-export function solSystem(lang, scene, ctx, context, state = null) {
+export function solSystem(lang, scene, ctx, context, state = null, agentsAsked = true) {
   const uk = lang === "uk";
+  const run = scene === "run";
   // the app (0.22.0) already puts the same line first in its context; older apps send no state at all
   const stateLine = state && !String(context || "").includes("PLAYER STATE NOW") ? solStateLine(state) : "";
   return [
     uk ? SOL_UK : SOL_EN,
+    run ? (uk ? SOL_RUN_UK : SOL_RUN_EN) : "",
     stateLine,
     context ? "What is happening now: " + context : "",
-    scene === "run" ? (uk ? SOL_RUN_UK : SOL_RUN_EN) : "",
     SOL_FACTS,
     uk ? "Факти англійською лише для тебе; гравцеві відповідай українською." : "",
-    SOL_ACT_RULES,
-    "CONTEXT\n" + solCtxLines(ctx),
+    run && !agentsAsked ? "" : SOL_ACT_RULES,
+    run && !agentsAsked ? "" : "CONTEXT\n" + solCtxLines(ctx),
+    run ? (uk ? SOL_RUN_UK : SOL_RUN_EN) : "",
   ].filter(Boolean).join("\n\n");
 }
 
@@ -1539,7 +1543,10 @@ async function solChatRoute(env, request) {
   const lang = solLangOf(input.language ?? input.lang);
   const scene = clip(input.scene, 12).toLowerCase() === "run" ? "run" : "yard";
   const ctx = solCtx(input);
-  const system = solSystem(lang, scene, ctx, clip(input.context, 800), solState(input.state));
+  // 0.22.3: in a run the agent tools/context are offered only when the player names agents (a voice line like
+  // "що тут робити?" used to come back as a start_agent card, or an empty agent_status reply = silence)
+  const agentsAsked = scene !== "run" || RUN_AGENT_WORDS.test(message);
+  const system = solSystem(lang, scene, ctx, clip(input.context, 800), solState(input.state), agentsAsked);
   const messages = solMessages(system, input.history, message);
   const stream = input.stream === true;
   const tried = [];
@@ -1555,11 +1562,9 @@ async function solChatRoute(env, request) {
           model: m,
           messages,
           temperature: 0.7,
-          max_tokens: scene === "run" ? 80 : 170,
+          max_tokens: scene === "run" ? 100 : 170,
           stream: true,
-          tools: [PROPOSE_TOOL],
-          tool_choice: "auto",
-          parallel_tool_calls: false,
+          ...(agentsAsked && { tools: [PROPOSE_TOOL], tool_choice: "auto", parallel_tool_calls: false }),
         }),
         signal: AbortSignal.timeout(9000),
       });
@@ -1583,13 +1588,18 @@ async function solChatRoute(env, request) {
       raw = null;
     }
     const action = solAction(raw, ctx);
-    let reply = clip(text, scene === "run" ? 140 : 360);
+    let reply = clip(text, scene === "run" ? 160 : 360);
     if (!reply && action) reply = readyLine(lang, action);
+    if (!reply && action?.type === "agent_status") {
+      const a = ctx.agents.find((x) => x.id === action.agent);
+      if (a) reply = lang === "uk" ? a.name + (a.running ? ": працює." : ": зараз на паузі.") : a.name + (a.running ? " is running." : " is paused right now.");
+    }
     if (!reply && raw && !action) {
       const names = ctx.agents.map((a) => a.name).filter(Boolean).slice(0, 4).join(", ");
       reply = lang === "uk" ? "Не зрозумів, про якого агента мова." + (names ? " У тебе є: " + names + "." : "") : "I couldn't tell which agent you mean." + (names ? " You have: " + names + "." : "");
       console.log(JSON.stringify({ event: "sol_action_unmatched", type: raw.type, agentLen: String(raw.agent || "").length, agentHead: String(raw.agent || "").slice(0, 12) }));
     }
+    if (!reply && !action) reply = scene === "run" ? (lang === "uk" ? "Біжи далі, я з тобою! Спитай ще раз — підкажу." : "Keep running, I'm with you! Ask again and I'll help.") : lang === "uk" ? "Я тут. Спитай ще раз, будь ласка." : "I'm here. Please ask again.";
     console.log(JSON.stringify({ event: "sol_chat", lang, scene, model, action: action?.type || "none", ttftMs: first ? first - t0 : null, ms: Date.now() - t0 }));
     return { ok: true, reply, action, raw: raw?.type || "none", language: lang, provider: "openai", model, ttftMs: first ? first - t0 : null, ms: Date.now() - t0, tried };
   };

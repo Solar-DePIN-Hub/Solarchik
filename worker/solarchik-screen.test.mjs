@@ -703,3 +703,14 @@ test("0.22.0 stale streak: the fresh player state comes right after the persona 
   assert.match(solStateLine({ streak: 0, signedToday: false, clockedToday: false, todayMeters: 300 }), /not signed yet; today's best run is 300 m of 1200 m/);
   assert.match(sys2, /never "windows 15\/60"/);
 });
+
+test("0.22.3 run scene: game first; agent rules/context only when the player names agents", async () => {
+  const { solSystem: sys, RUN_AGENT_WORDS } = await import("./solarchik-screen.js");
+  const ctx = { agents: [{ id: "paper:x", name: "SOL-скальпер", running: false, owned: true, windows: [] }], market: [], canMintFree: false };
+  const plain = sys("uk", "run", ctx, "Забіг: 412 м", null, false);
+  assert.match(plain, /ЗАРАЗ ТИ В ГРІ/);
+  assert.ok(!plain.includes("SOL-скальпер"), "no agent list in a game-only question");
+  assert.ok(sys("uk", "run", ctx, "", null, true).includes("SOL-скальпер"));
+  assert.ok(!RUN_AGENT_WORDS.test("Що тут робити?") && !RUN_AGENT_WORDS.test("Як побити рекорд?"));
+  assert.ok(RUN_AGENT_WORDS.test("запусти мого агента") && RUN_AGENT_WORDS.test("change my strategy"));
+});
