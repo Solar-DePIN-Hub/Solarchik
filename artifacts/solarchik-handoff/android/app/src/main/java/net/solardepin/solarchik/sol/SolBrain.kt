@@ -77,7 +77,12 @@ class SolBrain(
         var text = StringBuilder()
         var done: JsonObject? = null
         var first: Long? = null
-        val ok = try {
+        // 0.22.3: one quick retry when the first call fails before any text (cold connection / worker isolate)
+        var attempt = 0
+        var ok: Boolean
+        while (true) {
+        text = StringBuilder(); done = null; first = null
+        ok = try {
             stream(url, body(message, language, scene, ctx, history, context, state)) { line ->
                 val o = runCatching { json.parseToJsonElement(line) as? JsonObject }.getOrNull() ?: return@stream
                 val d = (o["d"] as? JsonPrimitive)?.content
@@ -93,6 +98,10 @@ class SolBrain(
         } catch (_: Throwable) {
             false
         }
+        val good = ok && (done?.get("ok") as? JsonPrimitive)?.content == "true"
+        if (good || text.isNotEmpty() || attempt >= 1 || System.currentTimeMillis() - t0 > 9_000) break
+        attempt++
+        }
         val fin = done
         if (ok && fin != null && (fin["ok"] as? JsonPrimitive)?.content == "true") {
             val reply = (fin["reply"] as? JsonPrimitive)?.content?.trim().orEmpty().ifBlank { text.toString().trim() }
@@ -101,6 +110,8 @@ class SolBrain(
                 return Reply(SolRules.tidy(reply), action, Source.WORKER, (fin["model"] as? JsonPrimitive)?.content.orEmpty(), first, System.currentTimeMillis() - t0)
             }
         }
+        // In a run the market route is wrong: it is the agent/strategy desk (it answered game questions about agents)
+        if (scene == "run") return Reply("", SolActions.parseLocal(message, ctx), Source.OFFLINE, "", null, System.currentTimeMillis() - t0)
         // 2. market sol-act (it falls back to the phone parser itself when unreachable)
         val m = try { market.ask(message, language, ctx, history) } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { SolActReply("", SolActions.parseLocal(message, ctx), offline = true) }
         if (!m.offline && (m.reply.isNotBlank() || m.action != null)) {

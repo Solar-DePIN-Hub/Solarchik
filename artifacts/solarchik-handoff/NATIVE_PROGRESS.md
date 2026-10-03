@@ -660,3 +660,8 @@ Owner feedback from the 0.21.7 phone test (9 items) plus the secretary's duplica
 - CLOCK IN: the neon sign is the button (new `RoofFrame.SIGN` hit area). The status pill under the sign shows the state (run first / sign / streak · new day at HH:MM). In portrait the pill sits right under the clock.
 - One dominant PLAY button ("Забіг дахами"): bigger, bottom-right in landscape and bottom-centre in portrait, with a gentle idle pulse (respects the system "remove animations" setting), a gold glow and a "Рекорд N м" sub-line. Every label dips on press.
 - The real emulator still can't boot here (host kernel BUG in kvm x86.c:702 at vCPU creation), so screens are Robolectric renders at 1280×800 dp (owner's 16:10 tablet), 800×1280 dp and 411×914 dp.
+
+## 0.22.3 (versionCode 78)
+- In-game Sol talks about the game. The worker only offers agent tools/context when the player names agents. The app never falls back to the agent desk in a run, retries one failed first call, and is never silent (empty reply or empty voice -> "Не розчув…").
+- The first rooftop visit starts the tour automatically, once (persisted), after the activity is resumed. Skip on every step, replay from "?".
+- Tests 348 / 11 skipped / 0 failed.

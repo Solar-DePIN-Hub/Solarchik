@@ -467,7 +467,9 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
         if (android.animation.ValueAnimator.areAnimatorsEnabled()) ctaPulse?.start()
         refreshPrices()
         roof.start()
-        if (offer && card == null) overlay.post { showOffer() }
+        // 0.22.3: the very first rooftop visit STARTS the tour (once, persisted by onRoofVisit); "Пропустити" on
+        // every step, replay from "?". It waits until the activity is resumed (no permission dialog over it).
+        if (offer && card == null) overlay.post { autoStartTour() }
         else if (tourSteps != null) showStep()
         debugHook?.invoke(this)
     }
@@ -809,6 +811,17 @@ class RooftopScreen(host: MainActivity) : Screen(host) {
         card = null
     }
 
+    private fun autoStartTour(tries: Int = 0) {
+        if (!shown || card != null || tourSteps != null) return
+        val resumed = host.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+        if (!resumed || root.width == 0) {
+            if (tries < 40) overlay.postDelayed({ autoStartTour(tries + 1) }, 250)
+            return
+        }
+        startTour(RoofTour.Variant.FULL)
+    }
+
+    @Suppress("unused") // 0.22.0 offer card, kept for a possible "ask first" variant
     private fun showOffer() {
         if (card != null || tourSteps != null) return
         setWorldUi(false)

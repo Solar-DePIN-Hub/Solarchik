@@ -118,9 +118,12 @@ class Roof0220Test {
         assertTrue(a.screen(MainActivity.Tab.YARD) is RooftopScreen)
         val d = a.window.decorView
         assertTrue("nav is hidden on the roof", !visible(find(d, "nav-wrap")))
-        assertTrue("new player sees the offer", visible(find(d, "tour-offer-later")))
-        find(d, "tour-offer-later")!!.performClick(); idle()
-        assertNull(find(d, "tour-offer-later"))
+        // 0.22.3: the first launch STARTS the tour, with a visible skip
+        assertTrue("new player's tour starts by itself", visible(find(d, "tour-card")))
+        assertTrue("skip is visible", visible(find(d, "tour-skip")))
+        assertNull("no offer card any more", find(d, "tour-offer-later"))
+        find(d, "tour-skip")!!.performClick(); idle()
+        assertNull(find(d, "tour-card"))
 
         // a second launch does not offer it again
         val b = open()
@@ -143,7 +146,7 @@ class Roof0220Test {
 
     @Test fun everyMenuDestinationIsReachableFromTheRoof() {
         val a = open()
-        find(a.window.decorView, "tour-offer-later")?.performClick(); idle()
+        find(a.window.decorView, "tour-skip")?.performClick(); idle()
         for ((row, tab) in listOf("roof-row-clock" to MainActivity.Tab.SHIFT, "roof-row-sol" to MainActivity.Tab.SOL,
             "roof-row-agents" to MainActivity.Tab.AGENTS, "roof-row-strategies" to MainActivity.Tab.AGENTS,
             "roof-row-slice" to MainActivity.Tab.AGENTS, "roof-row-garage" to MainActivity.Tab.RUN,
@@ -164,7 +167,7 @@ class Roof0220Test {
         CallInbox.store(app, CallInbox.parse(Screens0219Test.OWNER, 200, Screens0219Test.FIXTURE)!!)
         CallInbox.markSeen(app, 0)
         val a = open()
-        find(a.window.decorView, "tour-offer-later")?.performClick(); idle()
+        find(a.window.decorView, "tour-skip")?.performClick(); idle()
         val badge = find(a.window.decorView, "roof-calls-badge") as android.widget.TextView
         assertTrue(visible(badge))
         assertEquals(CallInbox.unreadCount(app).toString(), badge.text.toString())
@@ -183,7 +186,7 @@ class Roof0220Test {
 
     @Test fun punchClockOpensTheDailyCheckIn() {
         val a = open()
-        find(a.window.decorView, "tour-offer-later")?.performClick(); idle()
+        find(a.window.decorView, "tour-skip")?.performClick(); idle()
         val roof = a.screen(MainActivity.Tab.YARD) as RooftopScreen
         roof.debugTap(RoofObject.CLOCK); idle()
         assertEquals(MainActivity.Tab.SHIFT, a.current)

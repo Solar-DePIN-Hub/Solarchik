@@ -388,6 +388,7 @@
     <string name="run_talk">Говорити</string>
     <string name="run_talk_stop">Стоп</string>
     <string name="run_listening">Слухаю…</string>
+    <string name="run_not_heard">Не розчув. Натисни мікрофон і спитай ще раз!</string>
     <string name="run_mute">Вимкнути музику</string>
     <string name="run_unmute">Музика є</string>
     <string name="run_goal_label">%1$d м</string>

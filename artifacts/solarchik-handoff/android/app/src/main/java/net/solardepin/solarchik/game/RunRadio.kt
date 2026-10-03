@@ -286,7 +286,8 @@ class RunRadio(
             main.removeCallbacks(listenTimeout)
             val said = text?.takeIf { it.isNotBlank() } ?: heard
             heard = ""
-            if (said.isNotBlank()) askPlayer(said) else endChat(false)
+            // 0.22.3: an empty first utterance (cold recogniser) used to end in silence under "Слухаю…"
+            if (said.isNotBlank()) askPlayer(said) else { answer(context.getString(R.string.run_not_heard)); endChat(false) }
         }
         main.removeCallbacks(listenTimeout)
         main.postDelayed(listenTimeout, Policy.LISTEN_MS)
@@ -300,7 +301,7 @@ class RunRadio(
         ears?.stop()
         val said = heard.trim()
         heard = ""
-        if (said.isNotEmpty()) askPlayer(said) else endChat(false)
+        if (said.isNotEmpty()) askPlayer(said) else { answer(context.getString(R.string.run_not_heard)); endChat(false) }
     }
 
     /** Every question gets an answer, in order (answers are appended to the voice queue). */
@@ -342,6 +343,9 @@ class RunRadio(
                         if (streamed.isNotBlank()) v.feed(streamed, lang, final = true)
                         answer(said)
                     } else if (r == null || r.offline) { audio?.play("hurt"); answer(SolChat.offlineLine(lang)) }
+                    else if (streamed.isNotBlank()) v.feed(streamed, lang, final = true)
+                    else answer(context.getString(R.string.run_not_heard)) // 0.22.3: never silent
+
                 }
             } finally {
                 asking--

@@ -399,6 +399,7 @@
     <string name="run_talk">Talk</string>
     <string name="run_talk_stop">Stop</string>
     <string name="run_listening">Listening…</string>
+    <string name="run_not_heard">I didn\'t catch that. Tap the mic and ask again!</string>
     <string name="run_mute">Mute music</string>
     <string name="run_unmute">Music on</string>
     <string name="run_goal_label">%1$dm</string>

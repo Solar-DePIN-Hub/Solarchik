@@ -38,7 +38,7 @@ import java.io.File
 class Shots0221Test {
     private val app = ApplicationProvider.getApplicationContext<Context>()
     private val realCheck = SolanaWallet.walletAppCheck
-    private val dir = File(System.getProperty("solarchik.shots") ?: "build/screens", "0.22.2")
+    private val dir = File(System.getProperty("solarchik.shots") ?: "build/screens", "0.22.3")
 
     private val realTz = java.util.TimeZone.getDefault()
 
@@ -90,8 +90,8 @@ class Shots0221Test {
 
     @Test fun rooftopTourMenuAndClock() {
         val a = open()
-        shot(a, "01-roof-tour-offer-uk")
-        click(a, "tour-offer-later"); settle()
+        shot(a, "01-roof-tour-auto-start-uk")
+        click(a, "tour-skip"); settle()
         shot(a, "02-roof-uk")
         click(a, "roof-help")
         click(a, "tour-next"); click(a, "tour-next")
@@ -123,7 +123,7 @@ class Shots0221Test {
     @Test @Config(qualifiers = "en-w411dp-h914dp-xxhdpi")
     fun rooftopEnglish() {
         val a = open()
-        click(a, "tour-offer-later"); settle()
+        click(a, "tour-skip"); settle()
         shot(a, "08-roof-en")
         click(a, "roof-help"); click(a, "tour-next"); click(a, "tour-next")
         shot(a, "08b-roof-tour-clock-step-en")
@@ -134,7 +134,7 @@ class Shots0221Test {
 
     private fun tabletSet(prefix: String) {
         val a = open()
-        click(a, "tour-offer-later"); settle()
+        click(a, "tour-skip"); settle()
         shot(a, "$prefix-roof")
         click(a, "roof-help"); click(a, "tour-next"); click(a, "tour-next")
         shot(a, "$prefix-tour-clock-step")
