@@ -20,8 +20,9 @@ Use the caller's number as the callback; ask for another number only if they off
 Keep spoken answers under 20 words. Warm, a bit cheeky, never rude.
 Never give wallets, seeds, passwords, or home address.
 If spam or scam, refuse and end the call.
-When you have name plus reason, confirm once and say the owner will see the note, then say goodbye.
-In Ukrainian, address the caller with polite «ви» every time (you speak for the owner to someone you do not know): «Як вас звати і що ви хотіли передати?». Never switch to «ти» mid-call; «ви хотіли» also avoids guessing the caller's gender.`;
+When you have name plus reason, confirm once and say the owner will see the note, then say goodbye.`;
+
+const VOICE_UK = `Address the caller with polite «ви» every time (you speak for the owner to someone you do not know): «Як вас звати і що ви хотіли передати?». Never switch to «ти» mid-call; «ви хотіли» also avoids guessing the caller's gender.`;
 
 const NOTE_RULE = "\nBefore goodbye, call the save_call_note tool once with what you learned.";
 
@@ -510,9 +511,9 @@ const last4 = (n) => (n && n !== "unknown" ? "…" + String(n).slice(-4) : Strin
 
 export const LANGS = ["auto", "uk", "en"];
 export const LANG_RULE = {
-  uk: "Always speak Ukrainian.",
-  en: "Always speak English.",
-  auto: "Greet in Ukrainian, then reply in the language the caller speaks.",
+  uk: "Always speak Ukrainian. " + VOICE_UK,
+  en: "LANGUAGE LOCK: speak only English for the entire call, including the greeting and the goodbye. If the caller speaks Ukrainian, Russian, or any other language, you still answer in English. Never say a Ukrainian or Russian word. Never switch language after the greeting. If you did not understand, ask them to repeat, in English.",
+  auto: "Speak only English for the entire call. Do not switch to the caller's language.",
 };
 
 export async function langOf(env, userId) {
@@ -522,7 +523,8 @@ export async function langOf(env, userId) {
 }
 
 export function voiceFor(lang, withNote) {
-  return VOICE + "\n" + (withNote ? NOTE_FIRST + "\n" : "") + (LANG_RULE[lang] || LANG_RULE.auto) + (withNote ? NOTE_RULE : "");
+  const rule = LANG_RULE[lang] || LANG_RULE.en;
+  return VOICE + "\n" + (withNote ? NOTE_FIRST + "\n" : "") + rule + (withNote ? NOTE_RULE : "");
 }
 
 function validUserId(userId) {
@@ -993,7 +995,8 @@ export async function handleIncoming(env, origin, callId, sipHeaders, dedupKeys 
   const route = await playerRoute(env, parties);
   const userId = route.userId;
   const own = isOwnLine(env, parties);
-  const lang = await langOf(env, userId);
+  // English only until the booth is allowed to pick a language again.
+  const lang = "en";
   const base = { type: "realtime", model: "gpt-realtime", instructions: voiceFor(lang, false) };
   const reject = () =>
     fetch("https://api.openai.com/v1/realtime/calls/" + encodeURIComponent(callId) + "/reject", {
