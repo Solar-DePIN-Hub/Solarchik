@@ -717,8 +717,8 @@ test("0.22.3 run scene: game first; agent rules/context only when the player nam
 
 import { isOwnLine as _iol, callParties as _cp } from "./solarchik-screen.js";
 import _t from "node:test"; import _a from "node:assert/strict";
-_t("US and UK Zadarma numbers count as the secretary's own line", () => {
-  for (const n of ["+18325009920", "+442045771829", "+380914810885"]) {
+_t("US, Canada and UK Zadarma numbers count as the secretary's own line", () => {
+  for (const n of ["+18325009920", "+15816899510", "+442045771829", "+380914810885"]) {
     const p = _cp([{ name: "From", value: "<sip:+15551234567@x>" }, { name: "To", value: `<sip:${n.slice(1)}@sip.api.openai.com>` }]);
     _a.equal(_iol({}, p), true, n);
   }
