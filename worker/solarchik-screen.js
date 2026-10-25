@@ -346,6 +346,14 @@ async function topup(env, body) {
 /** The secretary's own line. Calls diverted to it map to the owner/demo account unless KV maps them. */
 export const DEFAULT_NUMBER = "+380914810885";
 
+/** All Sol secretary lines (Zadarma -> same OpenAI SIP project): Ukraine, US, UK. Extra via env SECRETARY_NUMBERS (comma-separated). */
+export const SECRETARY_LINES = ["+380914810885", "+18325009920", "+442045771829"];
+
+export function ownLines(env) {
+  const extra = String(env?.SECRETARY_NUMBERS || "").split(",").map((x) => e164(x)).filter(Boolean);
+  return [...new Set([ownLine(env), ...SECRETARY_LINES, ...extra])];
+}
+
 /**
  * One phone number as E.164. plus=true when the source had a leading "+". Ukrainian local numbers
  * (0XXXXXXXXX) become +380XXXXXXXXX; 380XXXXXXXXX without "+" gets it; 00-prefixed international loses 00.
@@ -481,8 +489,7 @@ async function claimedPlayer(env, caller) {
 }
 
 export function isOwnLine(env, parties) {
-  const own = ownLine(env);
-  return parties.number === own || parties.to === own || (parties.candidates || []).includes(own);
+  return ownLines(env).some((own) => parties.number === own || parties.to === own || (parties.candidates || []).includes(own));
 }
 
 /**

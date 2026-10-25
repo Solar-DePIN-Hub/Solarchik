@@ -714,3 +714,13 @@ test("0.22.3 run scene: game first; agent rules/context only when the player nam
   assert.ok(!RUN_AGENT_WORDS.test("Що тут робити?") && !RUN_AGENT_WORDS.test("Як побити рекорд?"));
   assert.ok(RUN_AGENT_WORDS.test("запусти мого агента") && RUN_AGENT_WORDS.test("change my strategy"));
 });
+
+import { isOwnLine as _iol, callParties as _cp } from "./solarchik-screen.js";
+import _t from "node:test"; import _a from "node:assert/strict";
+_t("US and UK Zadarma numbers count as the secretary's own line", () => {
+  for (const n of ["+18325009920", "+442045771829", "+380914810885"]) {
+    const p = _cp([{ name: "From", value: "<sip:+15551234567@x>" }, { name: "To", value: `<sip:${n.slice(1)}@sip.api.openai.com>` }]);
+    _a.equal(_iol({}, p), true, n);
+  }
+  _a.equal(_iol({}, _cp([{ name: "From", value: "<sip:+15551234567@x>" }, { name: "To", value: "<sip:+447700900123@x>" }])), false);
+});
