@@ -347,7 +347,7 @@ async function topup(env, body) {
 export const DEFAULT_NUMBER = "+380914810885";
 
 /** All Sol secretary lines (Zadarma -> same OpenAI SIP project): Ukraine, US, Canada, UK. Extra via env SECRETARY_NUMBERS (comma-separated). */
-export const SECRETARY_LINES = ["+380914810885", "+18325009920", "+15816899510", "+442045771829"];
+export const SECRETARY_LINES = ["+380914810885", "+18325009920", "+15816899510", "+442045771829", "+4532330495"];
 
 export function ownLines(env) {
   const extra = String(env?.SECRETARY_NUMBERS || "").split(",").map((x) => e164(x)).filter(Boolean);
